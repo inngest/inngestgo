@@ -55,12 +55,23 @@ func WithIngestKey(key string) Modifier {
 	}
 }
 
+// WithEndpoint is a modifier that allows you to specify the API which we send
+// events to.
+func WithEndpoint(url string) Modifier {
+	return func(c Client) {
+		if c, ok := c.(*apiClient); ok {
+			c.endpoint = &url
+		}
+	}
+}
+
 // apiClient is a concrete implementation of Client that uses the given HTTP client
 // to send events to the ingest API
 type apiClient struct {
 	*http.Client
 
 	ingestKey string
+	endpoint  *string
 }
 
 func (a apiClient) Send(ctx context.Context, e Event) error {
@@ -73,7 +84,12 @@ func (a apiClient) Send(ctx context.Context, e Event) error {
 		return fmt.Errorf("error marshalling event to json: %w", err)
 	}
 
-	url := fmt.Sprintf("https://inn.gs/e/%s", a.ingestKey)
+	ep := defaultEndpoint
+	if a.endpoint != nil {
+		ep = *a.endpoint
+	}
+
+	url := fmt.Sprintf("%s/e/%s", ep, a.ingestKey)
 	resp, err := a.Post(url, "application/json", bytes.NewBuffer(byt))
 	if err != nil {
 		return fmt.Errorf("error sending event request: %w", err)

@@ -24,13 +24,17 @@ var (
 	DefaultClient Client
 )
 
-// ExternalID is the field name used to reference the user's ID within your
-// systems.  This is _your_ UUID or ID for referencing the user, and allows
-// Inngest to match contacts to your users.
-const ExternalID = "external_id"
+const (
+	// ExternalID is the field name used to reference the user's ID within your
+	// systems.  This is _your_ UUID or ID for referencing the user, and allows
+	// Inngest to match contacts to your users.
+	ExternalID = "external_id"
 
-// Email is the field name used to reference the user's email.
-const Email = "email"
+	// Email is the field name used to reference the user's email.
+	Email = "email"
+
+	defaultEndpoint = "https://inn.gs"
+)
 
 // Event represents a single event generated from your system to be sent to
 // Inngest.
@@ -80,6 +84,7 @@ type Event struct {
 	Version string `json:"v,omitempty"`
 }
 
+// Validate returns  an error if the event is not well formed
 func (e Event) Validate() error {
 	if e.Name == "" {
 		return fmt.Errorf("event name must be present")
