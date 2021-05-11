@@ -17,7 +17,9 @@ type Client interface {
 // NewClient returns a concrete client initialized with the given ingest key,
 // which can immediately send events to the ingest API.
 func NewClient(ingestKey string, opts ...Modifier) Client {
-	c := &apiClient{}
+	c := &apiClient{
+		ingestKey: ingestKey,
+	}
 	for _, o := range opts {
 		o(c)
 	}
