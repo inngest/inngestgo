@@ -27,7 +27,7 @@ func WriteError(err error) {
 		log.Fatal(fmt.Errorf("unable to marshal error: %w", err))
 	}
 
-	_, err = os.Stderr.Write(byt)
+	_, err = fmt.Fprint(os.Stdout, string(byt))
 	if err != nil {
 		log.Fatal(fmt.Errorf("unable to write error: %w", err))
 	}
@@ -42,7 +42,7 @@ func WriteError(err error) {
 // of this SDK, and writing more than once may produce an error in the future.
 func WriteResult(i interface{}) error {
 	if i == nil {
-		_, err := os.Stdout.Write([]byte("{}"))
+		_, err := fmt.Fprint(os.Stdout, "{}")
 		return err
 	}
 
@@ -50,7 +50,7 @@ func WriteResult(i interface{}) error {
 	if err != nil {
 		return fmt.Errorf("error writing output: %w", err)
 	}
-	_, err = os.Stdout.Write(byt)
+	_, err = fmt.Fprint(os.Stdout, string(byt))
 	return err
 }
 
