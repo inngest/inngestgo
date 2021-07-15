@@ -41,6 +41,11 @@ func WriteError(err error) {
 // object, so you really only want to write once.  This may be enforced in future versions
 // of this SDK, and writing more than once may produce an error in the future.
 func WriteResult(i interface{}) error {
+	if i == nil {
+		_, err := os.Stdout.Write([]byte("{}"))
+		return err
+	}
+
 	byt, err := json.Marshal(i)
 	if err != nil {
 		return fmt.Errorf("error writing output: %w", err)
@@ -75,12 +80,12 @@ func GetArgs() (*Args, error) {
 
 	// We pass in a JSON string as the first arugment.  This payload contains the action metadata,
 	// workflow context, etc.
-	if len(os.Args) == 0 {
+	if len(os.Args) < 2 {
 		return nil, fmt.Errorf("no arguments present")
 	}
 
 	args = &Args{}
-	if err := json.Unmarshal([]byte(os.Args[0]), args); err != nil {
+	if err := json.Unmarshal([]byte(os.Args[1]), args); err != nil {
 		return nil, fmt.Errorf("unable to parse arguments: %s", err)
 	}
 
