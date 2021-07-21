@@ -19,6 +19,25 @@ var (
 type Args struct {
 	ArgsVersion int
 	Metadata    json.RawMessage
+	Baggage     Baggage
+}
+
+type Baggage struct {
+	EventWrapper EventWrapper `json:"WorkspaceEvent"`
+	Actions      map[uint]map[string]interface{}
+}
+
+type EventWrapper struct {
+	Event Event
+}
+
+type Event struct {
+	Name      string                 `json:"name"`
+	Data      map[string]interface{} `json:"data"`
+	User      map[string]interface{} `json:"user,omitempty"`
+	ID        string                 `json:"id,omitempty"`
+	Timestamp int64                  `json:"ts,omitempty"`
+	Version   string                 `json:"v,omitempty"`
 }
 
 func WriteError(err error) {
