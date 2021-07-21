@@ -40,6 +40,16 @@ type Event struct {
 	Version   string                 `json:"v,omitempty"`
 }
 
+// WriteError writes an error to stdout with a standard format.  The error is
+// added to a json object with an "error" key: {"error": err.Error()}.
+//
+// This does _not_ stop the action or workflow.
+//
+// To stop the action and prevent the workflow branch from continuing, exit
+// with a non-zero status code (ie. `os.Exit(1)`).
+//
+// To stop the action but allow workflows to continue, exit with a zero status
+// code (ie. `os.Exit(0)`)
 func WriteError(err error) {
 	byt, err := json.Marshal(map[string]interface{}{"error": err.Error()})
 	if err != nil {
@@ -59,6 +69,9 @@ func WriteError(err error) {
 // Even though this can be called many times the engine only supports one JSON-encoded
 // object, so you really only want to write once.  This may be enforced in future versions
 // of this SDK, and writing more than once may produce an error in the future.
+//
+// Note that this does _not_ stop the action.  To stop the action, call `os.Exit(0)` or
+// return from your main function.
 func WriteResult(i interface{}) error {
 	if i == nil {
 		_, err := fmt.Fprint(os.Stdout, "{}")
