@@ -17,18 +17,10 @@ var (
 )
 
 type Args struct {
-	ArgsVersion int
-	Metadata    json.RawMessage
-	Baggage     Baggage
-}
-
-type Baggage struct {
-	EventWrapper EventWrapper `json:"WorkspaceEvent"`
-	Actions      map[uint]map[string]interface{}
-}
-
-type EventWrapper struct {
-	Event Event
+	Event  Event                             `json:"event"`
+	Steps  map[string]map[string]interface{} `json:"steps"`
+	Ctx    map[string]interface{}            `json:"ctx"`
+	Config json.RawMessage                   `json:"config"`
 }
 
 type Event struct {
@@ -86,14 +78,14 @@ func WriteResult(i interface{}) error {
 	return err
 }
 
-// GetMetadata returns the metadata for the action as configured within this specific workflow.
+// GetConfig returns the config for the action as configured within this specific workflow.
 // The type for this struct must match the definitions within the action config (action.cue).
-func GetMetadata(dest interface{}) error {
+func GetConfig(dest interface{}) error {
 	args, err := GetArgs()
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(args.Metadata, dest)
+	return json.Unmarshal(args.Config, dest)
 }
 
 // GetSecret returns the secret stored within the current workspace.  If no secret is found
