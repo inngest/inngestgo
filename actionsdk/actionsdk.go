@@ -54,9 +54,12 @@ type Result struct {
 // To stop the action but allow workflows to continue, exit with a zero status
 // code (ie. `os.Exit(0)`)
 func WriteError(err error, retryable bool) {
-	status := 500
+	// 4xx errors are not retryable;  it indicates that the request, or input
+	// data, is wrong and simply re-running this step will not fix.
+	status := 400
 	if retryable {
-		status = 400
+		// 5xx errors are retryable
+		status = 500
 	}
 	byt, err := json.Marshal(map[string]interface{}{
 		"error":  err.Error(),
@@ -66,7 +69,7 @@ func WriteError(err error, retryable bool) {
 		log.Fatal(fmt.Errorf("unable to marshal error: %w", err))
 	}
 
-	_, err = fmt.Fprint(os.Stdout, string(byt))
+	_, err = fmt.Println(string(byt))
 	if err != nil {
 		log.Fatal(fmt.Errorf("unable to write error: %w", err))
 	}
@@ -89,7 +92,7 @@ func WriteResult(i *Result) error {
 		return fmt.Errorf("error writing output: %w", err)
 	}
 
-	_, err = fmt.Fprint(os.Stdout, string(byt))
+	_, err = fmt.Println(string(byt))
 	return err
 }
 
