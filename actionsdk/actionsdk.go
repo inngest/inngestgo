@@ -16,6 +16,10 @@ var (
 	args *Args
 )
 
+// Args is the function context, showing:
+// - The triggering event
+// - Data from previous steps
+// - Any function-specific config for this step.
 type Args struct {
 	Event  Event                             `json:"event"`
 	Steps  map[string]map[string]interface{} `json:"steps"`
@@ -23,6 +27,7 @@ type Args struct {
 	Config json.RawMessage                   `json:"config"`
 }
 
+// Event is the triggering event for this function.
 type Event struct {
 	Name      string                 `json:"name"`
 	Data      map[string]interface{} `json:"data"`
@@ -30,6 +35,12 @@ type Event struct {
 	ID        string                 `json:"id,omitempty"`
 	Timestamp int64                  `json:"ts,omitempty"`
 	Version   string                 `json:"v,omitempty"`
+}
+
+// Result is the data returned from this step.
+type Result struct {
+	Body   interface{} `json:"body"`
+	Status int         `json:"status"`
 }
 
 // WriteError writes an error to stdout with a standard format.  The error is
@@ -42,8 +53,15 @@ type Event struct {
 //
 // To stop the action but allow workflows to continue, exit with a zero status
 // code (ie. `os.Exit(0)`)
-func WriteError(err error) {
-	byt, err := json.Marshal(map[string]interface{}{"error": err.Error()})
+func WriteError(err error, retryable bool) {
+	status := 500
+	if retryable {
+		status = 400
+	}
+	byt, err := json.Marshal(map[string]interface{}{
+		"error":  err.Error(),
+		"status": status,
+	})
 	if err != nil {
 		log.Fatal(fmt.Errorf("unable to marshal error: %w", err))
 	}
@@ -58,15 +76,11 @@ func WriteError(err error) {
 // here is captured as action output, which is added to the workflow context and can be
 // used by future actions in the workflow.
 //
-// Even though this can be called many times the engine only supports one JSON-encoded
-// object, so you really only want to write once.  This may be enforced in future versions
-// of this SDK, and writing more than once may produce an error in the future.
-//
 // Note that this does _not_ stop the action.  To stop the action, call `os.Exit(0)` or
 // return from your main function.
-func WriteResult(i interface{}) error {
+func WriteResult(i *Result) error {
 	if i == nil {
-		_, err := fmt.Fprint(os.Stdout, "{}")
+		_, err := fmt.Fprint(os.Stdout, `{"body": null, "status": 201}`)
 		return err
 	}
 
@@ -74,6 +88,7 @@ func WriteResult(i interface{}) error {
 	if err != nil {
 		return fmt.Errorf("error writing output: %w", err)
 	}
+
 	_, err = fmt.Fprint(os.Stdout, string(byt))
 	return err
 }
@@ -97,6 +112,8 @@ func GetSecret(str string) (string, error) {
 	return "", fmt.Errorf("secret not found: %s", str)
 }
 
+// GetArgs returns the arguments provided to the step, returning an error
+// if invalid
 func GetArgs() (*Args, error) {
 	if args != nil {
 		return args, nil
@@ -114,4 +131,14 @@ func GetArgs() (*Args, error) {
 	}
 
 	return args, nil
+}
+
+// MustGetArgs returns the arguments provided to the step.
+func MustGetArgs() *Args {
+	args, err := GetArgs()
+	if err != nil {
+		WriteError(err, false)
+		os.Exit(1)
+	}
+	return args
 }
