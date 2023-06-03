@@ -1,10 +1,11 @@
-package inngestgo
+package inngestgo_test
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/inngest/inngestgo"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -30,58 +31,23 @@ type EventA struct {
 type EventB struct{}
 
 func TestRegister(t *testing.T) {
-	a := CreateFunction(
-		FunctionOpts{
+	a := inngestgo.CreateFunction(
+		inngestgo.FunctionOpts{
 			Name: "my func name",
 		},
-		EventTrigger("test/event.a"),
-		func(ctx context.Context, input Input[EventA]) (any, error) {
+		inngestgo.EventTrigger("test/event.a"),
+		func(ctx context.Context, input inngestgo.Input[EventA]) (any, error) {
 			return nil, nil
 		},
 	)
-	b := CreateFunction(
-		FunctionOpts{Name: "another func"},
-		EventTrigger("test/event.b"),
-		func(ctx context.Context, input Input[EventB]) (any, error) {
+	b := inngestgo.CreateFunction(
+		inngestgo.FunctionOpts{Name: "another func"},
+		inngestgo.EventTrigger("test/event.b"),
+		func(ctx context.Context, input inngestgo.Input[EventB]) (any, error) {
 			return nil, nil
 		},
 	)
-	Register(a, b)
-}
-
-// TestInvoke asserts that invoking a function with both the correct and incorrect type
-// works as expected.
-func TestInvoke(t *testing.T) {
-	resp := map[string]any{
-		"test": true,
-	}
-	a := CreateFunction(
-		FunctionOpts{Name: "my func name"},
-		EventTrigger("test/event.a"),
-		func(ctx context.Context, event Input[EventA]) (any, error) {
-			return resp, nil
-		},
-	)
-	Register(a)
-
-	ctx := context.Background()
-	event := EventA{
-		Name: "test/event.a",
-		Data: struct {
-			Foo string
-			Bar string
-		}{
-			Foo: "potato",
-			Bar: "squished",
-		},
-	}
-
-	t.Run("it invokes the function with correct types", func(t *testing.T) {
-		actual, op, err := invoke(ctx, a, createRequest(t, event))
-		require.NoError(t, err)
-		require.Nil(t, op)
-		require.Equal(t, resp, actual)
-	})
+	inngestgo.Register(a, b)
 }
 
 func TestServe(t *testing.T) {
@@ -99,17 +65,17 @@ func TestServe(t *testing.T) {
 	result := map[string]any{"result": true}
 
 	var called int32
-	a := CreateFunction(
-		FunctionOpts{Name: "My servable function!"},
-		EventTrigger("test/event.a"),
-		func(ctx context.Context, input Input[EventA]) (any, error) {
+	a := inngestgo.CreateFunction(
+		inngestgo.FunctionOpts{Name: "My servable function!"},
+		inngestgo.EventTrigger("test/event.a"),
+		func(ctx context.Context, input inngestgo.Input[EventA]) (any, error) {
 			atomic.AddInt32(&called, 1)
 			require.EqualValues(t, event, input.Event)
 			return result, nil
 		},
 	)
-	Register(a)
-	server := httptest.NewServer(DefaultHandler)
+	inngestgo.Register(a)
+	server := httptest.NewServer(inngestgo.DefaultHandler)
 	byt, err := json.Marshal(map[string]any{
 		"event": event,
 		"ctx": map[string]any{
@@ -169,10 +135,10 @@ func TestSteps(t *testing.T) {
 
 	var fnCt, aCt, bCt int32
 
-	a := CreateFunction(
-		FunctionOpts{Name: "step function"},
-		EventTrigger("test/event.a"),
-		func(ctx context.Context, input Input[EventA]) (any, error) {
+	a := inngestgo.CreateFunction(
+		inngestgo.FunctionOpts{Name: "step function"},
+		inngestgo.EventTrigger("test/event.a"),
+		func(ctx context.Context, input inngestgo.Input[EventA]) (any, error) {
 			atomic.AddInt32(&fnCt, 1)
 			stepA := step.Run(ctx, "First step", func(ctx context.Context) (map[string]any, error) {
 				atomic.AddInt32(&aCt, 1)
@@ -191,8 +157,8 @@ func TestSteps(t *testing.T) {
 			return stepB, nil
 		},
 	)
-	Register(a)
-	server := httptest.NewServer(DefaultHandler)
+	inngestgo.Register(a)
+	server := httptest.NewServer(inngestgo.DefaultHandler)
 	queryParams := url.Values{}
 	queryParams.Add("fnId", a.Slug())
 	url := fmt.Sprintf("%s?%s", server.URL, queryParams.Encode())

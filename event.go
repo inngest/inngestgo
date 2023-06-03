@@ -62,12 +62,12 @@ type Event struct {
 	// this contact.
 	User map[string]interface{} `json:"user,omitempty"`
 
-	// Timestamp is the time the event occured at *millisecond* (not nanosecond)
+	// Timestamp is the time the event occurred at *millisecond* (not nanosecond)
 	// precision.  This defaults to the time the event is received if left blank.
 	//
 	// Inngest does not guarantee that events are processed within the
 	// order specified by this field.  However, we do guarantee that user data
-	// is stored correctly according to this timestamp.  For example,  if there
+	// is stored correctly according to this timestamp.  For example,  if their
 	// two events set the same user attribute, the event with the latest timestamp
 	// is guaranteed to set the user attributes correctly.
 	Timestamp int64 `json:"ts,omitempty"`
@@ -76,7 +76,7 @@ type Event struct {
 	// when the structure of an event changes over time.
 	//
 	// Versions typically change when the keys in `Data` change, allowing you to
-	// keep the same event name (eg. "signup.new") as fields change within data
+	// keep the same event name (e.g. "signup.new") as fields change within data
 	// over time.
 	//
 	// We recommend the versioning scheme "YYYY-MM-DD.XX", where .XX increments:
@@ -84,7 +84,7 @@ type Event struct {
 	Version string `json:"v,omitempty"`
 }
 
-// Validate returns  an error if the event is not well formed
+// Validate returns  an error if the event is not well-formed
 func (e Event) Validate() error {
 	if e.Name == "" {
 		return fmt.Errorf("event name must be present")

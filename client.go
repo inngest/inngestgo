@@ -37,7 +37,7 @@ type Modifier func(c Client)
 // WithHTTPClient is a Modifier that allows you to set the HTTP client used
 // to send events.
 //
-// Typically you may want to use a new HTTP client to change the default timeouts
+// Typically, you may want to use a new HTTP client to change the default timeouts
 // used during the HTTP call.
 func WithHTTPClient(hc *http.Client) Modifier {
 	return func(c Client) {
@@ -97,12 +97,13 @@ func (a apiClient) Send(ctx context.Context, e Event) error {
 		return fmt.Errorf("error sending event request: %w", err)
 	}
 
-	// There is no body to read;  the ingest API responds with status codes representing
-	// each error.  We don't necessarily care about the error behind this close.
+	// There is nobody to read;  the ingest API responds with status codes representing
+	// each error. We don't necessarily care about the error behind this close.
 	defer resp.Body.Close()
 
 	switch resp.StatusCode {
-	case 201:
+	case 200:
+		// TODO: Return the EventAPIResponse
 		return nil
 	case 400:
 		return fmt.Errorf("invalid event data")

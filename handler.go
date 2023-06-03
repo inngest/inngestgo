@@ -93,7 +93,7 @@ func (h HandlerOpts) GetSigningKey() string {
 }
 
 func (h HandlerOpts) GetEnv() string {
-	if h.SigningKey == nil {
+	if h.Env == nil {
 		return os.Getenv("INNGEST_ENV")
 	}
 	return *h.Env

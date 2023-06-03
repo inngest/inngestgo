@@ -1,0 +1,9 @@
+version: "3"
+services:
+  inngest-dev-server:
+    image: "inngest/inngest:latest"
+    command:
+      - inngest
+      - dev
+    ports:
+      - "8288:8288"
