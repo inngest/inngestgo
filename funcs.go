@@ -51,7 +51,7 @@ func CreateFunction[T any](
 	}
 }
 
-func Event(name string) inngest.Trigger {
+func EventTrigger(name string) inngest.Trigger {
 	return inngest.Trigger{
 		EventTrigger: &inngest.EventTrigger{
 			Event: name,
