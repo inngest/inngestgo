@@ -95,7 +95,7 @@ func (e Event) Validate() error {
 // Now returns a timestamp with millisecond precision used for the Event.Timestamp
 // field.
 func Now() int64 {
-	return time.Now().UnixNano() / 1_000_000
+	return time.Now().UnixMilli()
 }
 
 // Timestamp converts a go time.Time into a timestamp with millisecond precision

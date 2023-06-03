@@ -34,14 +34,14 @@ func TestRegister(t *testing.T) {
 		FunctionOpts{
 			Name: "my func name",
 		},
-		Event("test/event.a"),
+		EventTrigger("test/event.a"),
 		func(ctx context.Context, input Input[EventA]) (any, error) {
 			return nil, nil
 		},
 	)
 	b := CreateFunction(
 		FunctionOpts{Name: "another func"},
-		Event("test/event.b"),
+		EventTrigger("test/event.b"),
 		func(ctx context.Context, input Input[EventB]) (any, error) {
 			return nil, nil
 		},
@@ -57,7 +57,7 @@ func TestInvoke(t *testing.T) {
 	}
 	a := CreateFunction(
 		FunctionOpts{Name: "my func name"},
-		Event("test/event.a"),
+		EventTrigger("test/event.a"),
 		func(ctx context.Context, event Input[EventA]) (any, error) {
 			return resp, nil
 		},
@@ -101,7 +101,7 @@ func TestServe(t *testing.T) {
 	var called int32
 	a := CreateFunction(
 		FunctionOpts{Name: "My servable function!"},
-		Event("test/event.a"),
+		EventTrigger("test/event.a"),
 		func(ctx context.Context, input Input[EventA]) (any, error) {
 			atomic.AddInt32(&called, 1)
 			require.EqualValues(t, event, input.Event)
@@ -171,7 +171,7 @@ func TestSteps(t *testing.T) {
 
 	a := CreateFunction(
 		FunctionOpts{Name: "step function"},
-		Event("test/event.a"),
+		EventTrigger("test/event.a"),
 		func(ctx context.Context, input Input[EventA]) (any, error) {
 			atomic.AddInt32(&fnCt, 1)
 			stepA := step.Run(ctx, "First step", func(ctx context.Context) (map[string]any, error) {
