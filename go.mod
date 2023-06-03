@@ -7,7 +7,7 @@ require (
 	github.com/gowebpki/jcs v1.0.0
 	github.com/inngest/inngest v0.13.7-0.20230530003125-e0514d25e85e
 	github.com/stretchr/testify v1.8.2
-	github.com/xhit/go-str2duration/v2 v2.0.0
+	github.com/xhit/go-str2duration/v2 v2.1.0
 	golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1
 )
 
