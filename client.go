@@ -86,12 +86,12 @@ func (a apiClient) Send(ctx context.Context, e Event) error {
 		return fmt.Errorf("error marshalling event to json: %w", err)
 	}
 
-	ep := defaultEndpoint
+	endpoint := defaultEndpoint
 	if a.endpoint != nil {
-		ep = *a.endpoint
+		endpoint = *a.endpoint
 	}
 
-	url := fmt.Sprintf("%s/e/%s", ep, a.ingestKey)
+	url := fmt.Sprintf("%s/e/%s", endpoint, a.ingestKey)
 	resp, err := a.Post(url, "application/json", bytes.NewBuffer(byt))
 	if err != nil {
 		return fmt.Errorf("error sending event request: %w", err)
