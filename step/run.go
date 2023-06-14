@@ -31,7 +31,8 @@ func Run[T any](
 			mgr.SetErr(fmt.Errorf("error unmarshalling state for step '%s': %w", name, err))
 			panic(ControlHijack{})
 		}
-		return reflect.ValueOf(v).Elem().Interface().(T)
+		val, _ := reflect.ValueOf(v).Elem().Interface().(T)
+		return val
 	}
 
 	// We're calling a function, so always cancel the context afterwards so that no

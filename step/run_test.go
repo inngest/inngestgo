@@ -118,6 +118,26 @@ func TestStep(t *testing.T) {
 			require.EqualValues(t, 646, val)
 			require.Empty(t, mgr.Ops())
 		})
+
+		t.Run("nil", func(t *testing.T) {
+			// Construct an op outside of the manager so that we don't mess with
+			// indexes
+			name = "nil"
+			op := sdkrequest.UnhashedOp{
+				Op:   enums.OpcodeStep,
+				Name: name,
+			}
+
+			byt, err := json.Marshal(nil)
+			require.NoError(t, err)
+			req.Steps[op.MustHash()] = byt
+			val := Run(ctx, name, func(ctx context.Context) (any, error) {
+				// memoized state, return doesnt matter
+				return nil, nil
+			})
+			require.EqualValues(t, nil, val)
+			require.Empty(t, mgr.Ops())
+		})
 	})
 
 	t.Run("No state", func(t *testing.T) {
