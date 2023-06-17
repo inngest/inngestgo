@@ -9,15 +9,22 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/gowebpki/jcs"
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/execution/state"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/step"
 	"github.com/stretchr/testify/require"
 )
+
+func init() {
+	os.Setenv("INNGEST_SIGNING_KEY", string(testKey))
+}
 
 type EventA struct {
 	Name string
@@ -123,19 +130,16 @@ func TestServe(t *testing.T) {
 		queryParams := url.Values{}
 		queryParams.Add("fnId", a.Slug())
 
-		resp, err := http.Post(
-			fmt.Sprintf("%s?%s", server.URL, queryParams.Encode()),
-			"application/json",
-			bytes.NewReader(byt),
-		)
-		require.NoError(t, err)
+		url := fmt.Sprintf("%s?%s", server.URL, queryParams.Encode())
+		resp := handlerPost(t, url, createRequest(t, event))
+
 		defer resp.Body.Close()
 		require.Equal(t, int32(1), atomic.LoadInt32(&called), "http function was not called")
 
 		// Assert that the output is correct.
 		byt, _ = io.ReadAll(resp.Body)
 		actual := map[string]any{}
-		err = json.Unmarshal(byt, &actual)
+		err := json.Unmarshal(byt, &actual)
 		require.NoError(t, err)
 		require.Equal(t, result, actual)
 	})
@@ -144,11 +148,9 @@ func TestServe(t *testing.T) {
 		queryParams := url.Values{}
 		queryParams.Add("fnId", "lol")
 
-		resp, err := http.Post(
-			fmt.Sprintf("%s?%s", server.URL, queryParams.Encode()),
-			"application/json",
-			bytes.NewReader(byt),
-		)
+		url := fmt.Sprintf("%s?%s", server.URL, queryParams.Encode())
+		resp := handlerPost(t, url, createRequest(t, event))
+
 		require.NoError(t, err)
 		defer resp.Body.Close()
 		require.Equal(t, 410, resp.StatusCode)
@@ -191,6 +193,7 @@ func TestSteps(t *testing.T) {
 			return stepB, nil
 		},
 	)
+
 	Register(a)
 	server := httptest.NewServer(DefaultHandler)
 	queryParams := url.Values{}
@@ -198,8 +201,7 @@ func TestSteps(t *testing.T) {
 	url := fmt.Sprintf("%s?%s", server.URL, queryParams.Encode())
 
 	t.Run("It invokes the first step and returns an opcode", func(t *testing.T) {
-		resp, err := http.Post(url, "application/json", createRequestReader(t, createRequest(t, event)))
-		require.NoError(t, err)
+		resp := handlerPost(t, url, createRequest(t, event))
 		defer resp.Body.Close()
 
 		// This should return an opcode indicating that the first step ran as expected.
@@ -212,7 +214,7 @@ func TestSteps(t *testing.T) {
 
 		t.Run("The first step.Run opcodes are correct", func(t *testing.T) {
 			opcodes := []state.GeneratorOpcode{}
-			err = json.Unmarshal(byt, &opcodes)
+			err := json.Unmarshal(byt, &opcodes)
 			require.NoError(t, err, string(byt))
 
 			require.Len(t, opcodes, 1)
@@ -237,13 +239,12 @@ func TestSteps(t *testing.T) {
 			req.Steps = map[string]json.RawMessage{
 				opcode.ID: opcode.Data,
 			}
-			resp, err := http.Post(url, "application/json", createRequestReader(t, req))
-			require.NoError(t, err)
+			resp := handlerPost(t, url, req)
 			defer resp.Body.Close()
 
 			// The response should be a new opcode.
 			opcodes := []state.GeneratorOpcode{}
-			err = json.NewDecoder(resp.Body).Decode(&opcodes)
+			err := json.NewDecoder(resp.Body).Decode(&opcodes)
 			require.NoError(t, err)
 
 			require.Len(t, opcodes, 1)
@@ -285,9 +286,27 @@ func createRequest(t *testing.T, evt any) *sdkrequest.Request {
 	}
 }
 
-func createRequestReader(t *testing.T, r *sdkrequest.Request) io.Reader {
+func handlerPost(t *testing.T, url string, r *sdkrequest.Request) *http.Response {
 	t.Helper()
+
+	body := marshalRequest(t, r)
+	sig := Sign(context.Background(), time.Now(), testKey, body)
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("X-Inngest-Signature", sig)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	return resp
+}
+
+func marshalRequest(t *testing.T, r *sdkrequest.Request) []byte {
+	t.Helper()
+
 	byt, err := json.Marshal(r)
 	require.NoError(t, err)
-	return bytes.NewReader(byt)
+	byt, err = jcs.Transform(byt)
+	require.NoError(t, err)
+	return byt
 }

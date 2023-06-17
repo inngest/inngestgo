@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/inngest/inngest/pkg/execution/state"
 	"github.com/inngest/inngest/pkg/inngest"
+	"github.com/inngest/inngest/pkg/publicerr"
 	"github.com/inngest/inngest/pkg/sdk"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/step"
@@ -31,6 +33,10 @@ var (
 	})
 
 	ErrTypeMismatch = fmt.Errorf("cannot invoke function with mismatched types")
+
+	// DefaultMaxBodySize is the default maximum size read within a single incoming
+	// invoke request (100MB).
+	DefaultMaxBodySize = 1024 * 1024 * 100
 )
 
 const (
@@ -79,6 +85,9 @@ type HandlerOpts struct {
 	//
 	// This only needs to be set when self hosting.
 	RegisterURL *string
+
+	// MaxBodySize is the max body size to read for incoming invoke requests
+	MaxBodySize int
 }
 
 func Str(s string) *string {
@@ -130,6 +139,10 @@ func NewHandler(appName string, opts HandlerOpts) Handler {
 		opts.Logger = slog.Default()
 	}
 
+	if opts.MaxBodySize == 0 {
+		opts.MaxBodySize = DefaultMaxBodySize
+	}
+
 	return &handler{
 		HandlerOpts: opts,
 		appName:     appName,
@@ -169,7 +182,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodPost:
-		h.invoke(w, r)
+		if err := h.invoke(w, r); err != nil {
+			_ = publicerr.WriteHTTP(w, err)
+		}
 		return
 	case http.MethodPut:
 		if err := h.register(w, r); err != nil {
@@ -276,6 +291,12 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 
+	key, err := hashedSigningKey([]byte(h.GetSigningKey()))
+	if err != nil {
+		return err
+	}
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", string(key)))
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
@@ -300,20 +321,46 @@ func (h *handler) url(r *http.Request) *url.URL {
 	return u
 }
 
-// invoke handles incoming POST calls to invoke a function.
-func (h *handler) invoke(w http.ResponseWriter, r *http.Request) {
+// invoke handles incoming POST calls to invoke a function, delegating to invoke() after validating
+// the request.
+func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
+	defer r.Body.Close()
 
-	// TODO: Check signature.
+	sig := r.Header.Get("X-Inngest-Signature")
+	if sig == "" {
+		return publicerr.Error{
+			Message: "unauthorized",
+			Status:  401,
+		}
+	}
+
+	byt, err := io.ReadAll(http.MaxBytesReader(w, r.Body, int64(h.HandlerOpts.MaxBodySize)))
+	if err != nil {
+		h.Logger.Error("error decoding function request", "error", err)
+		return publicerr.Error{
+			Message: "Error reading request",
+			Status:  500,
+		}
+	}
+
+	// Validate the signature.
+	if valid, err := ValidateSignature(r.Context(), sig, []byte(h.GetSigningKey()), byt); !valid {
+		h.Logger.Error("unauthorized inngest invoke request", "error", err)
+		return publicerr.Error{
+			Message: "unauthorized",
+			Status:  401,
+		}
+	}
 
 	fnID := r.URL.Query().Get("fnId")
 
 	request := &sdkrequest.Request{}
-	if err := json.NewDecoder(r.Body).Decode(request); err != nil {
+	if err := json.Unmarshal(byt, request); err != nil {
 		h.Logger.Error("error decoding function request", "error", err)
-
-		w.WriteHeader(400)
-		w.Write([]byte(`{"error":"malformed input"}`))
-		return
+		return publicerr.Error{
+			Message: "malformed input",
+			Status:  400,
+		}
 	}
 
 	h.l.RLock()
@@ -330,9 +377,10 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) {
 		// XXX: This is a 500 within the JS SDK.  We should probably change
 		// the JS SDK's status code to 410.  404 indicates that the overall
 		// API for serving Inngest isn't found.
-		w.WriteHeader(410)
-		w.Write([]byte(`{"error":"function not found"}`))
-		return
+		return publicerr.Error{
+			Message: fmt.Sprintf("function not found: %s", fnID),
+			Status:  410,
+		}
 	}
 
 	l := h.Logger.With("fn", fnID, "call_ctx", request.CallCtx)
@@ -342,15 +390,11 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// TODO: Handle errors appropriately, including retryable/non-retryable
 		// errors using nice types.
-
 		l.Error("error calling function", "error", err)
-		w.WriteHeader(500)
-
-		// TODO: Write standard response.
-		json.NewEncoder(w).Encode(map[string]any{
-			"error": err.Error(),
-		})
-		return
+		return publicerr.Error{
+			Message: fmt.Sprintf("error calling function: %s", err.Error()),
+			Status:  500,
+		}
 	}
 
 	if len(ops) > 0 {
@@ -359,11 +403,12 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) {
 		// over function return values as the function has not yet finished.
 		w.WriteHeader(206)
 		_ = json.NewEncoder(w).Encode(ops)
-		return
+		return nil
 	}
 
 	// Return the function response.
 	_ = json.NewEncoder(w).Encode(resp)
+	return nil
 }
 
 // invoke calls a given servable function with the specified input event.  The input event must
@@ -441,15 +486,4 @@ func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request)
 	}
 
 	return response, mgr.Ops(), err
-}
-
-func platform() string {
-	// TODO: Better Platform detection, eg. vercel, lambda.
-	if region := os.Getenv("AWS_REGION"); region != "" {
-		return fmt.Sprintf("aws-%s", region)
-	}
-	if os.Getenv("VERCEL") != "" {
-		return "vercel"
-	}
-	return ""
 }

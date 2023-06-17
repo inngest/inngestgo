@@ -59,6 +59,14 @@ func EventTrigger(name string) inngest.Trigger {
 	}
 }
 
+func CronTrigger(cron string) inngest.Trigger {
+	return inngest.Trigger{
+		CronTrigger: &inngest.CronTrigger{
+			Cron: cron,
+		},
+	}
+}
+
 // SDKFunction represents a user-defined function to be called based off of events or
 // on a schedule.
 //

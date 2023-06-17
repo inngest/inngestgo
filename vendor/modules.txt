@@ -84,6 +84,7 @@ github.com/inngest/inngest/pkg/execution/state
 github.com/inngest/inngest/pkg/expressions
 github.com/inngest/inngest/pkg/inngest
 github.com/inngest/inngest/pkg/logger
+github.com/inngest/inngest/pkg/publicerr
 github.com/inngest/inngest/pkg/sdk
 # github.com/magiconair/properties v1.8.5
 ## explicit; go 1.13
