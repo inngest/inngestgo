@@ -88,6 +88,10 @@ type HandlerOpts struct {
 
 	// MaxBodySize is the max body size to read for incoming invoke requests
 	MaxBodySize int
+
+	// URL that the function is served at.  If not supplied this is taken from
+	// the incoming request's data.
+	URL *url.URL
 }
 
 func Str(s string) *string {
@@ -102,7 +106,7 @@ func (h HandlerOpts) GetSigningKey() string {
 }
 
 func (h HandlerOpts) GetEnv() string {
-	if h.SigningKey == nil {
+	if h.Env == nil {
 		return os.Getenv("INNGEST_ENV")
 	}
 	return *h.Env
@@ -161,6 +165,14 @@ type handler struct {
 
 func (h *handler) SetOptions(opts HandlerOpts) Handler {
 	h.HandlerOpts = opts
+
+	if opts.MaxBodySize == 0 {
+		opts.MaxBodySize = DefaultMaxBodySize
+	}
+	if opts.Logger == nil {
+		opts.Logger = slog.Default()
+	}
+
 	return h
 }
 
@@ -296,15 +308,19 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", string(key)))
+	if h.GetEnv() != "" {
+		req.Header.Add("X-Inngest-Env", h.GetEnv())
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}
 	if resp.StatusCode > 299 {
-		body := map[string]string{}
-		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-			return fmt.Errorf("error reading register response: %w", err)
+		body := map[string]any{}
+		byt, _ := io.ReadAll(resp.Body)
+		if err := json.Unmarshal(byt, &body); err != nil {
+			return fmt.Errorf("error reading register response: %w\n\n%s", err, byt)
 		}
 		return fmt.Errorf("Error registering functions: %s", body["error"])
 	}
@@ -312,6 +328,10 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (h *handler) url(r *http.Request) *url.URL {
+	if h.URL != nil {
+		return h.URL
+	}
+
 	// Get the current URL.
 	scheme := "http"
 	if r.TLS != nil {
@@ -334,7 +354,11 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
-	byt, err := io.ReadAll(http.MaxBytesReader(w, r.Body, int64(h.HandlerOpts.MaxBodySize)))
+	max := h.HandlerOpts.MaxBodySize
+	if max == 0 {
+		max = DefaultMaxBodySize
+	}
+	byt, err := io.ReadAll(http.MaxBytesReader(w, r.Body, int64(max)))
 	if err != nil {
 		h.Logger.Error("error decoding function request", "error", err)
 		return publicerr.Error{

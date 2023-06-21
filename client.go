@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 )
 
 // Client represents a client used to send events to Inngest.
@@ -73,7 +74,15 @@ type apiClient struct {
 	*http.Client
 
 	ingestKey string
+	env       *string
 	endpoint  *string
+}
+
+func (a apiClient) GetEnv() string {
+	if a.env == nil {
+		return os.Getenv("INNGEST_ENV")
+	}
+	return *a.env
 }
 
 func (a apiClient) Send(ctx context.Context, e Event) (string, error) {
@@ -92,6 +101,12 @@ func (a apiClient) Send(ctx context.Context, e Event) (string, error) {
 	}
 
 	url := fmt.Sprintf("%s/e/%s", ep, a.ingestKey)
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(byt))
+	if err != nil {
+		return "", fmt.Errorf("error creating event request: %w", err)
+	}
+	req.Header.Set("content-type", "application/json")
+
 	resp, err := a.Post(url, "application/json", bytes.NewBuffer(byt))
 	if err != nil {
 		return "", fmt.Errorf("error sending event request: %w", err)

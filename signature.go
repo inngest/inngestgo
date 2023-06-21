@@ -72,7 +72,6 @@ func normalizeKey(key []byte) []byte {
 func hashedSigningKey(key []byte) ([]byte, error) {
 	prefix := keyRegexp.Find(key)
 	key = normalizeKey(key)
-	fmt.Println(key)
 
 	dst := make([]byte, hex.DecodedLen(len(key)))
 	if _, err := hex.Decode(dst, key); err != nil {
