@@ -3,6 +3,7 @@ package inngestgo
 import (
 	"context"
 	"reflect"
+	"time"
 
 	"github.com/gosimple/slug"
 	"github.com/inngest/inngest/pkg/inngest"
@@ -16,6 +17,40 @@ type FunctionOpts struct {
 	Concurrency int
 	Idempotency *string
 	Retries     int
+
+	// RateLimit allows the function to be rate limited.
+	RateLimit *RateLimit
+}
+
+// GetRateLimit returns the inngest.RateLimit for function configuration.  The
+// SDK's RateLimit type is incompatible with the inngest.RateLimit type signature
+// for ease of definition.
+func (f FunctionOpts) GetRateLimit() *inngest.RateLimit {
+	if f.RateLimit == nil {
+		return nil
+	}
+	return f.RateLimit.Convert()
+}
+
+type RateLimit struct {
+	// Limit is how often the function can be called within the specified period
+	Limit uint `json:"limit"`
+	// Period represents the time period for throttling the function
+	Period time.Duration `json:"period"`
+	// Key is an optional string to constrain throttling using event data.  For
+	// example, if you want to throttle incoming notifications based off of a user's
+	// ID in an event you can use the following key: "{{ event.user.id }}".  This ensures
+	// that we throttle functions for each user independently.
+	Key *string `json:"key,omitempty"`
+}
+
+// Convert converts a RateLimit to an inngest.RateLimit
+func (r RateLimit) Convert() *inngest.RateLimit {
+	return &inngest.RateLimit{
+		Limit:  r.Limit,
+		Period: r.Period.String(),
+		Key:    r.Key,
+	}
 }
 
 // CreateFunction creates a new function which can be registered within a handler.

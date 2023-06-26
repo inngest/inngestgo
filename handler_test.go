@@ -53,6 +53,7 @@ func TestRegister(t *testing.T) {
 			return nil, nil
 		},
 	)
+
 	Register(a, b)
 }
 

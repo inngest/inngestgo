@@ -248,6 +248,7 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 			Slug:        fn.Slug(),
 			Idempotency: c.Idempotency,
 			Triggers:    []inngest.Trigger{{}},
+			RateLimit:   fn.Config().GetRateLimit(),
 			Steps: map[string]sdk.SDKStep{
 				"step": {
 					ID:      "step",
