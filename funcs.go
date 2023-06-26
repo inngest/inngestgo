@@ -68,10 +68,11 @@ func (r RateLimit) Convert() *inngest.RateLimit {
 // 	}
 //
 // 	f := CreateFunction(
-// 		"Post-signup flow",
-// 		"user/signed.up",
-// 		func(ctx context.Context, input gosdk.Input[SignupEvent], tools gosdk.Tools) (any, error) {
+// 		inngestgo.FunctionOptions{Name: "Post-signup flow"},
+// 		inngestgo.EventTrigger("user/signed.up"),
+// 		func(ctx context.Context, input gosdk.Input[SignupEvent]) (any, error) {
 // 			// .. Your logic here.  input.Event will be strongly typed as a SignupEvent.
+// 			// step.Run(ctx, "Do some logic", func(ctx context.Context) (string, error) { return "hi", nil })
 // 		},
 // 	)
 func CreateFunction[T any](
