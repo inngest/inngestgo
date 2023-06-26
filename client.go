@@ -72,7 +72,7 @@ type ClientOpts struct {
 
 // NewClient returns a concrete client initialized with the given ingest key,
 // which can immediately send events to the ingest API.
-func NewClient(ingestKey string, opts ClientOpts) Client {
+func NewClient(opts ClientOpts) Client {
 	c := &apiClient{
 		ClientOpts: opts,
 	}
