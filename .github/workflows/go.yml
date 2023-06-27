@@ -5,21 +5,38 @@ name: Go
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [main]
   pull_request:
-    branches: [ "main" ]
+    branches: [main]
 
 jobs:
-
-  build:
-    runs-on: ubuntu-latest
+  golangci:
+    name: lint
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v2
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '1.20'
+      - name: Lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s v1.52.2
+          ./bin/golangci-lint run --verbose
+  test-linux-race:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: '1.20'
+      - name: Test
+        run: go test -v -race -count=1
 
-    - name: Set up Go
-      uses: actions/setup-go@v3
-      with:
-        go-version: 1.20
-
-    - name: Test
-      run: go test -v ./...

@@ -140,13 +140,6 @@ func (r *requestCtxManager) NewOp(op enums.Opcode, name string, opts map[string]
 	}
 }
 
-// request represents an incoming invoke request used to call functions from Inngest.
-type request struct {
-	Event   json.RawMessage `json:"event"`
-	Steps   map[string]any  `json:"steps"`
-	CallCtx CallCtx         `json:"ctx"`
-}
-
 type UnhashedOp struct {
 	Name   string         `json:"name"`
 	Op     enums.Opcode   `json:"op"`

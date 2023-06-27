@@ -170,9 +170,7 @@ func (h *handler) SetAppName(name string) Handler {
 func (h *handler) Register(funcs ...ServableFunction) {
 	h.l.Lock()
 	defer h.l.Unlock()
-	for _, f := range funcs {
-		h.funcs = append(h.funcs, f)
-	}
+	h.funcs = append(h.funcs, funcs...)
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -436,7 +434,7 @@ func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request)
 	fCtx, cancel := context.WithCancel(context.Background())
 	// This must be a pointer so that it can be mutated from within function tools.
 	mgr := sdkrequest.NewManager(cancel, input)
-	fCtx = sdkrequest.SetManager(ctx, mgr)
+	fCtx = sdkrequest.SetManager(fCtx, mgr)
 
 	// Create a new Input type.  We don't know ahead of time the type signature as
 	// this is generic;  we instead grab the generic event element and instantiate
