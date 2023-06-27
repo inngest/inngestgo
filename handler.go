@@ -28,9 +28,7 @@ var (
 	// It's recommended to call SetOptions() to set configuration before serving
 	// this in production environments;  this is set up for development and will
 	// attempt to connect to the dev server.
-	DefaultHandler Handler = NewHandler("Go app", HandlerOpts{
-		UseDevServer: true,
-	})
+	DefaultHandler Handler = NewHandler("Go app", HandlerOpts{})
 
 	ErrTypeMismatch = fmt.Errorf("cannot invoke function with mismatched types")
 
@@ -40,8 +38,7 @@ var (
 )
 
 const (
-	DefaultRegisterURL = "https://api.inngest.com/fn/register"
-	DevServerURL       = "http://127.0.0.1:8288"
+	defaultRegisterURL = "https://api.inngest.com/fn/register"
 )
 
 // Register adds the given functions to the default handler for serving.  You must register all
@@ -68,17 +65,6 @@ type HandlerOpts struct {
 	// os.Getenv("INNGEST_ENV").  This only deploys to branches if the
 	// signing key is a branch signing key.
 	Env *string
-
-	// UseDevServer attempts to use the development server if available.
-	//
-	// This should ALWAYS be set to false in your production environment,
-	// else calls to Inngest have increased latency as we attempt to check
-	// for the dev server running on port 8288 locally.
-	UseDevServer bool
-
-	// DevServerURL sets the URL for the dev server, defaulting to
-	// localhost:8288.
-	DevServerURL *string
 
 	// RegisterURL is the URL to use when registering functions.  If nil
 	// this defaults to Inngest's API.
@@ -213,7 +199,6 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 	h.l.Lock()
 	defer h.l.Unlock()
 
-	// TODO: Use open-source code
 	config := sdk.RegisterRequest{
 		URL:        r.URL.String(),
 		V:          "1",
@@ -282,14 +267,10 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 		config.Functions = append(config.Functions, f)
 	}
 
-	registerURL := DefaultRegisterURL
-	if h.UseDevServer {
-		// Check if dev server is up.  If not, error.  We can't deploy to production.
-		url := DevServerURL
-		if h.DevServerURL != nil {
-			url = *h.DevServerURL
-		}
-		registerURL = fmt.Sprintf("%s/fn/register", url)
+	registerURL := defaultRegisterURL
+	if IsDev() {
+		// TODO: Check if dev server is up.  If not, error.  We can't deploy to production.
+		registerURL = fmt.Sprintf("%s/fn/register", DevServerURL())
 	}
 	if h.RegisterURL != nil {
 		registerURL = *h.RegisterURL
@@ -345,13 +326,15 @@ func (h *handler) url(r *http.Request) *url.URL {
 // invoke handles incoming POST calls to invoke a function, delegating to invoke() after validating
 // the request.
 func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
+	var sig string
 	defer r.Body.Close()
 
-	sig := r.Header.Get("X-Inngest-Signature")
-	if sig == "" {
-		return publicerr.Error{
-			Message: "unauthorized",
-			Status:  401,
+	if !IsDev() {
+		if sig = r.Header.Get("X-Inngest-Signature"); sig == "" {
+			return publicerr.Error{
+				Message: "unauthorized",
+				Status:  401,
+			}
 		}
 	}
 
@@ -368,12 +351,14 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
-	// Validate the signature.
-	if valid, err := ValidateSignature(r.Context(), sig, []byte(h.GetSigningKey()), byt); !valid {
-		h.Logger.Error("unauthorized inngest invoke request", "error", err)
-		return publicerr.Error{
-			Message: "unauthorized",
-			Status:  401,
+	if !IsDev() {
+		// Validate the signature.
+		if valid, err := ValidateSignature(r.Context(), sig, []byte(h.GetSigningKey()), byt); !valid {
+			h.Logger.Error("unauthorized inngest invoke request", "error", err)
+			return publicerr.Error{
+				Message: "unauthorized",
+				Status:  401,
+			}
 		}
 	}
 
