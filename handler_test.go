@@ -27,11 +27,11 @@ func init() {
 }
 
 type EventA struct {
-	Name string
+	Name string `json:"name"`
 	Data struct {
-		Foo string
-		Bar string
-	}
+		Foo string `json:"foo"`
+		Bar string `json:"bar"`
+	} `json:"data"`
 }
 
 type EventB struct{}
@@ -60,35 +60,165 @@ func TestRegister(t *testing.T) {
 // TestInvoke asserts that invoking a function with both the correct and incorrect type
 // works as expected.
 func TestInvoke(t *testing.T) {
-	resp := map[string]any{
-		"test": true,
-	}
-	a := CreateFunction(
-		FunctionOpts{Name: "my func name"},
-		EventTrigger("test/event.a"),
-		func(ctx context.Context, event Input[EventA]) (any, error) {
-			return resp, nil
-		},
-	)
-	Register(a)
 
-	ctx := context.Background()
-	event := EventA{
-		Name: "test/event.a",
-		Data: struct {
-			Foo string
-			Bar string
-		}{
-			Foo: "potato",
-			Bar: "squished",
-		},
-	}
+	t.Run("With a struct value event type", func(t *testing.T) {
+		ctx := context.Background()
+		input := EventA{
+			Name: "test/event.a",
+			Data: struct {
+				Foo string `json:"foo"`
+				Bar string `json:"bar"`
+			}{
+				Foo: "potato",
+				Bar: "squished",
+			},
+		}
+		resp := map[string]any{
+			"test": true,
+		}
+		a := CreateFunction(
+			FunctionOpts{Name: "my func name"},
+			EventTrigger("test/event.a"),
+			func(ctx context.Context, event Input[EventA]) (any, error) {
+				require.EqualValues(t, event.Event, input)
+				return resp, nil
+			},
+		)
+		Register(a)
 
-	t.Run("it invokes the function with correct types", func(t *testing.T) {
-		actual, op, err := invoke(ctx, a, createRequest(t, event))
-		require.NoError(t, err)
-		require.Nil(t, op)
-		require.Equal(t, resp, actual)
+		t.Run("it invokes the function with correct types", func(t *testing.T) {
+			actual, op, err := invoke(ctx, a, createRequest(t, input))
+			require.NoError(t, err)
+			require.Nil(t, op)
+			require.Equal(t, resp, actual)
+		})
+	})
+
+	t.Run("With a struct ptr event type", func(t *testing.T) {
+		input := EventA{
+			Name: "test/event.a",
+			Data: struct {
+				Foo string `json:"foo"`
+				Bar string `json:"bar"`
+			}{
+				Foo: "potato",
+				Bar: "squished",
+			},
+		}
+		resp := map[string]any{
+			"test": true,
+		}
+		a := CreateFunction(
+			FunctionOpts{Name: "my func name"},
+			EventTrigger("test/event.a"),
+			func(ctx context.Context, event Input[*EventA]) (any, error) {
+				require.NotNil(t, event.Event)
+				require.EqualValues(t, *event.Event, input)
+				return resp, nil
+			},
+		)
+		Register(a)
+
+		ctx := context.Background()
+
+		t.Run("it invokes the function with correct types", func(t *testing.T) {
+			actual, op, err := invoke(ctx, a, createRequest(t, input))
+			require.NoError(t, err)
+			require.Nil(t, op)
+			require.Equal(t, resp, actual)
+		})
+	})
+
+	t.Run("With Input[any] as a function type", func(t *testing.T) {
+		resp := map[string]any{"test": true}
+		input := EventA{
+			Name: "test/event.a",
+			Data: struct {
+				Foo string `json:"foo"`
+				Bar string `json:"bar"`
+			}{
+				Foo: "potato",
+				Bar: "squished",
+			},
+		}
+		a := CreateFunction(
+			FunctionOpts{Name: "my func name"},
+			EventTrigger("test/event.a"),
+			func(ctx context.Context, event Input[any]) (any, error) {
+				require.NotNil(t, event.Event)
+				val, ok := event.Event.(map[string]any)
+				require.True(t, ok)
+				require.EqualValues(t, input.Name, val["name"])
+				val, ok = val["data"].(map[string]any)
+				require.True(t, ok)
+				require.EqualValues(t, input.Data.Foo, val["foo"])
+				require.EqualValues(t, input.Data.Bar, val["bar"])
+				return resp, nil
+			},
+		)
+		Register(a)
+
+		ctx := context.Background()
+		t.Run("it invokes the function with correct types", func(t *testing.T) {
+			actual, op, err := invoke(ctx, a, createRequest(t, input))
+			require.NoError(t, err)
+			require.Nil(t, op)
+			require.Equal(t, resp, actual)
+		})
+	})
+
+	t.Run("With Input[map[string]any] as a function type", func(t *testing.T) {
+		resp := map[string]any{"test": true}
+		input := EventA{
+			Name: "test/event.a",
+			Data: struct {
+				Foo string `json:"foo"`
+				Bar string `json:"bar"`
+			}{
+				Foo: "potato",
+				Bar: "squished",
+			},
+		}
+		a := CreateFunction(
+			FunctionOpts{Name: "my func name"},
+			EventTrigger("test/event.a"),
+			func(ctx context.Context, event Input[map[string]any]) (any, error) {
+				require.NotNil(t, event.Event)
+				val := event.Event
+				require.EqualValues(t, input.Name, val["name"])
+				val, ok := val["data"].(map[string]any)
+				require.True(t, ok)
+				require.EqualValues(t, input.Data.Foo, val["foo"])
+				require.EqualValues(t, input.Data.Bar, val["bar"])
+				return resp, nil
+			},
+		)
+		Register(a)
+
+		ctx := context.Background()
+		t.Run("it invokes the function with correct types", func(t *testing.T) {
+			actual, op, err := invoke(ctx, a, createRequest(t, input))
+			require.NoError(t, err)
+			require.Nil(t, op)
+			require.Equal(t, resp, actual)
+		})
+	})
+
+	// This is silly and no one should ever do this.  The tests are here
+	// so that we ensure the code panics on creation.
+	t.Run("With an io.Reader as a function type", func(t *testing.T) {
+		require.Panics(t, func() {
+			// Creating a function with an interface is impossible.  This can
+			// never go into production, and you should always be testing this
+			// before deploying to Inngest.
+			CreateFunction(
+				FunctionOpts{Name: "my func name"},
+				EventTrigger("test/event.a"),
+				func(ctx context.Context, event Input[io.Reader]) (any, error) {
+					return nil, nil
+				},
+			)
+		})
 	})
 }
 
@@ -96,8 +226,8 @@ func TestServe(t *testing.T) {
 	event := EventA{
 		Name: "test/event.a",
 		Data: struct {
-			Foo string
-			Bar string
+			Foo string `json:"foo"`
+			Bar string `json:"bar"`
 		}{
 			Foo: "potato",
 			Bar: "squished",
@@ -162,8 +292,8 @@ func TestSteps(t *testing.T) {
 	event := EventA{
 		Name: "test/event.a",
 		Data: struct {
-			Foo string
-			Bar string
+			Foo string `json:"foo"`
+			Bar string `json:"bar"`
 		}{
 			Foo: "potato",
 			Bar: "squished",
