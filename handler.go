@@ -170,9 +170,7 @@ func (h *handler) SetAppName(name string) Handler {
 func (h *handler) Register(funcs ...ServableFunction) {
 	h.l.Lock()
 	defer h.l.Unlock()
-	for _, f := range funcs {
-		h.funcs = append(h.funcs, f)
-	}
+	h.funcs = append(h.funcs, funcs...)
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -436,21 +434,31 @@ func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request)
 	fCtx, cancel := context.WithCancel(context.Background())
 	// This must be a pointer so that it can be mutated from within function tools.
 	mgr := sdkrequest.NewManager(cancel, input)
-	fCtx = sdkrequest.SetManager(ctx, mgr)
-
-	// Create a new copy of the event.
-	evtPtr := reflect.New(reflect.TypeOf(sf.ZeroEvent())).Interface()
-	if err := json.Unmarshal(input.Event, evtPtr); err != nil {
-		return nil, nil, fmt.Errorf("error unmarshalling event for function: %w", err)
-	}
-	evt := reflect.ValueOf(evtPtr).Elem()
+	fCtx = sdkrequest.SetManager(fCtx, mgr)
 
 	// Create a new Input type.  We don't know ahead of time the type signature as
 	// this is generic;  we instead grab the generic event element and instantiate
 	// it using the data within request.
 	fVal := reflect.ValueOf(sf.Func())
 	inputVal := reflect.New(fVal.Type().In(1)).Elem()
-	inputVal.FieldByName("Event").Set(evt)
+
+	// If we have an actual value to add to the event, vs `Input[any]`, set it.
+	if sf.ZeroEvent() != nil {
+		// Create a new copy of the event.
+		evtPtr := reflect.New(reflect.TypeOf(sf.ZeroEvent())).Interface()
+		if err := json.Unmarshal(input.Event, evtPtr); err != nil {
+			return nil, nil, fmt.Errorf("error unmarshalling event for function: %w", err)
+		}
+		evt := reflect.ValueOf(evtPtr).Elem()
+		inputVal.FieldByName("Event").Set(evt)
+	} else {
+		// Use a raw map to hold the input.
+		val := map[string]any{}
+		if err := json.Unmarshal(input.Event, &val); err != nil {
+			return nil, nil, fmt.Errorf("error unmarshalling event for function: %w", err)
+		}
+		inputVal.FieldByName("Event").Set(reflect.ValueOf(val))
+	}
 
 	var (
 		res       []reflect.Value

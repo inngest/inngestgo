@@ -80,11 +80,22 @@ func CreateFunction[T any](
 	trigger inngest.Trigger,
 	f SDKFunction[T],
 ) ServableFunction {
-	return servableFunc{
+	// Validate that the input type is a concrete type, and not an interface.
+	//
+	// The only exception is `any`, when users don't care about the input event
+	// eg. for cron based functions.
+
+	sf := servableFunc{
 		fc:      fc,
 		trigger: trigger,
 		f:       f,
 	}
+
+	zt := sf.ZeroType()
+	if zt.Interface() == nil && zt.NumMethod() > 0 {
+		panic("You cannot use an interface type as the input within an Inngest function.")
+	}
+	return sf
 }
 
 func EventTrigger(name string) inngest.Trigger {
@@ -179,12 +190,16 @@ func (s servableFunc) Trigger() inngest.Trigger {
 	return s.trigger
 }
 
-func (s servableFunc) ZeroEvent() any {
+func (s servableFunc) ZeroType() reflect.Value {
 	// Grab the concrete type from the generic Input[T] type.  This lets us easily
 	// initialize new values of this type at runtime.
 	fVal := reflect.ValueOf(s.f)
 	inputVal := reflect.New(fVal.Type().In(1)).Elem()
-	return reflect.New(inputVal.FieldByName("Event").Type()).Elem().Interface()
+	return reflect.New(inputVal.FieldByName("Event").Type()).Elem()
+}
+
+func (s servableFunc) ZeroEvent() any {
+	return s.ZeroType().Interface()
 }
 
 func (s servableFunc) Func() any {
