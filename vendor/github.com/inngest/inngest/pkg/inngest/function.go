@@ -57,6 +57,9 @@ type Function struct {
 	// Trigger represnets the trigger for the function.
 	Triggers []Trigger `json:"triggers"`
 
+	// EventBatch determines how the function will process a list of incoming events
+	EventBatch *EventBatchConfig `json:"batchEvents,omitempty"`
+
 	// RateLimit allows specifying custom rate limiting for the function.
 	RateLimit *RateLimit `json:"rateLimit,omitempty"`
 
@@ -118,9 +121,16 @@ func (f Function) Validate(ctx context.Context) error {
 	if len(f.Triggers) == 0 {
 		err = multierror.Append(err, fmt.Errorf("At least one trigger is required"))
 	}
+
 	for _, t := range f.Triggers {
 		if terr := t.Validate(ctx); terr != nil {
 			err = multierror.Append(err, terr)
+		}
+	}
+
+	if f.EventBatch != nil {
+		if berr := f.EventBatch.IsValid(); berr != nil {
+			err = multierror.Append(err, berr)
 		}
 	}
 
@@ -175,10 +185,7 @@ func (f Function) Validate(ctx context.Context) error {
 // If no edges for a step exists, an automatic step from the tirgger is added.
 func (f Function) AllEdges(ctx context.Context) ([]Edge, error) {
 	// This has no defined actions, which means its an implicit
-	// single action invocation.  We assume that a Dockerfile
-	// exists in the project root, and that we can build the
-	// image which contains all of the code necessary to run
-	// the function.
+	// single action invocation.
 	if len(f.Steps) == 0 {
 		return nil, fmt.Errorf("This function has no steps")
 	}
@@ -231,7 +238,8 @@ func (f Function) AllEdges(ctx context.Context) ([]Edge, error) {
 // DeterministicUUID returns a deterministic V3 UUID based off of the SHA1
 // hash of the function's name.
 func DeterministicUUID(f Function) uuid.UUID {
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(f.Name))
+	str := f.Name + f.Steps[0].URI
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(str))
 }
 
 func RandomID() (string, error) {
