@@ -17,6 +17,7 @@ import (
 	"github.com/gowebpki/jcs"
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/execution/state"
+	"github.com/inngest/inngest/pkg/inngest"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/step"
 	"github.com/stretchr/testify/require"
@@ -35,6 +36,7 @@ type EventA struct {
 }
 
 type EventB struct{}
+type EventC struct{}
 
 func TestRegister(t *testing.T) {
 	a := CreateFunction(
@@ -53,8 +55,15 @@ func TestRegister(t *testing.T) {
 			return nil, nil
 		},
 	)
+	c := CreateFunction(
+		FunctionOpts{Name: "batch func", BatchEvents: &inngest.EventBatchConfig{MaxSize: 20, Timeout: "10s"}},
+		EventTrigger("test/batch.a"),
+		func(ctx context.Context, input Input[EventC]) (any, error) {
+			return nil, nil
+		},
+	)
 
-	Register(a, b)
+	Register(a, b, c)
 }
 
 // TestInvoke asserts that invoking a function with both the correct and incorrect type
