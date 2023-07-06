@@ -232,6 +232,7 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 			Idempotency: c.Idempotency,
 			Triggers:    []inngest.Trigger{{}},
 			RateLimit:   fn.Config().GetRateLimit(),
+			Cancel:      fn.Config().Cancel,
 			Steps: map[string]sdk.SDKStep{
 				"step": {
 					ID:      "step",

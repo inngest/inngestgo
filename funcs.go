@@ -17,6 +17,7 @@ type FunctionOpts struct {
 	Concurrency int
 	Idempotency *string
 	Retries     int
+	Cancel      []inngest.Cancel
 
 	// RateLimit allows the function to be rate limited.
 	RateLimit *RateLimit
