@@ -452,13 +452,38 @@ func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request)
 
 	// If we have an actual value to add to the event, vs `Input[any]`, set it.
 	if sf.ZeroEvent() != nil {
+		eventType := reflect.TypeOf(sf.ZeroEvent())
+
 		// Create a new copy of the event.
-		evtPtr := reflect.New(reflect.TypeOf(sf.ZeroEvent())).Interface()
+		evtPtr := reflect.New(eventType).Interface()
 		if err := json.Unmarshal(input.Event, evtPtr); err != nil {
 			return nil, nil, fmt.Errorf("error unmarshalling event for function: %w", err)
 		}
 		evt := reflect.ValueOf(evtPtr).Elem()
 		inputVal.FieldByName("Event").Set(evt)
+
+		sliceType := reflect.SliceOf(eventType)
+		evtList := reflect.MakeSlice(sliceType, 0, 0)
+
+		temp := make([]map[string]any, 0)
+		if err := json.Unmarshal(input.Events, &temp); err != nil {
+			return nil, nil, fmt.Errorf("error unmarshalling events for function: %w", err)
+		}
+
+		for _, tempMap := range temp {
+			newEvent := reflect.New(eventType).Interface()
+
+			byt, err := json.Marshal(tempMap)
+			if err != nil {
+				return nil, nil, fmt.Errorf("error marshalling temp: %w", err)
+			}
+			if err := json.Unmarshal(byt, &newEvent); err != nil {
+				return nil, nil, fmt.Errorf("stupid error: %w", err)
+			}
+
+			evtList = reflect.Append(evtList, reflect.ValueOf(newEvent).Elem())
+		}
+		inputVal.FieldByName("Events").Set(evtList)
 	} else {
 		// Use a raw map to hold the input.
 		val := map[string]any{}
@@ -466,6 +491,12 @@ func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request)
 			return nil, nil, fmt.Errorf("error unmarshalling event for function: %w", err)
 		}
 		inputVal.FieldByName("Event").Set(reflect.ValueOf(val))
+
+		vals := []map[string]any{}
+		if err := json.Unmarshal(input.Events, &val); err != nil {
+			return nil, nil, fmt.Errorf("error unmarshalling events for function: %w", err)
+		}
+		inputVal.FieldByName("Events").Set(reflect.ValueOf(vals))
 	}
 
 	var (
