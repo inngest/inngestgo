@@ -21,6 +21,8 @@ type FunctionOpts struct {
 
 	// RateLimit allows the function to be rate limited.
 	RateLimit *RateLimit
+
+	BatchEvents *inngest.EventBatchConfig
 }
 
 // GetRateLimit returns the inngest.RateLimit for function configuration.  The

@@ -245,6 +245,13 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 			},
 		}
 
+		if c.BatchEvents != nil {
+			f.EventBatch = map[string]any{
+				"maxSize": c.BatchEvents.MaxSize,
+				"timeout": c.BatchEvents.Timeout,
+			}
+		}
+
 		if c.Concurrency > 0 {
 			f.Concurrency = &inngest.Concurrency{
 				Limit: c.Concurrency,

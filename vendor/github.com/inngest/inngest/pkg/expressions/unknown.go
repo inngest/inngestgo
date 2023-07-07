@@ -45,6 +45,28 @@ func unknownDecorator(act interpreter.PartialActivation) interpreter.Interpretab
 			return i, nil
 		}
 
+		// For each function that we wnat to be heterogeneous, check the types here.
+		//
+		// Only run this in the case in which we have known types;  unknowns are handled
+		// below.
+		if argTypes.TypeLen() == 2 && !argTypes.Exists(types.UnknownType) {
+			// Check if the original function is a success.
+			val := call.Eval(act)
+			if !types.IsError(val) && !types.IsUnknown(val) {
+				// Memoize this result and return it.
+				return staticCall{result: val, InterpretableCall: call}, nil
+			}
+
+			switch call.OverloadID() {
+			case "add_any":
+				//
+				// This allows concatenation of distinct types, eg string + number.
+				//
+				str := types.String(fmt.Sprintf("%v%v", args[0].Eval(act).Value(), args[1].Eval(act).Value()))
+				return staticCall{result: str, InterpretableCall: call}, nil
+			}
+		}
+
 		if argTypes.Exists(types.ErrType) || argTypes.Exists(types.UnknownType) {
 			// We work with unknown and error types, handling both as non-existent
 			// types.
@@ -117,6 +139,15 @@ func unknownDecorator(act interpreter.PartialActivation) interpreter.Interpretab
 // which is used in place of unknown.
 func handleUnknownCall(i interpreter.InterpretableCall, args *argColl) (interpreter.Interpretable, error) {
 	switch i.Function() {
+	case operators.Add:
+		// Find the non-unknown type and return that
+		for _, arg := range args.arguments {
+			if types.IsUnknown(arg) {
+				continue
+			}
+			return staticCall{result: arg, InterpretableCall: i}, nil
+		}
+		return staticCall{result: types.False, InterpretableCall: i}, nil
 	case operators.Equals:
 		// Comparing an unknown to null is true, else return false.
 		result := types.False
