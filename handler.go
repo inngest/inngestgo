@@ -493,7 +493,7 @@ func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request)
 
 			events[i] = val
 		}
-		inputVal.FieldByName("Events").Set(reflect.ValueOf(vals))
+		inputVal.FieldByName("Events").Set(reflect.ValueOf(events))
 	}
 
 	var (
