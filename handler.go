@@ -384,6 +384,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 		// retrieve data from API
 		// request.Steps =
 		// request.Events =
+		_ = 0 // no-op to avoid linter error
 	}
 
 	h.l.RLock()
