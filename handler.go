@@ -379,6 +379,13 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
+	if request.UseAPI {
+		// TODO: implement this
+		// retrieve data from API
+		// request.Steps =
+		// request.Events =
+	}
+
 	h.l.RLock()
 	var fn ServableFunction
 	for _, f := range h.funcs {
