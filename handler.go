@@ -469,7 +469,7 @@ func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request)
 			newEvent := reflect.New(eventType).Interface()
 
 			if err := json.Unmarshal(rawjson, &newEvent); err != nil {
-				return nil, nil, fmt.Errorf("stupid error: %w", err)
+				return nil, nil, fmt.Errorf("non-zero event: error unmarshalling event in event list: %w", err)
 			}
 
 			evtList = reflect.Append(evtList, reflect.ValueOf(newEvent).Elem())
@@ -488,7 +488,7 @@ func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request)
 			var val map[string]any
 
 			if err := json.Unmarshal(rawjson, &val); err != nil {
-				return nil, nil, fmt.Errorf("error unmarshalling events for function: %w", err)
+				return nil, nil, fmt.Errorf("zero event: error unmarshalling event in event list: %w", err)
 			}
 
 			events[i] = val
