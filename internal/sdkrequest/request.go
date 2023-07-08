@@ -5,7 +5,7 @@ import "encoding/json"
 // Request represents an incoming invoke request used to call functions from Inngest.
 type Request struct {
 	Event   json.RawMessage            `json:"event"`
-	Events  json.RawMessage            `json:"events"`
+	Events  []json.RawMessage          `json:"events"`
 	Steps   map[string]json.RawMessage `json:"steps"`
 	CallCtx CallCtx                    `json:"ctx"`
 	UseAPI  bool                       `json:"use_api"`

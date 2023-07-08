@@ -463,21 +463,12 @@ func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request)
 		inputVal.FieldByName("Event").Set(evt)
 
 		sliceType := reflect.SliceOf(eventType)
-		evtList := reflect.MakeSlice(sliceType, 0, 0)
+		evtList := reflect.MakeSlice(sliceType, 0, len(input.Events))
 
-		temp := make([]map[string]any, 0)
-		if err := json.Unmarshal(input.Events, &temp); err != nil {
-			return nil, nil, fmt.Errorf("error unmarshalling events for function: %w", err)
-		}
-
-		for _, tempMap := range temp {
+		for _, rawjson := range input.Events {
 			newEvent := reflect.New(eventType).Interface()
 
-			byt, err := json.Marshal(tempMap)
-			if err != nil {
-				return nil, nil, fmt.Errorf("error marshalling temp: %w", err)
-			}
-			if err := json.Unmarshal(byt, &newEvent); err != nil {
+			if err := json.Unmarshal(rawjson, &newEvent); err != nil {
 				return nil, nil, fmt.Errorf("stupid error: %w", err)
 			}
 
@@ -492,9 +483,15 @@ func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request)
 		}
 		inputVal.FieldByName("Event").Set(reflect.ValueOf(val))
 
-		vals := []map[string]any{}
-		if err := json.Unmarshal(input.Events, &val); err != nil {
-			return nil, nil, fmt.Errorf("error unmarshalling events for function: %w", err)
+		events := make([]map[string]any, len(input.Events))
+		for i, rawjson := range input.Events {
+			var val map[string]any
+
+			if err := json.Unmarshal(rawjson, &val); err != nil {
+				return nil, nil, fmt.Errorf("error unmarshalling events for function: %w", err)
+			}
+
+			events[i] = val
 		}
 		inputVal.FieldByName("Events").Set(reflect.ValueOf(vals))
 	}
