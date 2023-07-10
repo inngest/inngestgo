@@ -159,6 +159,7 @@ type ServableFunction interface {
 // and call context.
 type Input[T any] struct {
 	Event    T        `json:"event"`
+	Events   []T      `json:"events"`
 	InputCtx InputCtx `json:"ctx"`
 }
 

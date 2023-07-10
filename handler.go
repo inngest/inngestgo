@@ -379,6 +379,14 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
+	if request.UseAPI {
+		// TODO: implement this
+		// retrieve data from API
+		// request.Steps =
+		// request.Events =
+		_ = 0 // no-op to avoid linter error
+	}
+
 	h.l.RLock()
 	var fn ServableFunction
 	for _, f := range h.funcs {
@@ -452,13 +460,30 @@ func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request)
 
 	// If we have an actual value to add to the event, vs `Input[any]`, set it.
 	if sf.ZeroEvent() != nil {
+		eventType := reflect.TypeOf(sf.ZeroEvent())
+
 		// Create a new copy of the event.
-		evtPtr := reflect.New(reflect.TypeOf(sf.ZeroEvent())).Interface()
+		evtPtr := reflect.New(eventType).Interface()
 		if err := json.Unmarshal(input.Event, evtPtr); err != nil {
 			return nil, nil, fmt.Errorf("error unmarshalling event for function: %w", err)
 		}
 		evt := reflect.ValueOf(evtPtr).Elem()
 		inputVal.FieldByName("Event").Set(evt)
+
+		// events
+		sliceType := reflect.SliceOf(eventType)
+		evtList := reflect.MakeSlice(sliceType, 0, len(input.Events))
+
+		for _, rawjson := range input.Events {
+			newEvent := reflect.New(eventType).Interface()
+
+			if err := json.Unmarshal(rawjson, &newEvent); err != nil {
+				return nil, nil, fmt.Errorf("non-zero event: error unmarshalling event in event list: %w", err)
+			}
+
+			evtList = reflect.Append(evtList, reflect.ValueOf(newEvent).Elem())
+		}
+		inputVal.FieldByName("Events").Set(evtList)
 	} else {
 		// Use a raw map to hold the input.
 		val := map[string]any{}
@@ -466,6 +491,19 @@ func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request)
 			return nil, nil, fmt.Errorf("error unmarshalling event for function: %w", err)
 		}
 		inputVal.FieldByName("Event").Set(reflect.ValueOf(val))
+
+		// events
+		events := make([]any, len(input.Events))
+		for i, rawjson := range input.Events {
+			var val map[string]any
+
+			if err := json.Unmarshal(rawjson, &val); err != nil {
+				return nil, nil, fmt.Errorf("zero event: error unmarshalling event in event list: %w", err)
+			}
+
+			events[i] = val
+		}
+		inputVal.FieldByName("Events").Set(reflect.ValueOf(events))
 	}
 
 	var (

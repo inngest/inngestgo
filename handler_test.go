@@ -103,6 +103,40 @@ func TestInvoke(t *testing.T) {
 		})
 	})
 
+	t.Run("With a struct value event type batch", func(t *testing.T) {
+		ctx := context.Background()
+		input := EventA{
+			Name: "test/event.a",
+			Data: struct {
+				Foo string `json:"foo"`
+				Bar string `json:"bar"`
+			}{
+				Foo: "potato",
+				Bar: "squished",
+			},
+		}
+		resp := map[string]any{
+			"test": true,
+		}
+		a := CreateFunction(
+			FunctionOpts{Name: "my func name", BatchEvents: &inngest.EventBatchConfig{MaxSize: 5, Timeout: "10s"}},
+			EventTrigger("test/event.a"),
+			func(ctx context.Context, event Input[EventA]) (any, error) {
+				require.EqualValues(t, event.Event, input)
+				require.EqualValues(t, len(event.Events), 5)
+				return resp, nil
+			},
+		)
+		Register(a)
+
+		t.Run("it invokes the function with correct types", func(t *testing.T) {
+			actual, op, err := invoke(ctx, a, createBatchRequest(t, input, 5))
+			require.NoError(t, err)
+			require.Nil(t, op)
+			require.Equal(t, resp, actual)
+		})
+	})
+
 	t.Run("With a struct ptr event type", func(t *testing.T) {
 		input := EventA{
 			Name: "test/event.a",
@@ -419,6 +453,26 @@ func createRequest(t *testing.T, evt any) *sdkrequest.Request {
 
 	return &sdkrequest.Request{
 		Event: byt,
+		CallCtx: sdkrequest.CallCtx{
+			FunctionID: "fn-id",
+			RunID:      "run-id",
+		},
+	}
+}
+
+func createBatchRequest(t *testing.T, evt any, num int) *sdkrequest.Request {
+	t.Helper()
+
+	events := make([]json.RawMessage, num)
+	for i := 0; i < num; i++ {
+		byt, err := json.Marshal(evt)
+		require.NoError(t, err)
+		events[i] = byt
+	}
+
+	return &sdkrequest.Request{
+		Event:  events[0],
+		Events: events,
 		CallCtx: sdkrequest.CallCtx{
 			FunctionID: "fn-id",
 			RunID:      "run-id",
