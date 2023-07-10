@@ -470,6 +470,7 @@ func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request)
 		evt := reflect.ValueOf(evtPtr).Elem()
 		inputVal.FieldByName("Event").Set(evt)
 
+		// events
 		sliceType := reflect.SliceOf(eventType)
 		evtList := reflect.MakeSlice(sliceType, 0, len(input.Events))
 
@@ -491,6 +492,7 @@ func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request)
 		}
 		inputVal.FieldByName("Event").Set(reflect.ValueOf(val))
 
+		// events
 		events := make([]any, len(input.Events))
 		for i, rawjson := range input.Events {
 			var val any
