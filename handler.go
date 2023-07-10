@@ -493,7 +493,7 @@ func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request)
 		inputVal.FieldByName("Event").Set(reflect.ValueOf(val))
 
 		// events
-		events := make([]map[string]any, len(input.Events))
+		events := make([]any, len(input.Events))
 		for i, rawjson := range input.Events {
 			var val map[string]any
 
