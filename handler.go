@@ -435,9 +435,11 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 
 	if h.UseStreaming {
 		if err != nil {
+			// TODO: Add retry-at.
 			return json.NewEncoder(w).Encode(StreamResponse{
 				StatusCode: 500,
 				Body:       fmt.Sprintf("error calling function: %s", err.Error()),
+				NoRetry:    IsNoRetryError(err),
 			})
 		}
 		if len(ops) > 0 {
@@ -453,9 +455,14 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	if err != nil {
-		// TODO: Handle errors appropriately, including retryable/non-retryable
-		// errors using nice types.
 		l.Error("error calling function", "error", err)
+
+		if IsNoRetryError(err) {
+			w.Header().Add("x-inngest-no-retry", "true")
+		}
+
+		// TODO: Add retry-at.
+
 		return publicerr.Error{
 			Message: fmt.Sprintf("error calling function: %s", err.Error()),
 			Status:  500,
@@ -477,6 +484,8 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 type StreamResponse struct {
 	StatusCode int               `json:"status"`
 	Body       any               `json:"body"`
+	RetryAt    *string           `json:"retryAt"`
+	NoRetry    bool              `json:"noRetry"`
 	Headers    map[string]string `json:"headers"`
 }
 
