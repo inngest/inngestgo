@@ -218,9 +218,9 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 		c := fn.Config()
 
 		var retries *sdk.StepRetries
-		if c.Retries > 0 {
+		if c.Retries != nil {
 			retries = &sdk.StepRetries{
-				Attempts: c.Retries,
+				Attempts: *c.Retries,
 			}
 		}
 
