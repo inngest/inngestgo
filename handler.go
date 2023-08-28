@@ -175,7 +175,26 @@ func (h *handler) SetAppName(name string) Handler {
 func (h *handler) Register(funcs ...ServableFunction) {
 	h.l.Lock()
 	defer h.l.Unlock()
-	h.funcs = append(h.funcs, funcs...)
+
+	// Create a map of functions by slug.  If we're registering a function
+	// that already exists, clear it.
+	slugs := map[string]ServableFunction{}
+	for _, f := range h.funcs {
+		slugs[f.Slug()] = f
+	}
+
+	for _, f := range funcs {
+		slugs[f.Slug()] = f
+	}
+
+	newFuncs := make([]ServableFunction, len(slugs))
+	i := 0
+	for _, f := range slugs {
+		newFuncs[i] = f
+		i++
+	}
+
+	h.funcs = newFuncs
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
