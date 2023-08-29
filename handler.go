@@ -246,8 +246,8 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 		// Modify URL to contain fn ID, step params
 		url := h.url(r)
 		values := url.Query()
-		values.Add("fnId", fn.Slug())
-		values.Add("step", "step")
+		values.Set("fnId", fn.Slug())
+		values.Set("step", "step")
 		url.RawQuery = values.Encode()
 
 		f := sdk.SDKFunction{
