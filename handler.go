@@ -579,6 +579,16 @@ func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request)
 		inputVal.FieldByName("Events").Set(reflect.ValueOf(events))
 	}
 
+	// Set InputCtx
+	callCtx := InputCtx{
+		Env:        input.CallCtx.Env,
+		FunctionID: input.CallCtx.FunctionID,
+		RunID:      input.CallCtx.RunID,
+		StepID:     input.CallCtx.StepID,
+		Attempt:    input.CallCtx.Attempt,
+	}
+	inputVal.FieldByName("InputCtx").Set(reflect.ValueOf(callCtx))
+
 	var (
 		res       []reflect.Value
 		panickErr error
