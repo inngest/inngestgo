@@ -43,6 +43,8 @@ func (e noRetryError) Is(target error) bool {
 	}
 }
 
+// RetryAtError allows you to specify the time at which the next retry should occur. This
+// wraps your error, leaving the original cause and error message available.
 func RetryAtError(err error, at time.Time) error {
 	return retryAtError{Err: err, At: at}
 }
