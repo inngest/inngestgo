@@ -269,6 +269,13 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 			},
 		}
 
+		if c.Debounce != nil {
+			f.Debounce = &inngest.Debounce{
+				Key:    c.Debounce.Key,
+				Period: c.Debounce.Period.String(),
+			}
+		}
+
 		if c.BatchEvents != nil {
 			f.EventBatch = map[string]any{
 				"maxSize": c.BatchEvents.MaxSize,
