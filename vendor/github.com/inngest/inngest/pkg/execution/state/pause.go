@@ -33,6 +33,9 @@ type PauseMutater interface {
 	// Any data passed when consuming a pause will be stored within function run state
 	// for future reference using the pause's DataKey.
 	ConsumePause(ctx context.Context, id uuid.UUID, data any) error
+
+	// DeletePause permanently deletes a pause.
+	DeletePause(ctx context.Context, p Pause) error
 }
 
 // PauseGetter allows a runner to return all existing pauses by event or by outgoing ID.  This
@@ -40,6 +43,9 @@ type PauseMutater interface {
 type PauseGetter interface {
 	// PausesByEvent returns all pauses for a given event, in a given workspace.
 	PausesByEvent(ctx context.Context, workspaceID uuid.UUID, eventName string) (PauseIterator, error)
+
+	// EventHasPauses returns whether the event has pauses stored.
+	EventHasPauses(ctx context.Context, workspaceID uuid.UUID, eventName string) (bool, error)
 
 	// PauseByStep returns a specific pause for a given workflow run, from a given step.
 	//
@@ -143,6 +149,9 @@ type Pause struct {
 	// GroupID stores the group ID for this step and history, allowing us to correlate
 	// event receives with other history items.
 	GroupID string `json:"groupID"`
+	// TriggeringEventID is the event that triggered the original run.  This allows us
+	// to exclude the original event ID when considering triggers.
+	TriggeringEventID *string `json:"tID,omitempty"`
 }
 
 func (p Pause) Edge() inngest.Edge {

@@ -10,9 +10,10 @@ import (
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/inngest"
 	"github.com/xhit/go-str2duration/v2"
+	"golang.org/x/exp/slog"
 )
 
-const DefaultErrorMessage = "Unknown error running SDK"
+const DefaultErrorMessage = "Function execution error"
 
 type Retryable interface {
 	Retryable() bool
@@ -37,22 +38,18 @@ type GeneratorOpcode struct {
 }
 
 func (g GeneratorOpcode) WaitForEventOpts() (*WaitForEventOpts, error) {
-	opts := WaitForEventOpts{
-		Event: g.Name,
+	opts := &WaitForEventOpts{}
+	if err := opts.UnmarshalAny(g.Opts); err != nil {
+		return nil, err
+	}
+	if opts.Event == "" {
+		// use the step name as a fallback, for v1/2 of the TS SDK.
+		opts.Event = g.Name
 	}
 	if opts.Event == "" {
 		return nil, fmt.Errorf("An event name must be provided when waiting for an event")
 	}
-
-	byt, err := json.Marshal(g.Opts)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := json.Unmarshal(byt, &opts); err != nil {
-		return nil, err
-	}
-	return &opts, nil
+	return opts, nil
 }
 
 func (g GeneratorOpcode) SleepDuration() (time.Duration, error) {
@@ -60,9 +57,22 @@ func (g GeneratorOpcode) SleepDuration() (time.Duration, error) {
 		return 0, fmt.Errorf("unable to return sleep duration for opcode %s", g.Op.String())
 	}
 
+	opts := &SleepOpts{}
+	if err := opts.UnmarshalAny(g.Opts); err != nil {
+		return 0, err
+	}
+
+	if opts.Duration == "" {
+		// use step name as a fallback for v1/2 of the TS SDK
+		opts.Duration = g.Name
+	}
+	if len(opts.Duration) == 0 {
+		return 0, nil
+	}
+
 	// Quick heuristic to check if this is likely a date layout
-	if len(g.Name) >= 10 {
-		if parsed, err := dateutil.Parse(g.Name); err == nil {
+	if len(opts.Duration) >= 10 {
+		if parsed, err := dateutil.Parse(opts.Duration); err == nil {
 			at := time.Until(parsed).Round(time.Second)
 			if at < 0 {
 				return time.Duration(0), nil
@@ -71,14 +81,58 @@ func (g GeneratorOpcode) SleepDuration() (time.Duration, error) {
 		}
 	}
 
-	return str2duration.ParseDuration(g.Name)
+	return str2duration.ParseDuration(opts.Duration)
+}
+
+type SleepOpts struct {
+	Duration string `json:"duration"`
+}
+
+func (s *SleepOpts) UnmarshalAny(a any) error {
+	opts := SleepOpts{}
+	var mappedByt []byte
+	switch typ := a.(type) {
+	case []byte:
+		mappedByt = typ
+	default:
+		byt, err := json.Marshal(a)
+		if err != nil {
+			return err
+		}
+		mappedByt = byt
+	}
+	if err := json.Unmarshal(mappedByt, &opts); err != nil {
+		return err
+	}
+	*s = opts
+	return nil
 }
 
 type WaitForEventOpts struct {
 	Timeout string  `json:"timeout"`
 	If      *string `json:"if"`
-	// Event is taken from GeneratorOpcode.Name
-	Event string `json:"-"`
+	// Event is taken from GeneratorOpcode.Name if this is empty.
+	Event string `json:"event"`
+}
+
+func (w *WaitForEventOpts) UnmarshalAny(a any) error {
+	opts := WaitForEventOpts{}
+	var mappedByt []byte
+	switch typ := a.(type) {
+	case []byte:
+		mappedByt = typ
+	default:
+		byt, err := json.Marshal(a)
+		if err != nil {
+			return err
+		}
+		mappedByt = byt
+	}
+	if err := json.Unmarshal(mappedByt, &opts); err != nil {
+		return err
+	}
+	*w = opts
+	return nil
 }
 
 func (w WaitForEventOpts) Expires() (time.Time, error) {
@@ -102,6 +156,11 @@ type DriverResponse struct {
 
 	// Duration is how long the step took to run, from the driver itsef.
 	Duration time.Duration `json:"dur"`
+
+	// RequestVersion represents the hashing version used within the current SDK request.
+	//
+	// This allows us to store the hash version for each function run to check backcompat.
+	RequestVersion int `json:"request_version"`
 
 	// Generator indicates that this response is a partial repsonse from a
 	// SDK-based step (generator) function.  These functions are invoked
@@ -135,7 +194,14 @@ type DriverResponse struct {
 
 	// Err represents the error from the action, if the action errored.
 	// If the action terminated successfully this must be nil.
-	Err error `json:"err"`
+	Err *string `json:"err"`
+
+	// RetryAt is an optional retry at field, specifying when we should retry
+	// the step if the step errored.
+	RetryAt *time.Time `json:"retryAt,omitempty"`
+
+	// Noretry, if true, indicates that we should never retry this step.
+	NoRetry bool `json:"noRetry,omitempty"`
 
 	// final indicates whether the error has been marked as final.  This occurs
 	// when the response errors and the executor detects that this is the final
@@ -143,12 +209,36 @@ type DriverResponse struct {
 	//
 	// When final is true, Retryable() always returns false.
 	final bool
+
+	StatusCode int `json:"statusCode,omitempty"`
 }
 
 // SetFinal indicates that this error is final, regardless of the status code
 // returned.  This is used to prevent retries when the max limit is reached.
 func (r *DriverResponse) SetFinal() {
+	r.NoRetry = true
 	r.final = true
+}
+
+// SetError sets the Err field to the string of the error specified.
+func (r *DriverResponse) SetError(err error) {
+	if err == nil {
+		return
+	}
+	str := err.Error()
+	r.Err = &str
+}
+
+// NextRetryAt fulfils the queue.RetryAtSpecifier interface
+func (r DriverResponse) NextRetryAt() *time.Time {
+	return r.RetryAt
+}
+
+func (r DriverResponse) Error() string {
+	if r.Err == nil {
+		return ""
+	}
+	return *r.Err
 }
 
 // Retryable returns whether the response indicates that the action is
@@ -166,40 +256,46 @@ func (r DriverResponse) Retryable() bool {
 		return false
 	}
 
-	// Convert output into a map to check whether this responds with our
-	// suggested JSON response
-	mapped, ok := r.Output.(map[string]any)
-	if !ok {
-		// This doesn't contain the response, so default to retrying.
+	if r.NoRetry {
+		// If there's a no retry flag set this is never retryable.
+		return false
+	}
+
+	status := r.StatusCode
+	if status == 0 {
+		if mapped, ok := r.Output.(map[string]any); ok {
+			// Fall back to statusCode for AWS Lambda compatibility in
+			// an attempt to use this field.
+			v, ok := mapped["statusCode"]
+			if !ok {
+				// If actions don't return a status, we assume that they're
+				// always retryable.
+				return true
+			}
+
+			switch val := v.(type) {
+			case float64:
+				status = int(val)
+			case int64:
+				status = int(val)
+			case int:
+				status = val
+			default:
+				slog.Default().Error(
+					"unexpected status code type",
+					"type", fmt.Sprintf("%T", v),
+				)
+			}
+		}
+	}
+
+	if status == 0 {
+		slog.Default().Error("missing status code")
 		return true
 	}
 
-	status, ok := mapped["status"]
-	if !ok {
-		// Fall back to statusCode for AWS Lambda compatibility in
-		// an attempt to use this field.
-		status, ok = mapped["statusCode"]
-		if !ok {
-			// If actions don't return a status, we assume that they're
-			// always retryable.  We prefer that actions respond with a
-			// { "status": xxx, "body": ... } format to disable retries.
-			return true
-		}
-	}
-
-	switch v := status.(type) {
-	case float64:
-		if int(v) > 499 {
-			return true
-		}
-	case int64:
-		if int(v) > 499 {
-			return true
-		}
-	case int:
-		if int(v) > 499 {
-			return true
-		}
+	if status > 499 {
+		return true
 	}
 
 	return false
@@ -229,18 +325,6 @@ func (r *DriverResponse) Final() bool {
 	return false
 }
 
-// Error allows Response to fulfil the Error interface.
-func (r DriverResponse) Error() string {
-	if r.Err == nil {
-		return ""
-	}
-	return r.Err.Error()
-}
-
-func (r DriverResponse) Unwrap() error {
-	return r.Err
-}
-
 // UserError returns the error that the user reported for this response. Can be
 // used to safely fetch the error from the response.
 //
@@ -262,9 +346,9 @@ func (r DriverResponse) Unwrap() error {
 func (r DriverResponse) UserError() map[string]any {
 	if r.Output == nil && r.Err != nil {
 		return map[string]any{
-			"error":   r.Err.Error(),
+			"error":   *r.Err,
 			"name":    "Error",
-			"message": r.Err.Error(),
+			"message": *r.Err,
 		}
 	}
 
@@ -281,10 +365,39 @@ func (r DriverResponse) UserError() map[string]any {
 		}
 	}
 
+	err := DefaultErrorMessage
+	if r.Err != nil {
+		err = *r.Err
+	}
+
+	output := any(DefaultErrorMessage)
+	switch v := r.Output.(type) {
+	case json.RawMessage:
+		if len(v) > 0 {
+			output = v
+		}
+	case []byte:
+		if len(v) > 0 {
+			output = v
+		}
+	case string:
+		if len(v) > 0 {
+			output = v
+		}
+	case interface{}:
+		if v != nil {
+			output = v
+		}
+	case nil:
+		// ignore.
+	default:
+		output = v
+	}
+
 	return map[string]any{
-		"error":   DefaultErrorMessage,
+		"error":   err,
 		"name":    "Error",
-		"message": DefaultErrorMessage,
+		"message": output,
 	}
 }
 

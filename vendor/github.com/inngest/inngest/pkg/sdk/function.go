@@ -42,6 +42,8 @@ type SDKFunction struct {
 	// function.
 	Retries *int `json:"retries,omitempty"`
 
+	Debounce *inngest.Debounce `json:"debounce,omitempty"`
+
 	// Cancel specifies cancellation signals for the function
 	Cancel []inngest.Cancel `json:"cancel,omitempty"`
 
@@ -55,6 +57,7 @@ func (s SDKFunction) Function() (*inngest.Function, error) {
 		Triggers:  s.Triggers,
 		RateLimit: s.RateLimit,
 		Cancel:    s.Cancel,
+		Debounce:  s.Debounce,
 	}
 	// Ensure we set the slug here if s.ID is nil.  This defaults to using
 	// the slugged version of the function name.
@@ -70,10 +73,14 @@ func (s SDKFunction) Function() (*inngest.Function, error) {
 	case map[string]any:
 		// Handle maps.
 		limit, ok := v["limit"].(float64)
+		key, _ := v["key"].(string)
 		if ok {
 			f.Concurrency = &inngest.Concurrency{
 				Limit: int(limit),
 			}
+		}
+		if key != "" {
+			f.Concurrency.Key = &key
 		}
 	}
 
@@ -108,9 +115,17 @@ func (s SDKFunction) Function() (*inngest.Function, error) {
 			funcStep.Retries = &atts
 		}
 		if step.Retries == nil && s.Retries != nil {
-			// Use the function's defaults provided as syntactic sugar when registering functions
+			// Use the function's defaults provided as syntactic sugar when registering functions,
+			// only if retries is nil
 			funcStep.Retries = s.Retries
 		}
+
+		// Always enforce bounds.
+		if funcStep.Retries != nil && *funcStep.Retries > consts.MaxRetries {
+			max := consts.MaxRetries
+			funcStep.Retries = &max
+		}
+
 		f.Steps = append(f.Steps, funcStep)
 	}
 

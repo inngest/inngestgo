@@ -32,16 +32,39 @@ var (
 	ErrFunctionComplete   = fmt.Errorf("function completed")
 	ErrFunctionFailed     = fmt.Errorf("function failed")
 	ErrFunctionOverflowed = fmt.Errorf("function has too many steps")
+	ErrDuplicateResponse  = fmt.Errorf("duplicate response")
 )
 
 // Identifier represents the unique identifier for a workflow run.
 type Identifier struct {
-	WorkflowID      uuid.UUID `json:"wID"`
-	WorkflowVersion int       `json:"wv"`
-	RunID           ulid.ULID `json:"runID"`
-	// Key represents a unique idempotency key used to deduplicate this
-	// workflow run amongst other runs for the same workflow.
-	Key string `json:"key"`
+	RunID ulid.ULID `json:"runID"`
+	// WorkflowID tracks the internal ID of the function
+	WorkflowID uuid.UUID `json:"wID"`
+	// WorkflowVersion tracks the version of the function that was live
+	// at the time of the trigger.
+	WorkflowVersion int `json:"wv"`
+	// StaticVersion indicates whether the workflow is pinned to the
+	// given function definition over the life of the function.  If functions
+	// are deployed to their own URLs, this ensures that the endpoint we hit
+	// for the function (and therefore code) stays the same.  Note:  this is only
+	// important when we people use separate endpoints per function version.
+	StaticVersion bool `json:"s,omitempty"`
+	// EventID tracks the event ID that started the function.
+	EventID ulid.ULID `json:"evtID"`
+	// BatchID tracks the batch ID for the function, if the function uses batching.
+	BatchID *ulid.ULID `json:"bID,omitempty"`
+	// Key represents a unique user-defined key to be used as part of the
+	// idempotency key.  This is appended to the workflow ID and workflow
+	// version to create a full idempotency key (via the IdempotencyKey() method).
+	//
+	// If this is not present the RunID is used as this value.
+	Key string `json:"key,omitempty"`
+	// AccountID represents the account ID for this run
+	AccountID uuid.UUID `json:"aID"`
+	// WorkspaceID represents the ws ID for this run
+	WorkspaceID uuid.UUID `json:"wsID"`
+	// If this is a rerun, the original run ID is stored here.
+	OriginalRunID *ulid.ULID `json:"oRunID,omitempty"`
 }
 
 // IdempotencyKey returns the unique key used to represent this single
@@ -87,6 +110,8 @@ type Metadata struct {
 	OriginalRunID *ulid.ULID `json:"originalRunID,omitempty"`
 
 	// Name stores the name of the workflow as it started.
+	//
+	// DEPRECATED
 	Name string `json:"name"`
 
 	// Pending is the number of steps that have been enqueued but have
@@ -99,14 +124,43 @@ type Metadata struct {
 	// - A step that has completed, and has its next steps (children in
 	//   the dag) enqueued. Note that the step must have its children
 	//   enqueued to be considered finalized.
+	//
+	// DEPRECATED
 	Pending int `json:"pending"`
 
-	// Version is the used for making sure workloads runs are backward compatible
-	// and work without issues during breaking changes to backend logic
+	// Version represents the version of _metadata_ in particular.
+	//
+	// TODO: This should be removed and made specific to each particular state
+	// implementation.
 	Version int `json:"version"`
+
+	// RequestVersion represents the executor request versioning/hashing style
+	// used to manage state.
+	//
+	// TS v3, Go, Rust, Elixir, and Java all use the same hashing style (1).
+	//
+	// TS v1 + v2 use a unique hashing style (0) which cannot be transferred
+	// to other languages.
+	//
+	// This lets us send the hashing style to SDKs so that we can execute in
+	// the correct format with backcompat guarantees built in.
+	//
+	// NOTE: We can only know this the first time an SDK is responding to a step.
+	RequestVersion int `json:"rv"`
 
 	// Context allows storing any other contextual data in metadata.
 	Context map[string]any `json:"ctx,omitempty"`
+
+	// DisableImmediateExecution is used to tell the SDK whether it should
+	// disallow immediate execution of steps as they are found.
+	DisableImmediateExecution bool `json:"disableImmediateExecution,omitempty"`
+}
+
+type MetadataUpdate struct {
+	Debugger                  bool           `json:"debugger"`
+	Context                   map[string]any `json:"ctx,omitempty"`
+	DisableImmediateExecution bool           `json:"disableImmediateExecution,omitempty"`
+	RequestVersion            int            `json:"rv"`
 }
 
 // State represents the current state of a fn run.  It is data-structure
@@ -191,6 +245,9 @@ type FunctionCallback func(context.Context, Identifier, enums.RunStatus)
 
 // StateLoader allows loading of previously stored state based off of a given Identifier.
 type StateLoader interface {
+	// Exists checks whether the run ID exists.
+	Exists(ctx context.Context, runID ulid.ULID) (bool, error)
+
 	// Metadata returns run metadata for the given identifier.  It may be cheaper
 	// than a full load in cases where only the metadata is necessary.
 	Metadata(ctx context.Context, runID ulid.ULID) (*Metadata, error)
@@ -226,6 +283,8 @@ type Mutater interface {
 	// If the IdempotencyKey within Identifier already exists, the state implementation should return
 	// ErrIdentifierExists.
 	New(ctx context.Context, input Input) (State, error)
+
+	UpdateMetadata(ctx context.Context, runID ulid.ULID, md MetadataUpdate) error
 
 	// Cancel sets a function run metadata status to RunStatusCancelled, which prevents
 	// future execution of steps.
