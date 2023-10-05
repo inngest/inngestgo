@@ -221,8 +221,15 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 	h.l.Lock()
 	defer h.l.Unlock()
 
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	host := r.Host
+	path := r.URL.String()
+
 	config := sdk.RegisterRequest{
-		URL:        r.URL.String(),
+		URL:        fmt.Sprintf("%s://%s%s", scheme, host, path),
 		V:          "1",
 		DeployType: "ping",
 		SDK:        "go:v0.0.1",
