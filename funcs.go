@@ -18,6 +18,7 @@ type FunctionOpts struct {
 	Idempotency *string
 	Retries     *int
 	Cancel      []inngest.Cancel
+	Debounce    *Debounce
 
 	// RateLimit allows the function to be rate limited.
 	RateLimit *RateLimit
@@ -41,6 +42,11 @@ func (f FunctionOpts) GetRateLimit() *inngest.RateLimit {
 		return nil
 	}
 	return f.RateLimit.Convert()
+}
+
+type Debounce struct {
+	Key    string        `json:"key"`
+	Period time.Duration `json:"period"`
 }
 
 type RateLimit struct {
@@ -176,8 +182,7 @@ type InputCtx struct {
 	FunctionID string `json:"fn_id"`
 	RunID      string `json:"run_id"`
 	StepID     string `json:"step_id"`
-	// Attempt is the 0 index attempt count for the current step.
-	Attempt int `json:"attempt"`
+	Attempt    int    `json:"attempt"`
 }
 
 type servableFunc struct {
