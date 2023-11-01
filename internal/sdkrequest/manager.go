@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/gowebpki/jcs"
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/execution/state"
 )
@@ -117,23 +116,20 @@ func (r *requestCtxManager) Step(op UnhashedOp) (json.RawMessage, bool) {
 	return val, ok
 }
 
-func (r *requestCtxManager) NewOp(op enums.Opcode, name string, opts map[string]any) UnhashedOp {
+func (r *requestCtxManager) NewOp(op enums.Opcode, id string, opts map[string]any) UnhashedOp {
 	r.l.Lock()
 	defer r.l.Unlock()
 
-	key := fmt.Sprintf("%s-%s", op, name)
-	n, ok := r.indexes[key]
-	if ok {
-		// We have an index already, so increase the counter as we're
-		// adding to this key.
-		n += 1
-	}
+	// NOTE: Indexes are 1-indexed, ie. start at 1.  We always add 1 to the
+	// existing index to ensure that we're incrementing correctly.  This is due
+	// to the original spec and publicly released hashing.
+	n := r.indexes[id] + 1
 
 	// Update indexes for each particualar key.
-	r.indexes[key] = n
+	r.indexes[id] = n
 
 	return UnhashedOp{
-		Name: name,
+		ID:   id,
 		Op:   op,
 		Opts: opts,
 		Pos:  uint(n),
@@ -141,7 +137,7 @@ func (r *requestCtxManager) NewOp(op enums.Opcode, name string, opts map[string]
 }
 
 type UnhashedOp struct {
-	Name   string         `json:"name"`
+	ID     string         `json:"id"`
 	Op     enums.Opcode   `json:"op"`
 	Opts   map[string]any `json:"opts"`
 	Pos    uint           `json:"pos"`
@@ -149,15 +145,8 @@ type UnhashedOp struct {
 }
 
 func (u UnhashedOp) Hash() (string, error) {
-	j, err := json.Marshal(u)
-	if err != nil {
-		return "", err
-	}
-	byt, err := jcs.Transform(j)
-	if err != nil {
-		return "", err
-	}
-	sum := sha1.Sum(byt)
+	input := fmt.Sprintf("%s:%d", u.ID, u.Pos)
+	sum := sha1.Sum([]byte(input))
 	return hex.EncodeToString(sum[:]), nil
 }
 
