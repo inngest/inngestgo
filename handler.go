@@ -100,9 +100,15 @@ func (h HandlerOpts) GetEnv() string {
 }
 
 func (h HandlerOpts) GetRegisterURL() string {
+	envvar := os.Getenv("INNGEST_REGISTER_URL")
+	if envvar != "" {
+		return envvar
+	}
+
 	if h.RegisterURL == nil {
 		return "https://www.inngest.com/fn/register"
 	}
+
 	return *h.RegisterURL
 }
 
