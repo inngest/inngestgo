@@ -35,7 +35,7 @@ type InvocationManager interface {
 	Step(op UnhashedOp) (json.RawMessage, bool)
 	// NewOp generates a new unhashed op for creating a state.GeneratorOpcode.  This
 	// is required for future execution of a step.
-	NewOp(op enums.Opcode, name string, opts map[string]any) UnhashedOp
+	NewOp(op enums.Opcode, id string, opts map[string]any) UnhashedOp
 }
 
 // NewManager returns an InvocationManager to manage the incoming executor request.  This

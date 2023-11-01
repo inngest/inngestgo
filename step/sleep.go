@@ -9,10 +9,10 @@ import (
 	str2duration "github.com/xhit/go-str2duration/v2"
 )
 
-func Sleep(ctx context.Context, duration time.Duration) {
+func Sleep(ctx context.Context, id string, duration time.Duration) {
 	mgr := preflight(ctx)
 	name := str2duration.String(duration)
-	op := mgr.NewOp(enums.OpcodeSleep, name, nil)
+	op := mgr.NewOp(enums.OpcodeSleep, id, nil)
 	if _, ok := mgr.Step(op); ok {
 		// We've already slept.
 		return

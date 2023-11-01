@@ -44,8 +44,8 @@ func TestStep(t *testing.T) {
 			// indexes
 			name = "struct"
 			op := sdkrequest.UnhashedOp{
-				Op:   enums.OpcodeStep,
-				Name: name,
+				Op: enums.OpcodeStep,
+				ID: name,
 			}
 
 			byt, err := json.Marshal(expected)
@@ -64,8 +64,8 @@ func TestStep(t *testing.T) {
 			// indexes
 			name = "struct ptrs"
 			op := sdkrequest.UnhashedOp{
-				Op:   enums.OpcodeStep,
-				Name: name,
+				Op: enums.OpcodeStep,
+				ID: name,
 			}
 
 			byt, err := json.Marshal(expected)
@@ -84,8 +84,8 @@ func TestStep(t *testing.T) {
 			// indexes
 			name = "slices"
 			op := sdkrequest.UnhashedOp{
-				Op:   enums.OpcodeStep,
-				Name: name,
+				Op: enums.OpcodeStep,
+				ID: name,
 			}
 
 			byt, err := json.Marshal([]response{expected})
@@ -104,8 +104,8 @@ func TestStep(t *testing.T) {
 			// indexes
 			name = "ints"
 			op := sdkrequest.UnhashedOp{
-				Op:   enums.OpcodeStep,
-				Name: name,
+				Op: enums.OpcodeStep,
+				ID: name,
 			}
 
 			byt, err := json.Marshal(646)
@@ -124,8 +124,8 @@ func TestStep(t *testing.T) {
 			// indexes
 			name = "nil"
 			op := sdkrequest.UnhashedOp{
-				Op:   enums.OpcodeStep,
-				Name: name,
+				Op: enums.OpcodeStep,
+				ID: name,
 			}
 
 			byt, err := json.Marshal(nil)
@@ -156,8 +156,8 @@ func TestStep(t *testing.T) {
 			}()
 
 			op := sdkrequest.UnhashedOp{
-				Op:   enums.OpcodeStep,
-				Name: name,
+				Op: enums.OpcodeStep,
+				ID: name,
 			}
 
 			require.NotEmpty(t, mgr.Ops())
