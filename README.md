@@ -40,6 +40,8 @@ complex primitives such as concurrency, parallelism, event batching, or distribu
 
 # Examples
 
+The following is the bare minimum setup for a fully distributed durable workflow server:
+
 ```go
 package main
 
@@ -57,7 +59,7 @@ func main() {
 	h := inngestgo.NewHandler("core", inngestgo.HandlerOpts{})
 	f := inngestgo.CreateFunction(
 		inngestgo.FunctionOpts{
-			ID: "account-created",
+			ID:   "account-created",
 			Name: "Account creation flow",
 		},
 		// Run on every api/account.created event.
@@ -79,10 +81,14 @@ func AccountCreated(ctx context.Context, input inngestgo.Input[AccountCreatedEve
 	step.Sleep(ctx, "initial-delay", time.Second)
 
 	// Run a step which emails the user.  This automatically retries on error.
-	step.Run(ctx, "on-user-created", func(ctx context.Context) (bool, error) {
+	// This returns the fully typed result of the lambda.
+	result := step.Run(ctx, "on-user-created", func(ctx context.Context) (bool, error) {
 		// Run any code inside a step.
-		return true, nil
+		result, err := emails.Send(emails.Opts{})
+		return result, err
 	})
+	// `result` is  fully typed from the lambda
+	_ = result
 
 	// Sample from the event stream for new events.  The function will stop
 	// running and automatially resume when a matching event is found, or if
@@ -95,7 +101,7 @@ func AccountCreated(ctx context.Context, input inngestgo.Input[AccountCreatedEve
 			Event:   "api/function.created",
 			Timeout: time.Hour * 72,
 			// Match events where the user_id is the same in the async sampled event.
-			If:      inngestgo.StrPtr("event.data.user_id == async.data.user_id"),
+			If: inngestgo.StrPtr("event.data.user_id == async.data.user_id"),
 		},
 	)
 	if err == step.ErrEventNotReceived {
