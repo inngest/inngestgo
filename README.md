@@ -72,7 +72,8 @@ func main() {
 // event is received by Inngest.
 //
 // It is invoked by Inngest, with each step being backed by Inngest's orchestrator.
-// Function state is automatically managed.
+// Function state is automatically managed, and persists across server restarts,
+// cloud migrations, and language changes.
 func AccountCreated(ctx context.Context, input inngestgo.Input[AccountCreatedEvent]) (any, error) {
 	// Sleep for a second, minute, hour, week across server restarts.
 	step.Sleep(ctx, "initial-delay", time.Second)
@@ -83,7 +84,9 @@ func AccountCreated(ctx context.Context, input inngestgo.Input[AccountCreatedEve
 		return true, nil
 	})
 
-	// Sample from the event stream for new events
+	// Sample from the event stream for new events.  The function will stop
+	// running and automatially resume when a matching event is found, or if
+	// the timeout is reached.
 	fn, err := step.WaitForEvent[FunctionCreatedEvent](
 		ctx,
 		"wait-for-activity",
