@@ -3,7 +3,7 @@
   <br/>
   <br/>
   <p>
-    A durable event-driven workflow engine for Golang.<br />
+    A durable event-driven workflow engine SDK for Golang.<br />
     Read the <a href="https://www.inngest.com/docs?ref=github-inngest-js-readme">documentation</a> and get started in minutes.
   </p>
   <p>
