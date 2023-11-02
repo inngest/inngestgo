@@ -139,11 +139,11 @@ func (r *requestCtxManager) NewOp(op enums.Opcode, id string, opts map[string]an
 }
 
 type UnhashedOp struct {
-	ID     string         `json:"id"`
-	Op     enums.Opcode   `json:"op"`
-	Opts   map[string]any `json:"opts"`
-	Pos    uint           `json:"pos"`
-	Parent *string        `json:"parent,omitempty"`
+	Op   enums.Opcode   `json:"op"`
+	ID   string         `json:"id"`
+	Name string         `json:"name"`
+	Opts map[string]any `json:"opts"`
+	Pos  uint           `json:"-"`
 }
 
 func (u UnhashedOp) Hash() (string, error) {

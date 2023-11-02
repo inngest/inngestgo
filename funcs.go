@@ -46,6 +46,8 @@ func (f FunctionOpts) GetRateLimit() *inngest.RateLimit {
 	return f.RateLimit.Convert()
 }
 
+// Debounce represents debounce configuration used when creating a new function within
+// FunctionOpts
 type Debounce struct {
 	Key    string        `json:"key"`
 	Period time.Duration `json:"period"`

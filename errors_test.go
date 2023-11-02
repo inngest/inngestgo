@@ -10,13 +10,13 @@ import (
 
 func TestIsNoRetryError(t *testing.T) {
 	err := fmt.Errorf("error")
-	require.False(t, IsNoRetryError(err))
+	require.False(t, isNoRetryError(err))
 
 	wrapped := NoRetryError(err)
-	require.True(t, IsNoRetryError(wrapped))
+	require.True(t, isNoRetryError(wrapped))
 
 	cause := fmt.Errorf("error: %w", wrapped)
-	require.True(t, IsNoRetryError(cause))
+	require.True(t, isNoRetryError(cause))
 }
 
 func TestGetRetryAtTime(t *testing.T) {
@@ -26,15 +26,15 @@ func TestGetRetryAtTime(t *testing.T) {
 	at := RetryAtError(err, expected)
 
 	t.Run("It returns the time with a RetryAtError", func(t *testing.T) {
-		require.NotNil(t, GetRetryAtTime(at))
-		require.EqualValues(t, expected, *GetRetryAtTime(at))
+		require.NotNil(t, getRetryAtTime(at))
+		require.EqualValues(t, expected, *getRetryAtTime(at))
 	})
 
 	t.Run("It returns if RetryAtError is wrapped itself", func(t *testing.T) {
 
 		wrapped := fmt.Errorf("wrap: %w", at)
 
-		require.NotNil(t, GetRetryAtTime(wrapped))
-		require.EqualValues(t, expected, *GetRetryAtTime(wrapped))
+		require.NotNil(t, getRetryAtTime(wrapped))
+		require.EqualValues(t, expected, *getRetryAtTime(wrapped))
 	})
 }

@@ -39,8 +39,7 @@ func AccountCreated(ctx context.Context, input inngestgo.Input[AccountCreatedEve
 	// This returns the fully typed result of the lambda.
 	result := step.Run(ctx, "on-user-created", func(ctx context.Context) (bool, error) {
 		// Run any code inside a step.
-		result, err := emails.Send(emails.Opts{})
-		return result, err
+		return false, nil
 	})
 	// `result` is  fully typed from the lambda
 	_ = result
