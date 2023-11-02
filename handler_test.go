@@ -43,21 +43,21 @@ func TestRegister(t *testing.T) {
 		FunctionOpts{
 			Name: "my func name",
 		},
-		EventTrigger("test/event.a"),
+		EventTrigger("test/event.a", nil),
 		func(ctx context.Context, input Input[EventA]) (any, error) {
 			return nil, nil
 		},
 	)
 	b := CreateFunction(
 		FunctionOpts{Name: "another func"},
-		EventTrigger("test/event.b"),
+		EventTrigger("test/event.b", nil),
 		func(ctx context.Context, input Input[EventB]) (any, error) {
 			return nil, nil
 		},
 	)
 	c := CreateFunction(
 		FunctionOpts{Name: "batch func", BatchEvents: &inngest.EventBatchConfig{MaxSize: 20, Timeout: "10s"}},
-		EventTrigger("test/batch.a"),
+		EventTrigger("test/batch.a", nil),
 		func(ctx context.Context, input Input[EventC]) (any, error) {
 			return nil, nil
 		},
@@ -87,7 +87,7 @@ func TestInvoke(t *testing.T) {
 		}
 		a := CreateFunction(
 			FunctionOpts{Name: "my func name"},
-			EventTrigger("test/event.a"),
+			EventTrigger("test/event.a", nil),
 			func(ctx context.Context, event Input[EventA]) (any, error) {
 				require.EqualValues(t, event.Event, input)
 				return resp, nil
@@ -120,7 +120,7 @@ func TestInvoke(t *testing.T) {
 		}
 		a := CreateFunction(
 			FunctionOpts{Name: "my func name", BatchEvents: &inngest.EventBatchConfig{MaxSize: 5, Timeout: "10s"}},
-			EventTrigger("test/event.a"),
+			EventTrigger("test/event.a", nil),
 			func(ctx context.Context, event Input[EventA]) (any, error) {
 				require.EqualValues(t, event.Event, input)
 				require.EqualValues(t, len(event.Events), 5)
@@ -153,7 +153,7 @@ func TestInvoke(t *testing.T) {
 		}
 		a := CreateFunction(
 			FunctionOpts{Name: "my func name"},
-			EventTrigger("test/event.a"),
+			EventTrigger("test/event.a", nil),
 			func(ctx context.Context, event Input[*EventA]) (any, error) {
 				require.NotNil(t, event.Event)
 				require.EqualValues(t, *event.Event, input)
@@ -186,7 +186,7 @@ func TestInvoke(t *testing.T) {
 		}
 		a := CreateFunction(
 			FunctionOpts{Name: "my func name"},
-			EventTrigger("test/event.a"),
+			EventTrigger("test/event.a", nil),
 			func(ctx context.Context, event Input[any]) (any, error) {
 				require.NotNil(t, event.Event)
 				val, ok := event.Event.(map[string]any)
@@ -224,7 +224,7 @@ func TestInvoke(t *testing.T) {
 		}
 		a := CreateFunction(
 			FunctionOpts{Name: "my func name"},
-			EventTrigger("test/event.a"),
+			EventTrigger("test/event.a", nil),
 			func(ctx context.Context, event Input[map[string]any]) (any, error) {
 				require.NotNil(t, event.Event)
 				val := event.Event
@@ -256,7 +256,7 @@ func TestInvoke(t *testing.T) {
 			// before deploying to Inngest.
 			CreateFunction(
 				FunctionOpts{Name: "my func name"},
-				EventTrigger("test/event.a"),
+				EventTrigger("test/event.a", nil),
 				func(ctx context.Context, event Input[io.Reader]) (any, error) {
 					return nil, nil
 				},
@@ -282,7 +282,7 @@ func TestServe(t *testing.T) {
 	var called int32
 	a := CreateFunction(
 		FunctionOpts{Name: "My servable function!"},
-		EventTrigger("test/event.a"),
+		EventTrigger("test/event.a", nil),
 		func(ctx context.Context, input Input[EventA]) (any, error) {
 			atomic.AddInt32(&called, 1)
 			require.EqualValues(t, event, input.Event)
@@ -347,7 +347,7 @@ func TestSteps(t *testing.T) {
 
 	a := CreateFunction(
 		FunctionOpts{Name: "step function"},
-		EventTrigger("test/event.a"),
+		EventTrigger("test/event.a", nil),
 		func(ctx context.Context, input Input[EventA]) (any, error) {
 			atomic.AddInt32(&fnCt, 1)
 			stepA := step.Run(ctx, "First step", func(ctx context.Context) (map[string]any, error) {
