@@ -74,7 +74,7 @@ func main() {
 // It is invoked by Inngest, with each step being backed by Inngest's orchestrator.
 // Function state is automatically managed.
 func AccountCreated(ctx context.Context, input inngestgo.Input[AccountCreatedEvent]) (any, error) {
-	// Sleep for a second
+	// Sleep for a second, minute, hour, week across server restarts.
 	step.Sleep(ctx, "initial-delay", time.Second)
 
 	// Run a step which emails the user.  This automatically retries on error.
@@ -83,13 +83,18 @@ func AccountCreated(ctx context.Context, input inngestgo.Input[AccountCreatedEve
 		return true, nil
 	})
 
-
-	fn, err := step.WaitForEvent[FunctionCreatedEvent](ctx, "wait-for-activity", step.WaitForEventOpts{
-		Name:    "Wait for a function to be created",
-		Event:   "api/function.created",
-		If:      inngestgo.StrPtr("async.data.user_id == event.data.user_id"),
-		Timeout: time.Hour * 72,
-	})
+	// Sample from the event stream for new events
+	fn, err := step.WaitForEvent[FunctionCreatedEvent](
+		ctx,
+		"wait-for-activity",
+		step.WaitForEventOpts{
+			Name:    "Wait for a function to be created",
+			Event:   "api/function.created",
+			Timeout: time.Hour * 72,
+			// Match events where the user_id is the same in the async sampled event.
+			If:      inngestgo.StrPtr("event.data.user_id == async.data.user_id"),
+		},
+	)
 	if err == step.ErrEventNotReceived {
 		// A function wasn't created within 3 days.  Send a follow-up email.
 		step.Run(ctx, "follow-up-email", func(ctx context.Context) (any, error) {
