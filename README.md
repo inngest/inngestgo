@@ -1,17 +1,20 @@
 <div align="center">
-    <a href="https://www.inngest.com"><img src="https://user-images.githubusercontent.com/306177/191580717-1f563f4c-31e3-4aa0-848c-5ddc97808a9a.png" width="250" /></a>
+  <a href="https://www.inngest.com"><img src="https://user-images.githubusercontent.com/306177/191580717-1f563f4c-31e3-4aa0-848c-5ddc97808a9a.png" width="250" /></a>
   <br/>
   <br/>
   <p>
     A durable event-driven workflow engine for Golang.<br />
     Read the <a href="https://www.inngest.com/docs?ref=github-inngest-js-readme">documentation</a> and get started in minutes.
   </p>
-</div>
+  <p>
 
 [![GoDoc](https://godoc.org/github.com/inngest/inngestgo?status.svg)](http://godoc.org/github.com/inngest/inngestgo)
 [![discord](https://img.shields.io/discord/842170679536517141?label=discord)](https://www.inngest.com/discord)
 [![twitter](https://img.shields.io/twitter/follow/inngest?style=social)](https://twitter.com/inngest)
 
+  </p>
+</div>
+	  
 <hr />
 
 # Inngest Go SDK
