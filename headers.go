@@ -17,7 +17,7 @@ const (
 )
 
 var (
-	HeaderValueSDK = fmt.Sprintf("%s:%s", SDKLanguage, SDKVersion)
+	HeaderValueSDK = fmt.Sprintf("%s:v%s", SDKLanguage, SDKVersion)
 )
 
 func SetBasicRequestHeaders(req *http.Request) {
