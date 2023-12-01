@@ -1,4 +1,4 @@
-//go:generate go run github.com/dmarkham/enumer -trimprefix=RunStatus -type=RunStatus -json -text
+//go:generate go run github.com/dmarkham/enumer -trimprefix=RunStatus -type=RunStatus -json -text -gqlgen
 
 package enums
 
@@ -20,6 +20,7 @@ const (
 	// to any errors
 	RunStatusCancelled
 	// RunStatusOverflowed indicates that the function had too many steps ran.
+	// Deprecated.  This must be RunStatusFailed with an appropriate error code.
 	RunStatusOverflowed
 )
 
