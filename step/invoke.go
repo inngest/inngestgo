@@ -19,6 +19,11 @@ type InvokeOpts struct {
 	User any
 }
 
+// Invoke another Inngest function using its ID. Returns the value returned from
+// that function.
+//
+// If the invoked function can't be found or otherwise errors, the step will
+// fail and the function will stop with a `NoRetryError`.
 func Invoke[T any](ctx context.Context, id string, opts InvokeOpts) (T, error) {
 	mgr := preflight(ctx)
 	args := map[string]any{
