@@ -7,6 +7,7 @@ import (
 
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/execution/state"
+	"github.com/inngest/inngestgo/errors"
 )
 
 type InvokeOpts struct {
@@ -61,11 +62,9 @@ func Invoke[T any](ctx context.Context, id string, opts InvokeOpts) (T, error) {
 				errMsg += "; " + errObj.Message
 			}
 
-			// customErr := NoRetryError(fmt.Errorf(errMsg))
-			// TODO This shoulld be a NoRetryError, but circular imports atm
-			customErr := fmt.Errorf(errMsg)
+			customErr := errors.NoRetryError(fmt.Errorf(errMsg))
 			mgr.SetErr(customErr)
-			return output, customErr
+			panic(ControlHijack{})
 		}
 
 		mgr.SetErr(fmt.Errorf("error parsing invoke value for '%s'; unknown shape", opts.FunctionId))
