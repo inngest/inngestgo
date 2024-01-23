@@ -12,6 +12,7 @@ import (
 	"github.com/google/cel-go/cel"
 	celast "github.com/google/cel-go/common/ast"
 	"github.com/google/cel-go/common/operators"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // TreeParser parses an expression into a tree, with a root node and branches for
@@ -20,19 +21,24 @@ type TreeParser interface {
 	Parse(ctx context.Context, eval Evaluable) (*ParsedExpression, error)
 }
 
-// CELParser represents a CEL parser which takes an expression string
+// CELCompiler represents a CEL compiler which takes an expression string
 // and returns a CEL AST, any issues during parsing, and any lifted and replaced
 // from the expression.
 //
 // By default, *cel.Env fulfils this interface.  In production, it's common
 // to provide a caching layer on top of *cel.Env to optimize parsing, as it's
 // the slowest part of the expression process.
-type CELParser interface {
+type CELCompiler interface {
+	// Compile calls Compile on the expression, parsing and validating the AST.
+	// This returns the AST, issues during validation, and args lifted.
+	Compile(expr string) (*cel.Ast, *cel.Issues, LiftedArgs)
+	// Parse calls Parse on an expression, but does not check the expression
+	// for valid variable names etc. within the env.
 	Parse(expr string) (*cel.Ast, *cel.Issues, LiftedArgs)
 }
 
-// EnvParser turns a *cel.Env into a CELParser.
-func EnvParser(env *cel.Env) CELParser {
+// EnvCompiler turns a *cel.Env into a CELParser.
+func EnvCompiler(env *cel.Env) CELCompiler {
 	return envparser{env}
 }
 
@@ -45,16 +51,21 @@ func (e envparser) Parse(txt string) (*cel.Ast, *cel.Issues, LiftedArgs) {
 	return ast, iss, nil
 }
 
+func (e envparser) Compile(txt string) (*cel.Ast, *cel.Issues, LiftedArgs) {
+	ast, iss := e.env.Compile(txt)
+	return ast, iss, nil
+}
+
 // NewTreeParser returns a new tree parser for a given *cel.Env
-func NewTreeParser(ep CELParser) (TreeParser, error) {
+func NewTreeParser(ep CELCompiler) TreeParser {
 	parser := &parser{
 		ep: ep,
 	}
-	return parser, nil
+	return parser
 }
 
 type parser struct {
-	ep CELParser
+	ep CELCompiler
 
 	// rander is a random reader set during testing.  it is never used outside
 	// of the test package during Parse.  Instead,  a new deterministic random
@@ -63,20 +74,26 @@ type parser struct {
 }
 
 func (p *parser) Parse(ctx context.Context, eval Evaluable) (*ParsedExpression, error) {
-	ast, issues, vars := p.ep.Parse(eval.Expression())
+	expression := eval.GetExpression() // "event.data.id == '1'"
+	if expression == "" {
+		return &ParsedExpression{
+			Evaluable: eval,
+		}, nil
+	}
+
+	ast, issues, vars := p.ep.Parse(expression)
 	if issues != nil {
 		return nil, issues.Err()
 	}
 
 	r := p.rander
-
 	if r == nil {
 		// Create a new deterministic random reader based off of the evaluable's identifier.
 		// This means that every time we parse an expression with the given identifier, the
 		// group IDs will be deterministic as the randomness is sourced from the ID.
 		//
 		// We only overwrite this if rander is not nil so that we can inject rander during tests.
-		digest := sha256.Sum256([]byte(eval.Identifier()))
+		digest := sha256.Sum256([]byte(eval.GetID()))
 		seed := int64(binary.NativeEndian.Uint64(digest[:8]))
 		r = rand.New(rand.NewSource(seed)).Read
 	}
@@ -180,6 +197,7 @@ type Node struct {
 	// for the expression to be truthy.
 	//
 	// If this is nil, this is a parent container for a series of AND or Or checks.
+	// a == b
 	Predicate *Predicate
 }
 
@@ -293,7 +311,7 @@ type Predicate struct {
 	Ident string
 
 	// LiteralIdent represents the second literal that we're comparing against,
-	// eg. in the expression "event.data.a == event.data.b this stores event.data.b
+	// eg. in the expression "event.data.a == event.data.b" this stores event.data.b
 	LiteralIdent *string
 
 	// Operator is the binary operator being used.  NOTE:  This always assumes that the
@@ -330,6 +348,8 @@ func (p Predicate) TreeType() TreeType {
 		return TreeTypeART
 	case int64, float64:
 		return TreeTypeBTree
+	case nil:
+		return TreeTypeNullMatch
 	default:
 		return TreeTypeNone
 	}
@@ -566,6 +586,12 @@ func callToPredicate(item celast.Expr, negated bool, vars LiftedArgs) *Predicate
 		}
 	}
 
+	// If the literal is of type `structpb.NullValue`, replace this with a simple `nil`
+	// to make nil checks easy.
+	if _, ok := literal.(structpb.NullValue); ok {
+		literal = nil
+	}
+
 	if identA != "" && identB != "" {
 		// We're matching two variables together.  Check to see whether any
 		// of these idents have variable data being passed in above.
@@ -621,9 +647,9 @@ func callToPredicate(item celast.Expr, negated bool, vars LiftedArgs) *Predicate
 		}
 	}
 
-	if identA == "" || literal == nil {
-		return nil
-	}
+	// if identA == "" || literal == nil {
+	// 	return nil
+	// }
 
 	// We always assume that the ident is on the LHS.  In the case of comparisons,
 	// we need to switch these and the operator if the literal is on the RHS.  This lets

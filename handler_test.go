@@ -394,7 +394,7 @@ func TestSteps(t *testing.T) {
 			require.Len(t, opcodes, 1)
 			opcode = opcodes[0]
 
-			require.Equal(t, enums.OpcodeStep, opcode.Op, "tools.Run didn't return the correct opcode")
+			require.Equal(t, enums.OpcodeStepRun, opcode.Op, "tools.Run didn't return the correct opcode")
 			require.Equal(t, "First step", opcode.Name, "tools.Run didn't return the correct opcode")
 
 			require.EqualValues(t, 1, fnCt)
@@ -406,9 +406,7 @@ func TestSteps(t *testing.T) {
 			err = json.Unmarshal(opcode.Data, &stepA)
 			require.NoError(t, err)
 			require.EqualValues(t, map[string]any{
-				"data": map[string]any{
-					"test": true, "foo": "potato",
-				},
+				"test": true, "foo": "potato",
 			}, stepA)
 		})
 
@@ -428,7 +426,7 @@ func TestSteps(t *testing.T) {
 			require.Len(t, opcodes, 1)
 			opcode = opcodes[0]
 
-			require.Equal(t, enums.OpcodeStep, opcode.Op, "tools.Run didn't return the correct opcode")
+			require.Equal(t, enums.OpcodeStepRun, opcode.Op, "tools.Run didn't return the correct opcode")
 			require.Equal(t, "Second step", opcode.Name, "tools.Run didn't return the correct opcode")
 
 			require.EqualValues(t, 2, fnCt)
@@ -441,10 +439,8 @@ func TestSteps(t *testing.T) {
 			require.NoError(t, err)
 			require.EqualValues(t, map[string]any{
 				// data is wrapped in an object to conform to the spec.
-				"data": map[string]any{
-					"b": "lol",
-					"a": stepA["data"],
-				},
+				"b": "lol",
+				"a": stepA,
 			}, stepB)
 
 		})
