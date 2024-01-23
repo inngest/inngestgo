@@ -268,7 +268,7 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 
 		f := sdk.SDKFunction{
 			Name:        fn.Name(),
-			Slug:        fn.Slug(),
+			Slug:        h.appName + "-" + fn.Slug(),
 			Idempotency: c.Idempotency,
 			Priority:    fn.Config().Priority,
 			Triggers:    []inngest.Trigger{{}},
