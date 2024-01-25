@@ -350,14 +350,14 @@ func TestSteps(t *testing.T) {
 		EventTrigger("test/event.a", nil),
 		func(ctx context.Context, input Input[EventA]) (any, error) {
 			atomic.AddInt32(&fnCt, 1)
-			stepA := step.Run(ctx, "First step", func(ctx context.Context) (map[string]any, error) {
+			stepA, _ := step.Run(ctx, "First step", func(ctx context.Context) (map[string]any, error) {
 				atomic.AddInt32(&aCt, 1)
 				return map[string]any{
 					"test": true,
 					"foo":  input.Event.Data.Foo,
 				}, nil
 			})
-			stepB := step.Run(ctx, "Second step", func(ctx context.Context) (map[string]any, error) {
+			stepB, _ := step.Run(ctx, "Second step", func(ctx context.Context) (map[string]any, error) {
 				atomic.AddInt32(&bCt, 1)
 				return map[string]any{
 					"b": "lol",
@@ -394,7 +394,7 @@ func TestSteps(t *testing.T) {
 			require.Len(t, opcodes, 1)
 			opcode = opcodes[0]
 
-			require.Equal(t, enums.OpcodeStep, opcode.Op, "tools.Run didn't return the correct opcode")
+			require.Equal(t, enums.OpcodeStepRun, opcode.Op, "tools.Run didn't return the correct opcode")
 			require.Equal(t, "First step", opcode.Name, "tools.Run didn't return the correct opcode")
 
 			require.EqualValues(t, 1, fnCt)
@@ -405,7 +405,9 @@ func TestSteps(t *testing.T) {
 			stepA = map[string]any{}
 			err = json.Unmarshal(opcode.Data, &stepA)
 			require.NoError(t, err)
-			require.EqualValues(t, map[string]any{"test": true, "foo": "potato"}, stepA)
+			require.EqualValues(t, map[string]any{
+				"test": true, "foo": "potato",
+			}, stepA)
 		})
 
 		t.Run("It invokes the second step if the first step's data is passed in", func(t *testing.T) {
@@ -424,7 +426,7 @@ func TestSteps(t *testing.T) {
 			require.Len(t, opcodes, 1)
 			opcode = opcodes[0]
 
-			require.Equal(t, enums.OpcodeStep, opcode.Op, "tools.Run didn't return the correct opcode")
+			require.Equal(t, enums.OpcodeStepRun, opcode.Op, "tools.Run didn't return the correct opcode")
 			require.Equal(t, "Second step", opcode.Name, "tools.Run didn't return the correct opcode")
 
 			require.EqualValues(t, 2, fnCt)
@@ -436,6 +438,7 @@ func TestSteps(t *testing.T) {
 			err = json.Unmarshal(opcode.Data, &stepB)
 			require.NoError(t, err)
 			require.EqualValues(t, map[string]any{
+				// data is wrapped in an object to conform to the spec.
 				"b": "lol",
 				"a": stepA,
 			}, stepB)

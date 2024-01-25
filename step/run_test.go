@@ -33,7 +33,8 @@ func TestStep(t *testing.T) {
 			"life": float64(42),
 		},
 	}
-	byt, err := json.Marshal(expected)
+
+	opData, err := json.Marshal(map[string]any{"data": expected})
 	require.NoError(t, err)
 
 	name := "My test step"
@@ -48,13 +49,12 @@ func TestStep(t *testing.T) {
 				ID: name,
 			}
 
-			byt, err := json.Marshal(expected)
-			require.NoError(t, err)
-			req.Steps[op.MustHash()] = byt
-			val := Run(ctx, name, func(ctx context.Context) (response, error) {
+			req.Steps[op.MustHash()] = opData
+			val, err := Run(ctx, name, func(ctx context.Context) (response, error) {
 				// memoized state, return doesnt matter
 				return response{}, nil
 			})
+			require.NoError(t, err)
 			require.Equal(t, expected, val)
 			require.Empty(t, mgr.Ops())
 		})
@@ -68,35 +68,62 @@ func TestStep(t *testing.T) {
 				ID: name,
 			}
 
-			byt, err := json.Marshal(expected)
-			require.NoError(t, err)
-			req.Steps[op.MustHash()] = byt
-			val := Run(ctx, name, func(ctx context.Context) (*response, error) {
+			req.Steps[op.MustHash()] = opData
+			val, err := Run(ctx, name, func(ctx context.Context) (*response, error) {
 				// memoized state, return doesnt matter
 				return nil, nil
 			})
+			require.NoError(t, err)
 			require.EqualValues(t, &expected, val)
 			require.Empty(t, mgr.Ops())
 		})
 
 		t.Run("Slices", func(t *testing.T) {
-			// Construct an op outside of the manager so that we don't mess with
-			// indexes
-			name = "slices"
-			op := sdkrequest.UnhashedOp{
-				Op: enums.OpcodeStep,
-				ID: name,
-			}
+			t.Run("With wrapped 'data' field", func(t *testing.T) {
+				// Construct an op outside of the manager so that we don't mess with
+				// indexes
+				name = "slices-data"
+				op := sdkrequest.UnhashedOp{
+					Op: enums.OpcodeStep,
+					ID: name,
+				}
 
-			byt, err := json.Marshal([]response{expected})
-			require.NoError(t, err)
-			req.Steps[op.MustHash()] = byt
-			val := Run(ctx, name, func(ctx context.Context) ([]response, error) {
-				// memoized state, return doesnt matter
-				return nil, nil
+				byt, err := json.Marshal(map[string]any{
+					"data": []response{expected},
+				})
+				require.NoError(t, err)
+				req.Steps[op.MustHash()] = byt
+
+				val, err := Run(ctx, name, func(ctx context.Context) ([]response, error) {
+					// memoized state, return doesnt matter
+					return nil, nil
+				})
+				require.NoError(t, err)
+				require.EqualValues(t, []response{expected}, val)
+				require.Empty(t, mgr.Ops())
 			})
-			require.EqualValues(t, []response{expected}, val)
-			require.Empty(t, mgr.Ops())
+
+			t.Run("With raw data in op", func(t *testing.T) {
+				// Construct an op outside of the manager so that we don't mess with
+				// indexes
+				name = "slices-raw"
+				op := sdkrequest.UnhashedOp{
+					Op: enums.OpcodeStep,
+					ID: name,
+				}
+
+				byt, err := json.Marshal([]response{expected})
+				require.NoError(t, err)
+				req.Steps[op.MustHash()] = byt
+
+				val, err := Run(ctx, name, func(ctx context.Context) ([]response, error) {
+					// memoized state, return doesnt matter
+					return nil, nil
+				})
+				require.NoError(t, err)
+				require.EqualValues(t, []response{expected}, val)
+				require.Empty(t, mgr.Ops())
+			})
 		})
 
 		t.Run("Ints", func(t *testing.T) {
@@ -108,13 +135,16 @@ func TestStep(t *testing.T) {
 				ID: name,
 			}
 
-			byt, err := json.Marshal(646)
+			// Add a new number
+			byt, err := json.Marshal(map[string]any{"data": 646})
 			require.NoError(t, err)
 			req.Steps[op.MustHash()] = byt
-			val := Run(ctx, name, func(ctx context.Context) (int, error) {
+
+			val, err := Run(ctx, name, func(ctx context.Context) (int, error) {
 				// memoized state, return doesnt matter
 				return 0, nil
 			})
+			require.NoError(t, err)
 			require.EqualValues(t, 646, val)
 			require.Empty(t, mgr.Ops())
 		})
@@ -128,13 +158,16 @@ func TestStep(t *testing.T) {
 				ID: name,
 			}
 
-			byt, err := json.Marshal(nil)
+			// Add nil
+			opData, err := json.Marshal(nil)
 			require.NoError(t, err)
-			req.Steps[op.MustHash()] = byt
-			val := Run(ctx, name, func(ctx context.Context) (any, error) {
+			req.Steps[op.MustHash()] = opData
+
+			val, err := Run(ctx, name, func(ctx context.Context) (any, error) {
 				// memoized state, return doesnt matter
 				return nil, nil
 			})
+			require.NoError(t, err)
 			require.EqualValues(t, nil, val)
 			require.Empty(t, mgr.Ops())
 		})
@@ -150,9 +183,10 @@ func TestStep(t *testing.T) {
 					require.Equal(t, ControlHijack{}, rcv)
 				}()
 
-				_ = Run(ctx, name, func(ctx context.Context) (response, error) {
+				_, err := Run(ctx, name, func(ctx context.Context) (response, error) {
 					return expected, nil
 				})
+				require.NoError(t, err)
 			}()
 
 			op := sdkrequest.UnhashedOp{
@@ -166,7 +200,7 @@ func TestStep(t *testing.T) {
 				ID:   op.MustHash(),
 				Op:   enums.OpcodeStep,
 				Name: name,
-				Data: byt,
+				Data: opData,
 			}}, mgr.Ops())
 		})
 	})
@@ -179,9 +213,10 @@ func TestStep(t *testing.T) {
 				rcv := recover()
 				require.Equal(t, ControlHijack{}, rcv)
 			}()
-			val := Run(ctx, "new", func(ctx context.Context) (response, error) {
+			val, err := Run(ctx, "new", func(ctx context.Context) (response, error) {
 				return expected, nil
 			})
+			require.NoError(t, err)
 			require.Empty(t, val)
 		}()
 	})
