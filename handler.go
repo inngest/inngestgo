@@ -447,10 +447,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	if request.UseAPI {
-		// TODO: implement this
-		// retrieve data from API
-		// request.Steps =
-		// request.Events =
+		// Allow use of fetching state from a signed URL in the future.
 		_ = 0 // no-op to avoid linter error
 	}
 
@@ -522,11 +519,18 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	if h.UseStreaming {
+		headers := map[string]string{}
+		if noRetry {
+			headers[HeaderKeyNoRetry] = "true"
+		}
+		if retryAt != nil {
+			headers[HeaderKeyRetryAfter] = retryAt.Format(time.RFC3339)
+		}
 		if err != nil {
-			// TODO: Add retry-at.
 			return json.NewEncoder(w).Encode(StreamResponse{
 				StatusCode: 500,
 				Body:       fmt.Sprintf("error calling function: %s", err.Error()),
+				Headers:    headers,
 				NoRetry:    noRetry,
 				RetryAt:    retryAt,
 			})
@@ -535,11 +539,13 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 			return json.NewEncoder(w).Encode(StreamResponse{
 				StatusCode: 206,
 				Body:       ops,
+				Headers:    headers,
 			})
 		}
 		return json.NewEncoder(w).Encode(StreamResponse{
 			StatusCode: 200,
 			Body:       resp,
+			Headers:    headers,
 		})
 	}
 
