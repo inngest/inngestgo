@@ -281,7 +281,7 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 			Slug:        h.appName + "-" + fn.Slug(),
 			Idempotency: c.Idempotency,
 			Priority:    fn.Config().Priority,
-			Triggers:    []inngest.Trigger{{}},
+			Triggers:    inngest.MultipleTriggers{},
 			RateLimit:   fn.Config().GetRateLimit(),
 			Cancel:      fn.Config().Cancel,
 			Steps: map[string]sdk.SDKStep{
@@ -319,15 +319,21 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 			f.Concurrency = &inngest.ConcurrencyLimits{Limits: c.Concurrency}
 		}
 
-		trigger := fn.Trigger()
-		if trigger.EventTrigger != nil {
-			f.Triggers[0].EventTrigger = &inngest.EventTrigger{
-				Event:      trigger.Event,
-				Expression: trigger.Expression,
-			}
-		} else {
-			f.Triggers[0].CronTrigger = &inngest.CronTrigger{
-				Cron: trigger.Cron,
+		triggers := fn.Trigger().Triggers()
+		for _, trigger := range triggers {
+			if trigger.EventTrigger != nil {
+				f.Triggers = append(f.Triggers, inngest.Trigger{
+					EventTrigger: &inngest.EventTrigger{
+						Event:      trigger.Event,
+						Expression: trigger.Expression,
+					},
+				})
+			} else {
+				f.Triggers = append(f.Triggers, inngest.Trigger{
+					CronTrigger: &inngest.CronTrigger{
+						Cron: trigger.Cron,
+					},
+				})
 			}
 		}
 
