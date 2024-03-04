@@ -219,6 +219,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		if err := h.register(w, r); err != nil {
 			h.Logger.Error("error registering functions", "error", err.Error())
+
+			w.WriteHeader(500)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"message": err.Error(),
+			})
 		}
 		return
 	}
@@ -355,6 +361,15 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 		qp := req.URL.Query()
 		qp.Set("deployId", syncID)
 		req.URL.RawQuery = qp.Encode()
+	}
+
+	// If the request specifies a server kind then include it as an expectation
+	// in the outgoing request
+	if r.Header.Get(HeaderKeyServerKind) != "" {
+		req.Header.Set(
+			HeaderKeyExpectedServerKind,
+			r.Header.Get(HeaderKeyServerKind),
+		)
 	}
 
 	key, err := hashedSigningKey([]byte(h.GetSigningKey()))
