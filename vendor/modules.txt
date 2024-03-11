@@ -41,7 +41,7 @@ github.com/google/cel-go/common/types/traits
 github.com/google/cel-go/interpreter
 github.com/google/cel-go/parser
 github.com/google/cel-go/parser/gen
-# github.com/google/uuid v1.4.0
+# github.com/google/uuid v1.6.0
 ## explicit
 github.com/google/uuid
 # github.com/gosimple/slug v1.12.0
@@ -78,10 +78,10 @@ github.com/hashicorp/hcl/v2
 ## explicit; go 1.14
 github.com/hashicorp/terraform/dag
 github.com/hashicorp/terraform/tfdiags
-# github.com/inngest/expr v0.0.0-20240109020554-19e459e1e8d4
+# github.com/inngest/expr v0.0.0-20240201152704-a643bc6ace48
 ## explicit; go 1.21.0
 github.com/inngest/expr
-# github.com/inngest/inngest v0.24.4-0.20240125144251-d920c39952bc
+# github.com/inngest/inngest v0.26.3-0.20240229121853-bf40aa29d3af
 ## explicit; go 1.21.0
 github.com/inngest/inngest/pkg/consts
 github.com/inngest/inngest/pkg/dateutil
@@ -123,9 +123,6 @@ github.com/pelletier/go-toml
 # github.com/pkg/errors v0.9.1
 ## explicit
 github.com/pkg/errors
-# github.com/plar/go-adaptive-radix-tree v1.0.5
-## explicit; go 1.12
-github.com/plar/go-adaptive-radix-tree
 # github.com/pmezard/go-difflib v1.0.0
 ## explicit
 github.com/pmezard/go-difflib/difflib

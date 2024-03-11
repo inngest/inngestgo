@@ -106,7 +106,7 @@ func (r RateLimit) Convert() *inngest.RateLimit {
 //	)
 func CreateFunction[T any](
 	fc FunctionOpts,
-	trigger inngest.Trigger,
+	trigger inngest.Triggerable,
 	f SDKFunction[T],
 ) ServableFunction {
 	// Validate that the input type is a concrete type, and not an interface.
@@ -170,7 +170,7 @@ type ServableFunction interface {
 	Config() FunctionOpts
 
 	// Trigger returns the event name or schedule that triggers the function.
-	Trigger() inngest.Trigger
+	Trigger() inngest.Triggerable
 
 	// ZeroEvent returns the zero event type to marshal the event into, given an
 	// event name.
@@ -200,7 +200,7 @@ type InputCtx struct {
 
 type servableFunc struct {
 	fc      FunctionOpts
-	trigger inngest.Trigger
+	trigger inngest.Triggerable
 	f       any
 }
 
@@ -219,7 +219,7 @@ func (s servableFunc) Name() string {
 	return s.fc.Name
 }
 
-func (s servableFunc) Trigger() inngest.Trigger {
+func (s servableFunc) Trigger() inngest.Triggerable {
 	return s.trigger
 }
 
