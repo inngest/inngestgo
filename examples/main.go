@@ -37,7 +37,7 @@ func AccountCreated(ctx context.Context, input inngestgo.Input[AccountCreatedEve
 
 	// Run a step which emails the user.  This automatically retries on error.
 	// This returns the fully typed result of the lambda.
-	result := step.Run(ctx, "on-user-created", func(ctx context.Context) (bool, error) {
+	result, err := step.Run(ctx, "on-user-created", func(ctx context.Context) (bool, error) {
 		// Run any code inside a step.
 		return false, nil
 	})
