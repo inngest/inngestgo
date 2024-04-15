@@ -290,6 +290,8 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 			Triggers:    inngest.MultipleTriggers{},
 			RateLimit:   fn.Config().GetRateLimit(),
 			Cancel:      fn.Config().Cancel,
+			Timeouts:    (*inngest.Timeouts)(fn.Config().Timeouts),
+			Throttle:    (*inngest.Throttle)(fn.Config().Throttle),
 			Steps: map[string]sdk.SDKStep{
 				"step": {
 					ID:      "step",
