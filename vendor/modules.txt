@@ -16,6 +16,9 @@ github.com/davecgh/go-spew/spew
 # github.com/dustinkirkland/golang-petname v0.0.0-20191129215211-8e5a1ed0cff0
 ## explicit
 github.com/dustinkirkland/golang-petname
+# github.com/fatih/structs v1.1.0
+## explicit
+github.com/fatih/structs
 # github.com/fsnotify/fsnotify v1.6.0
 ## explicit; go 1.16
 github.com/fsnotify/fsnotify
@@ -81,7 +84,7 @@ github.com/hashicorp/terraform/tfdiags
 # github.com/inngest/expr v0.0.0-20240201152704-a643bc6ace48
 ## explicit; go 1.21.0
 github.com/inngest/expr
-# github.com/inngest/inngest v0.26.8-0.20240415152450-b5d83041a1b5
+# github.com/inngest/inngest v0.26.8-0.20240416154023-e5e81de0ebeb
 ## explicit; go 1.21.0
 github.com/inngest/inngest/pkg/consts
 github.com/inngest/inngest/pkg/dateutil
