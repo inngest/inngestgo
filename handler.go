@@ -64,6 +64,10 @@ type HandlerOpts struct {
 	// to os.Getenv("INNGEST_SIGNING_KEY").
 	SigningKey *string
 
+	// SigningKeyFallback is the fallback signing key for your app. If nil, this
+	// defaults to os.Getenv("INNGEST_SIGNING_KEY_FALLBACK").
+	SigningKeyFallback *string
+
 	// Env is the branch environment to deploy to.  If nil, this uses
 	// os.Getenv("INNGEST_ENV").  This only deploys to branches if the
 	// signing key is a branch signing key.
@@ -97,6 +101,19 @@ func (h HandlerOpts) GetSigningKey() string {
 		return os.Getenv("INNGEST_SIGNING_KEY")
 	}
 	return *h.SigningKey
+}
+
+// GetSigningKeyFallback returns the signing key fallback defined within
+// HandlerOpts, or the default defined within INNGEST_SIGNING_KEY_FALLBACK.
+//
+// This is the fallback private key used to register functions and communicate
+// with the private API. If a request fails auth with the signing key then we'll
+// try again with the fallback
+func (h HandlerOpts) GetSigningKeyFallback() string {
+	if h.SigningKeyFallback == nil {
+		return os.Getenv("INNGEST_SIGNING_KEY_FALLBACK")
+	}
+	return *h.SigningKeyFallback
 }
 
 // GetEnv returns the env defined within HandlerOpts, or the default
@@ -357,40 +374,41 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 		registerURL = *h.RegisterURL
 	}
 
-	byt, err := json.Marshal(config)
-	if err != nil {
-		return fmt.Errorf("error marshalling function config: %w", err)
-	}
-	req, err := http.NewRequest(http.MethodPost, registerURL, bytes.NewReader(byt))
-	if err != nil {
-		return fmt.Errorf("error creating new request: %w", err)
-	}
-	if syncID != "" {
-		qp := req.URL.Query()
-		qp.Set("deployId", syncID)
-		req.URL.RawQuery = qp.Encode()
+	createRequest := func() (*http.Request, error) {
+		byt, err := json.Marshal(config)
+		if err != nil {
+			return nil, fmt.Errorf("error marshalling function config: %w", err)
+		}
+
+		req, err := http.NewRequest(http.MethodPost, registerURL, bytes.NewReader(byt))
+		if err != nil {
+			return nil, fmt.Errorf("error creating new request: %w", err)
+		}
+		if syncID != "" {
+			qp := req.URL.Query()
+			qp.Set("deployId", syncID)
+			req.URL.RawQuery = qp.Encode()
+		}
+
+		// If the request specifies a server kind then include it as an expectation
+		// in the outgoing request
+		if r.Header.Get(HeaderKeyServerKind) != "" {
+			req.Header.Set(
+				HeaderKeyExpectedServerKind,
+				r.Header.Get(HeaderKeyServerKind),
+			)
+		}
+
+		SetBasicRequestHeaders(req)
+
+		return req, nil
 	}
 
-	// If the request specifies a server kind then include it as an expectation
-	// in the outgoing request
-	if r.Header.Get(HeaderKeyServerKind) != "" {
-		req.Header.Set(
-			HeaderKeyExpectedServerKind,
-			r.Header.Get(HeaderKeyServerKind),
-		)
-	}
-
-	key, err := hashedSigningKey([]byte(h.GetSigningKey()))
-	if err != nil {
-		return fmt.Errorf("error creating signing key: %w", err)
-	}
-	req.Header.Add(HeaderKeyAuthorization, fmt.Sprintf("Bearer %s", string(key)))
-	if h.GetEnv() != "" {
-		req.Header.Add(HeaderKeyEnv, h.GetEnv())
-	}
-	SetBasicRequestHeaders(req)
-
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := fetchWithAuthFallback(
+		createRequest,
+		h.GetSigningKey(),
+		h.GetSigningKeyFallback(),
+	)
 	if err != nil {
 		return fmt.Errorf("error performing registration request: %w", err)
 	}
@@ -447,14 +465,17 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
-	if !IsDev() {
-		// Validate the signature.
-		if valid, err := ValidateSignature(r.Context(), sig, []byte(h.GetSigningKey()), byt); !valid {
-			h.Logger.Error("unauthorized inngest invoke request", "error", err)
-			return publicerr.Error{
-				Message: "unauthorized",
-				Status:  401,
-			}
+	if valid, err := ValidateSignature(
+		r.Context(),
+		sig,
+		h.GetSigningKey(),
+		h.GetSigningKeyFallback(),
+		byt,
+	); !valid {
+		h.Logger.Error("unauthorized inngest invoke request", "error", err)
+		return publicerr.Error{
+			Message: "unauthorized",
+			Status:  401,
 		}
 	}
 
