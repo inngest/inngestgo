@@ -450,16 +450,16 @@ func TestSteps(t *testing.T) {
 }
 
 func TestIntrospection(t *testing.T) {
-	a := CreateFunction(
+	fn := CreateFunction(
 		FunctionOpts{Name: "My servable function!"},
 		EventTrigger("test/event.a", nil),
 		func(ctx context.Context, input Input[any]) (any, error) {
 			return nil, nil
 		},
 	)
-	Register(a)
-
-	server := httptest.NewServer(DefaultHandler)
+	h := NewHandler("introspection", HandlerOpts{})
+	h.Register(fn)
+	server := httptest.NewServer(h)
 	defer server.Close()
 
 	t.Run("no signature", func(t *testing.T) {
