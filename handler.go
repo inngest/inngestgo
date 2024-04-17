@@ -228,6 +228,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	SetBasicResponseHeaders(w)
 
 	switch r.Method {
+	case http.MethodGet:
+		if err := h.introspect(w, r); err != nil {
+			_ = publicerr.WriteHTTP(w, err)
+		}
+		return
 	case http.MethodPost:
 		if err := h.invoke(w, r); err != nil {
 			_ = publicerr.WriteHTTP(w, err)
@@ -613,6 +618,83 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 
 	// Return the function response.
 	return json.NewEncoder(w).Encode(resp)
+}
+
+type insecureIntrospection struct {
+	FunctionCount int    `json:"function_count"`
+	HasEventKey   bool   `json:"has_event_key"`
+	HasSigningKey bool   `json:"has_signing_key"`
+	Mode          string `json:"mode"`
+}
+
+type secureIntrospection struct {
+	insecureIntrospection
+	SigningKeyFallbackHash *string `json:"signing_key_fallback_hash"`
+	SigningKeyHash         *string `json:"signing_key_hash"`
+}
+
+func (h *handler) introspect(w http.ResponseWriter, r *http.Request) error {
+	defer r.Body.Close()
+
+	mode := "cloud"
+	if IsDev() {
+		mode = "dev"
+	}
+
+	sig := r.Header.Get(HeaderKeySignature)
+	valid, _ := ValidateSignature(
+		r.Context(),
+		sig,
+		h.GetSigningKey(),
+		h.GetSigningKeyFallback(),
+		[]byte{},
+	)
+	if valid {
+		var signingKeyHash *string
+		if h.GetSigningKey() != "" {
+			key, err := hashedSigningKey([]byte(h.GetSigningKey()))
+			if err != nil {
+				return fmt.Errorf("error hashing signing key: %w", err)
+			}
+			hash := string(key)
+			signingKeyHash = &hash
+		}
+
+		var signingKeyFallbackHash *string
+		if h.GetSigningKeyFallback() != "" {
+			key, err := hashedSigningKey([]byte(h.GetSigningKeyFallback()))
+			if err != nil {
+				return fmt.Errorf("error hashing signing key fallback: %w", err)
+			}
+			hash := string(key)
+			signingKeyFallbackHash = &hash
+		}
+
+		introspection := secureIntrospection{
+			insecureIntrospection: insecureIntrospection{
+				FunctionCount: len(h.funcs),
+				HasEventKey:   os.Getenv("INNGEST_EVENT_KEY") != "",
+				HasSigningKey: h.GetSigningKey() != "",
+				Mode:          mode,
+			},
+			SigningKeyFallbackHash: signingKeyFallbackHash,
+			SigningKeyHash:         signingKeyHash,
+		}
+
+		w.Header().Set(HeaderKeyContentType, "application/json")
+		return json.NewEncoder(w).Encode(introspection)
+	}
+
+	introspection := insecureIntrospection{
+		FunctionCount: len(h.funcs),
+		HasEventKey:   os.Getenv("INNGEST_EVENT_KEY") != "",
+		HasSigningKey: h.GetSigningKey() != "",
+		Mode:          mode,
+	}
+
+	w.Header().Set(HeaderKeyContentType, "application/json")
+	return json.NewEncoder(w).Encode(introspection)
+
 }
 
 type StreamResponse struct {

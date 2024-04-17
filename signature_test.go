@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	testBody = []byte(`hey!  if you're reading this come work with us: careers@inngest.com`)
-	testKey  = []byte("signkey-test-12345678")
+	testBody        = []byte(`hey!  if you're reading this come work with us: careers@inngest.com`)
+	testKey         = "signkey-test-12345678"
+	testKeyFallback = "signkey-test-00000000"
 )
 
 func TestSign(t *testing.T) {
@@ -35,27 +36,27 @@ func TestValidateSignature(t *testing.T) {
 
 	t.Run("failures", func(t *testing.T) {
 		t.Run("With an invalid sig it fails", func(t *testing.T) {
-			ok, err := ValidateSignature(ctx, "lol", testKey, testBody)
+			ok, err := ValidateSignature(ctx, "lol", testKey, "", testBody)
 			require.False(t, ok)
 			require.ErrorContains(t, err, "invalid signature")
 		})
 		t.Run("With an invalid ts it fails", func(t *testing.T) {
-			ok, err := ValidateSignature(ctx, "t=what&s=yea", testKey, testBody)
+			ok, err := ValidateSignature(ctx, "t=what&s=yea", testKey, "", testBody)
 			require.False(t, ok)
 			require.ErrorContains(t, err, "invalid timestamp")
 		})
 		t.Run("With an expired ts it fails", func(t *testing.T) {
 			ts := time.Now().Add(-1 * time.Hour).Unix()
-			ok, err := ValidateSignature(ctx, fmt.Sprintf("t=%d&s=yea", ts), testKey, testBody)
+			ok, err := ValidateSignature(ctx, fmt.Sprintf("t=%d&s=yea", ts), testKey, "", testBody)
 			require.False(t, ok)
 			require.ErrorContains(t, err, "expired signature")
 		})
 
 		t.Run("with the wrong key it fails", func(t *testing.T) {
 			at := time.Now()
-			sig := Sign(ctx, at, testKey, testBody)
+			sig := Sign(ctx, at, []byte(testKey), testBody)
 
-			ok, err := ValidateSignature(ctx, sig, []byte("signkey-test-lolwtf"), testBody)
+			ok, err := ValidateSignature(ctx, sig, "signkey-test-lolwtf", "", testBody)
 			require.False(t, ok)
 			require.ErrorContains(t, err, "invalid signature")
 		})
@@ -63,16 +64,16 @@ func TestValidateSignature(t *testing.T) {
 
 	t.Run("with the same key and within a reasonable time it succeeds", func(t *testing.T) {
 		at := time.Now().Add(-5 * time.Second)
-		sig := Sign(ctx, at, testKey, testBody)
+		sig := Sign(ctx, at, []byte(testKey), testBody)
 
-		ok, err := ValidateSignature(ctx, sig, testKey, testBody)
+		ok, err := ValidateSignature(ctx, sig, testKey, "", testBody)
 		require.True(t, ok)
 		require.NoError(t, err)
 	})
 }
 
 func TestHashedSigning(t *testing.T) {
-	actual, err := hashedSigningKey(testKey)
+	actual, err := hashedSigningKey([]byte(testKey))
 	require.NoError(t, err)
 	require.Equal(t, actual, []byte("signkey-test-b2ed992186a5cb19f6668aade821f502c1d00970dfd0e35128d51bac4649916c"))
 }
