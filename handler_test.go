@@ -25,6 +25,7 @@ import (
 
 func init() {
 	os.Setenv("INNGEST_SIGNING_KEY", string(testKey))
+	os.Setenv("INNGEST_SIGNING_KEY_FALLBACK", string(testKeyFallback))
 }
 
 type EventA struct {
@@ -448,6 +449,106 @@ func TestSteps(t *testing.T) {
 
 }
 
+func TestIntrospection(t *testing.T) {
+	fn := CreateFunction(
+		FunctionOpts{Name: "My servable function!"},
+		EventTrigger("test/event.a", nil),
+		func(ctx context.Context, input Input[any]) (any, error) {
+			return nil, nil
+		},
+	)
+	h := NewHandler("introspection", HandlerOpts{})
+	h.Register(fn)
+	server := httptest.NewServer(h)
+	defer server.Close()
+
+	t.Run("no signature", func(t *testing.T) {
+		// When the request has no signature, respond with the insecure
+		// introspection body
+
+		r := require.New(t)
+
+		reqBody := []byte("")
+		req, err := http.NewRequest(http.MethodGet, server.URL, bytes.NewReader(reqBody))
+		r.NoError(err)
+		resp, err := http.DefaultClient.Do(req)
+		r.Equal(http.StatusOK, resp.StatusCode)
+		r.NoError(err)
+
+		var respBody map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&respBody)
+		r.NoError(err)
+
+		r.Equal(map[string]any{
+			"function_count":  float64(1),
+			"has_event_key":   false,
+			"has_signing_key": true,
+			"mode":            "cloud",
+		}, respBody)
+	})
+
+	t.Run("valid signature", func(t *testing.T) {
+		// When the request has a valid signature, respond with the secure
+		// introspection body
+
+		r := require.New(t)
+
+		reqBody := []byte("")
+		sig := Sign(context.Background(), time.Now(), []byte(testKey), reqBody)
+		req, err := http.NewRequest(http.MethodGet, server.URL, bytes.NewReader(reqBody))
+		r.NoError(err)
+		req.Header.Set("X-Inngest-Signature", sig)
+		resp, err := http.DefaultClient.Do(req)
+		r.Equal(http.StatusOK, resp.StatusCode)
+		r.NoError(err)
+
+		var respBody map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&respBody)
+		r.NoError(err)
+
+		signingKeyHash, err := hashedSigningKey([]byte(testKey))
+		r.NoError(err)
+		signingKeyFallbackHash, err := hashedSigningKey([]byte(testKeyFallback))
+		r.NoError(err)
+		r.Equal(map[string]any{
+			"function_count":            float64(1),
+			"has_event_key":             false,
+			"has_signing_key":           true,
+			"mode":                      "cloud",
+			"signing_key_fallback_hash": string(signingKeyFallbackHash),
+			"signing_key_hash":          string(signingKeyHash),
+		}, respBody)
+	})
+
+	t.Run("invalid signature", func(t *testing.T) {
+		// When the request has an invalid signature, respond with the insecure
+		// introspection body
+
+		r := require.New(t)
+
+		reqBody := []byte("")
+		invalidKey := "deadbeef"
+		sig := Sign(context.Background(), time.Now(), []byte(invalidKey), reqBody)
+		req, err := http.NewRequest(http.MethodGet, server.URL, bytes.NewReader(reqBody))
+		r.NoError(err)
+		req.Header.Set("X-Inngest-Signature", sig)
+		resp, err := http.DefaultClient.Do(req)
+		r.Equal(http.StatusOK, resp.StatusCode)
+		r.NoError(err)
+
+		var respBody map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&respBody)
+		r.NoError(err)
+
+		r.Equal(map[string]any{
+			"function_count":  float64(1),
+			"has_event_key":   false,
+			"has_signing_key": true,
+			"mode":            "cloud",
+		}, respBody)
+	})
+}
+
 func createRequest(t *testing.T, evt any) *sdkrequest.Request {
 	t.Helper()
 
@@ -487,7 +588,7 @@ func handlerPost(t *testing.T, url string, r *sdkrequest.Request) *http.Response
 	t.Helper()
 
 	body := marshalRequest(t, r)
-	sig := Sign(context.Background(), time.Now(), testKey, body)
+	sig := Sign(context.Background(), time.Now(), []byte(testKey), body)
 
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	require.NoError(t, err)
