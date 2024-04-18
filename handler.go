@@ -404,6 +404,10 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 			)
 		}
 
+		if h.GetEnv() != "" {
+			req.Header.Add(HeaderKeyEnv, h.GetEnv())
+		}
+
 		SetBasicRequestHeaders(req)
 
 		return req, nil
