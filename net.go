@@ -35,7 +35,7 @@ func fetchWithAuthFallback(
 			return nil, fmt.Errorf("error creating request: %w", err)
 		}
 
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		key, err := hashedSigningKey([]byte(signingKeyFallback))
 		if err != nil {
