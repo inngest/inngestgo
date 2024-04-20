@@ -22,7 +22,7 @@ func main() {
 		AccountCreated,
 	)
 	h.Register(f)
-	http.ListenAndServe(":8080", h)
+	_ = http.ListenAndServe(":8080", h)
 }
 
 // AccountCreated is a durable function which runs any time the "api/account.created"
@@ -60,7 +60,7 @@ func AccountCreated(ctx context.Context, input inngestgo.Input[AccountCreatedEve
 	)
 	if err == step.ErrEventNotReceived {
 		// A function wasn't created within 3 days.  Send a follow-up email.
-		step.Run(ctx, "follow-up-email", func(ctx context.Context) (any, error) {
+		_, _ = step.Run(ctx, "follow-up-email", func(ctx context.Context) (any, error) {
 			// ...
 			return true, nil
 		})
