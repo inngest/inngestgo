@@ -154,6 +154,10 @@ type Pause struct {
 	ExpressionData map[string]any `json:"data"`
 	// InvokeCorrelationID is the correlation ID for the invoke pause.
 	InvokeCorrelationID *string `json:"icID,omitempty"`
+	// InvokeTargetFnID is the target function ID for the invoke pause.
+	// This is used to be able to accurately reconstruct the entire invocation
+	// span.
+	InvokeTargetFnID *string `json:"itFnID,omitempty"`
 	// OnTimeout indicates that this incoming edge should only be ran
 	// when the pause times out, if set to true.
 	OnTimeout bool `json:"onTimeout"`
@@ -182,6 +186,8 @@ type Pause struct {
 	// TriggeringEventID is the event that triggered the original run.  This allows us
 	// to exclude the original event ID when considering triggers.
 	TriggeringEventID *string `json:"tID,omitempty"`
+	// Metadata is additional metadata that should be stored with the pause
+	Metadata map[string]any
 }
 
 func (p Pause) GetID() uuid.UUID {
@@ -208,6 +214,10 @@ func (p Pause) Edge() inngest.Edge {
 		Outgoing: p.Outgoing,
 		Incoming: p.Incoming,
 	}
+}
+
+func (p Pause) IsInvoke() bool {
+	return p.Opcode != nil && *p.Opcode == enums.OpcodeInvokeFunction.String()
 }
 
 type ResumeData struct {
