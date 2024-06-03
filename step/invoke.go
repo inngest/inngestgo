@@ -75,6 +75,9 @@ func Invoke[T any](ctx context.Context, id string, opts InvokeOpts) (T, error) {
 				errMsg += "; " + errObj.Message
 			}
 
+			// TODO:
+			// return err if the invoke target has timed out
+
 			customErr := errors.NoRetryError(fmt.Errorf(errMsg))
 			mgr.SetErr(customErr)
 			panic(ControlHijack{})
