@@ -17,6 +17,9 @@ type InvokeOpts struct {
 	Data map[string]any
 	// User is the user data to pass to the invoked function.
 	User any
+	// Timeout is an optional duration specifying when the invoked function will be
+	// considered timed out
+	Timeout *string
 }
 
 // Invoke another Inngest function using its ID. Returns the value returned from
@@ -32,6 +35,9 @@ func Invoke[T any](ctx context.Context, id string, opts InvokeOpts) (T, error) {
 			"data": opts.Data,
 			"user": opts.User,
 		},
+	}
+	if opts.Timeout != nil {
+		args["timeout"] = *opts.Timeout
 	}
 
 	op := mgr.NewOp(enums.OpcodeInvokeFunction, id, args)
