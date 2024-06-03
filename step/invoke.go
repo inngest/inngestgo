@@ -51,10 +51,6 @@ func Invoke[T any](ctx context.Context, id string, opts InvokeOpts) (T, error) {
 			panic(ControlHijack{})
 		}
 
-		if valMap == nil {
-			return output, fmt.Errorf("invoke target timed out")
-		}
-
 		if data, ok := valMap["data"]; ok {
 			if err := json.Unmarshal(data, &output); err != nil {
 				mgr.SetErr(fmt.Errorf("error unmarshalling invoke data for '%s': %w", opts.FunctionId, err))
@@ -79,12 +75,13 @@ func Invoke[T any](ctx context.Context, id string, opts InvokeOpts) (T, error) {
 				errMsg += "; " + errObj.Message
 			}
 
-			// TODO:
-			// return err if the invoke target has timed out
-
 			customErr := errors.NoRetryError(fmt.Errorf(errMsg))
 			mgr.SetErr(customErr)
 			panic(ControlHijack{})
+		}
+
+		if valMap == nil {
+			return output, fmt.Errorf("invoke target timed out")
 		}
 
 		mgr.SetErr(fmt.Errorf("error parsing invoke value for '%s'; unknown shape", opts.FunctionId))
