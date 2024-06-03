@@ -51,6 +51,10 @@ func Invoke[T any](ctx context.Context, id string, opts InvokeOpts) (T, error) {
 			panic(ControlHijack{})
 		}
 
+		if valMap == nil {
+			return output, fmt.Errorf("invoke target timed out")
+		}
+
 		if data, ok := valMap["data"]; ok {
 			if err := json.Unmarshal(data, &output); err != nil {
 				mgr.SetErr(fmt.Errorf("error unmarshalling invoke data for '%s': %w", opts.FunctionId, err))
