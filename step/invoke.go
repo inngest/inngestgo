@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/execution/state"
 	"github.com/inngest/inngestgo/errors"
+	"github.com/xhit/go-str2duration/v2"
 )
 
 type InvokeOpts struct {
@@ -19,7 +21,7 @@ type InvokeOpts struct {
 	User any
 	// Timeout is an optional duration specifying when the invoked function will be
 	// considered timed out
-	Timeout *string
+	Timeout time.Duration
 }
 
 // Invoke another Inngest function using its ID. Returns the value returned from
@@ -36,8 +38,8 @@ func Invoke[T any](ctx context.Context, id string, opts InvokeOpts) (T, error) {
 			"user": opts.User,
 		},
 	}
-	if opts.Timeout != nil {
-		args["timeout"] = *opts.Timeout
+	if opts.Timeout > 0 {
+		args["timeout"] = str2duration.String(opts.Timeout)
 	}
 
 	op := mgr.NewOp(enums.OpcodeInvokeFunction, id, args)
