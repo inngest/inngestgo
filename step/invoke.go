@@ -80,10 +80,6 @@ func Invoke[T any](ctx context.Context, id string, opts InvokeOpts) (T, error) {
 			panic(ControlHijack{})
 		}
 
-		if valMap == nil {
-			return output, fmt.Errorf("invoke target timed out")
-		}
-
 		mgr.SetErr(fmt.Errorf("error parsing invoke value for '%s'; unknown shape", opts.FunctionId))
 		panic(ControlHijack{})
 	}
