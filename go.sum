@@ -314,10 +314,10 @@ github.com/hpcloud/tail v1.0.0/go.mod h1:ab1qPbhIpdTxEkNHXyeSf5vhxWSCs/tWer42PpO
 github.com/huandu/xstrings v1.3.2/go.mod h1:y5/lhBue+AyNmUVz9RLU9xbLR0o4KIIExikq4ovT0aE=
 github.com/ianlancetaylor/demangle v0.0.0-20181102032728-5e5cf60278f6/go.mod h1:aSSvb/t6k1mPoxDqO4vJh6VOCGPwU4O0C2/Eqndh1Sc=
 github.com/imdario/mergo v0.3.11/go.mod h1:jmQim1M+e3UYxmgPu/WyfjB3N3VflVyUjjjwH0dnCYA=
-github.com/inngest/expr v0.0.0-20240201152704-a643bc6ace48 h1:32YlbLIeO8HOMzYF3DfRLNX8hKeDb8omccWf03PHyh4=
-github.com/inngest/expr v0.0.0-20240201152704-a643bc6ace48/go.mod h1:Evn0nMuDe2NghjynoNzNwwc8ONXuFVzVr1H93tCwPyE=
-github.com/inngest/inngest v0.29.1-0.20240521071806-c8589f8ecc64 h1:QAjqid3o364ArUp+uTQIHifmt3CUmQOgdnYzSFfmB6I=
-github.com/inngest/inngest v0.29.1-0.20240521071806-c8589f8ecc64/go.mod h1:GujvEGMk9y2hDcsAoavmkZJjvZEYiiXmujcQ1hjcL4A=
+github.com/inngest/expr v0.0.0-20240521153320-6f549d6745fd h1:zVlqAmiuWBYO8O5T8Rxin4qfqD0YrFQyK/als0w9LS0=
+github.com/inngest/expr v0.0.0-20240521153320-6f549d6745fd/go.mod h1:Dq8dNC1Q/cZBjl6ltxCoAeNn8fstrBJWWjeSisqTL94=
+github.com/inngest/inngest v0.29.4-0.20240715161914-8a28f85fdcdc h1:X028+6/1qaIsPgpajm21VtBeQ0RqBh/7pOjS7HX9prw=
+github.com/inngest/inngest v0.29.4-0.20240715161914-8a28f85fdcdc/go.mod h1:iK3qBNrXQ0Yc2YrvMtGhGc8T/LE087PL4xmKfSDYPms=
 github.com/jhump/protoreflect v1.6.0/go.mod h1:eaTn3RZAmMBcV0fifFvlm6VHNz3wSkYyXYWUh7ymB74=
 github.com/jmespath/go-jmespath v0.0.0-20160202185014-0b12d6b521d8/go.mod h1:Nht3zPeWKUH0NzdCt2Blrr5ys8VGpn0CEB0cQHVjt7k=
 github.com/jmespath/go-jmespath v0.3.0/go.mod h1:9QtRXoHjLGCJ5IBSaohpXITPlowMeeYCZ7fLUTSywik=
@@ -507,6 +507,8 @@ github.com/subosito/gotenv v1.2.0 h1:Slr1R9HxAlEKefgq5jn9U+DnETlIUa6HfgEzj0g5d7s
 github.com/subosito/gotenv v1.2.0/go.mod h1:N0PQaV/YGNqwC0u51sEeR/aUtSLEXKX9iv69rRypqCw=
 github.com/tencentcloud/tencentcloud-sdk-go v1.0.191/go.mod h1:asUz5BPXxgoPGaRgZaVm1iGcUAuHyYUo1nXqKa83cvI=
 github.com/tencentyun/cos-go-sdk-v5 v0.0.0-20190808065407-f07404cefc8c/go.mod h1:wk2XFUg6egk4tSDNZtXeKfe2G6690UVyt163PuUxBZk=
+github.com/tidwall/btree v1.7.0 h1:L1fkJH/AuEh5zBnnBbmTwQ5Lt+bRJ5A8EWecslvo9iI=
+github.com/tidwall/btree v1.7.0/go.mod h1:twD9XRA5jj9VUQGELzDO4HPQTNJsoWWfYEL+EUQ2cKY=
 github.com/tmc/grpc-websocket-proxy v0.0.0-20171017195756-830351dc03c6/go.mod h1:ncp9v5uamzpCO7NfCPTXjqaC+bZgJeR0sMTm6dMHP7U=
 github.com/tombuildsstuff/giovanni v0.15.1/go.mod h1:0TZugJPEtqzPlMpuJHYfXY6Dq2uLPrXf98D2XQSxNbA=
 github.com/ugorji/go v0.0.0-20180813092308-00b869d2f4a5/go.mod h1:hnLbHMwcvSihnDhEfx2/BzKp2xb0Y+ErdfYcrs9tkJQ=

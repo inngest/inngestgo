@@ -15,13 +15,14 @@ import (
 )
 
 const (
-	EventReceivedName = "event/event.received"
-	FnFailedName      = "inngest/function.failed"
-	FnFinishedName    = "inngest/function.finished"
+	EventReceivedName  = "event/event.received"
+	InternalNamePrefix = "inngest/"
+	FnFailedName       = InternalNamePrefix + "function.failed"
+	FnFinishedName     = InternalNamePrefix + "function.finished"
 	// InvokeEventName is the event name used to invoke specific functions via an
 	// API.  Note that invoking functions still sends an event in the usual manner.
-	InvokeFnName = "inngest/function.invoked"
-	FnCronName   = "inngest/scheduled.timer"
+	InvokeFnName = InternalNamePrefix + "function.invoked"
+	FnCronName   = InternalNamePrefix + "scheduled.timer"
 )
 
 var (
@@ -35,9 +36,9 @@ type TrackedEvent interface {
 	GetEvent() Event
 }
 
-func NewEvent(data string) (*Event, error) {
+func NewEvent(data []byte) (*Event, error) {
 	evt := &Event{}
-	if err := json.Unmarshal([]byte(data), evt); err != nil {
+	if err := json.Unmarshal(data, evt); err != nil {
 		return nil, err
 	}
 
@@ -128,9 +129,17 @@ func (e Event) CorrelationID() string {
 	return ""
 }
 
+func (e Event) IsInternal() bool {
+	return strings.HasPrefix(e.Name, InternalNamePrefix)
+}
+
 // IsFinishedEvent returns true if the event is a function finished event.
 func (e Event) IsFinishedEvent() bool {
 	return e.Name == FnFinishedName
+}
+
+func (e Event) IsInvokeEvent() bool {
+	return e.Name == InvokeFnName
 }
 
 // InngestMetadata represents metadata for an event that is used to invoke a

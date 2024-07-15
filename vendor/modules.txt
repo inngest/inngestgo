@@ -99,10 +99,10 @@ github.com/hashicorp/hcl/v2
 ## explicit; go 1.14
 github.com/hashicorp/terraform/dag
 github.com/hashicorp/terraform/tfdiags
-# github.com/inngest/expr v0.0.0-20240201152704-a643bc6ace48
+# github.com/inngest/expr v0.0.0-20240521153320-6f549d6745fd
 ## explicit; go 1.21.0
 github.com/inngest/expr
-# github.com/inngest/inngest v0.29.1-0.20240521071806-c8589f8ecc64
+# github.com/inngest/inngest v0.29.4-0.20240715161914-8a28f85fdcdc
 ## explicit; go 1.21.0
 github.com/inngest/inngest/pkg/consts
 github.com/inngest/inngest/pkg/dateutil
@@ -209,6 +209,9 @@ github.com/stretchr/testify/require
 # github.com/subosito/gotenv v1.2.0
 ## explicit
 github.com/subosito/gotenv
+# github.com/tidwall/btree v1.7.0
+## explicit; go 1.19
+github.com/tidwall/btree
 # github.com/xhit/go-str2duration/v2 v2.1.0
 ## explicit; go 1.13
 github.com/xhit/go-str2duration/v2

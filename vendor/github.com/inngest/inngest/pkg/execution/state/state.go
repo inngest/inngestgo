@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/inngest"
+	"github.com/inngest/inngest/pkg/util"
 	"github.com/oklog/ulid/v2"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -25,6 +26,7 @@ var (
 	// that doesn't exist within the backing state store.
 	ErrPauseNotFound       = fmt.Errorf("pause not found")
 	ErrInvokePauseNotFound = fmt.Errorf("invoke pause not found")
+	ErrRunNotFound         = fmt.Errorf("run not found in state store")
 	// ErrPauseLeased is returned when attempting to lease a pause that is
 	// already leased by another event.
 	ErrPauseLeased        = fmt.Errorf("pause already leased")
@@ -35,6 +37,15 @@ var (
 	ErrFunctionFailed     = fmt.Errorf("function failed")
 	ErrFunctionOverflowed = fmt.Errorf("function has too many steps")
 	ErrDuplicateResponse  = fmt.Errorf("duplicate response")
+	ErrEventNotFound      = fmt.Errorf("event not found in state store")
+	ErrStateOverflowed    = fmt.Errorf("state is too large")
+)
+
+const (
+	// InngestErrFunctionOverflowed is the public error code for ErrFunctionOverflowed
+	InngestErrFunctionOverflowed = "InngestErrFunctionOverflowed"
+	// InngestErrStateOverflowed is the public error code for ErrStateOverflowed
+	InngestErrStateOverflowed = "InngestErrStateOverflowed"
 )
 
 // Identifier represents the unique identifier for a workflow run.
@@ -101,15 +112,9 @@ type CustomConcurrency struct {
 func (i Identifier) IdempotencyKey() string {
 	key := i.Key
 	if i.Key == "" {
-		key = i.RunID.String()
+		return fmt.Sprintf("%s:%s", util.XXHash(i.WorkflowID), util.XXHash(i.RunID.String()))
 	}
-	return fmt.Sprintf("%s:%d:%s", i.WorkflowID, i.WorkflowVersion, key)
-}
-
-type StepNotification struct {
-	ID      Identifier
-	Step    string
-	Attempt int
+	return key
 }
 
 // Metadata must be stored for each workflow run, allowing the runner to inspect
@@ -183,12 +188,9 @@ func (md *Metadata) GetSpanID() (*trace.SpanID, error) {
 }
 
 type MetadataUpdate struct {
-	Debugger                  bool           `json:"debugger"`
-	Context                   map[string]any `json:"ctx,omitempty"`
-	DisableImmediateExecution bool           `json:"disableImmediateExecution,omitempty"`
-	RequestVersion            int            `json:"rv"`
-	SpanID                    string         `json:"sid"`
-	StartedAt                 time.Time      `json:"sat"`
+	DisableImmediateExecution bool      `json:"disableImmediateExecution,omitempty"`
+	RequestVersion            int       `json:"rv"`
+	StartedAt                 time.Time `json:"sat"`
 }
 
 // State represents the current state of a fn run.  It is data-structure
@@ -198,9 +200,6 @@ type MetadataUpdate struct {
 // It is assumed that, once initialized, state does not error when returning
 // data for the given identifier.
 type State interface {
-	// Function returns the inngest function for the given run.
-	Function() inngest.Function
-
 	// Metadata returns the run metadata, including the started at time
 	// as well as the pending count.
 	Metadata() Metadata
@@ -248,7 +247,6 @@ type State interface {
 
 // Manager represents a state manager which can both load and mutate state.
 type Manager interface {
-	FunctionLoader
 	StateLoader
 	Mutater
 	PauseManager
@@ -277,28 +275,28 @@ type FunctionCallback func(context.Context, Identifier, enums.RunStatus)
 // StateLoader allows loading of previously stored state based off of a given Identifier.
 type StateLoader interface {
 	// Exists checks whether the run ID exists.
-	Exists(ctx context.Context, runID ulid.ULID) (bool, error)
+	Exists(ctx context.Context, accountId uuid.UUID, runID ulid.ULID) (bool, error)
 
 	// Metadata returns run metadata for the given identifier.  It may be cheaper
 	// than a full load in cases where only the metadata is necessary.
-	Metadata(ctx context.Context, runID ulid.ULID) (*Metadata, error)
+	Metadata(ctx context.Context, accountId uuid.UUID, runID ulid.ULID) (*Metadata, error)
 
 	// Load returns run state for the given identifier.
-	Load(ctx context.Context, runID ulid.ULID) (State, error)
+	Load(ctx context.Context, accountId uuid.UUID, runID ulid.ULID) (State, error)
 
 	// IsComplete returns whether the given identifier is complete, ie. the
 	// pending count in the identifier's metadata is zero.
-	IsComplete(ctx context.Context, runID ulid.ULID) (complete bool, err error)
+	IsComplete(ctx context.Context, accountId uuid.UUID, runID ulid.ULID) (complete bool, err error)
 
 	// StackIndex returns the index for the given step ID within the function stack of
 	// a given run.
-	StackIndex(ctx context.Context, runID ulid.ULID, stepID string) (int, error)
+	StackIndex(ctx context.Context, accountId uuid.UUID, runID ulid.ULID, stepID string) (int, error)
 }
 
 // FunctionLoader loads function definitions based off of an identifier.
 type FunctionLoader interface {
 	// LoadFunction should always return the latest live version of a function
-	LoadFunction(ctx context.Context, identifier Identifier) (*inngest.Function, error)
+	LoadFunction(ctx context.Context, envID, fnID uuid.UUID) (*inngest.Function, error)
 }
 
 // Mutater mutates state for a given identifier, storing the state and returning
@@ -313,10 +311,10 @@ type Mutater interface {
 	// ErrIdentifierExists.
 	New(ctx context.Context, input Input) (State, error)
 
-	UpdateMetadata(ctx context.Context, runID ulid.ULID, md MetadataUpdate) error
+	UpdateMetadata(ctx context.Context, accountId uuid.UUID, runID ulid.ULID, md MetadataUpdate) error
 
 	// Delete removes state from the state store.
-	Delete(ctx context.Context, i Identifier) error
+	Delete(ctx context.Context, i Identifier) (bool, error)
 
 	// Cancel sets a function run metadata status to RunStatusCancelled, which prevents
 	// future execution of steps.

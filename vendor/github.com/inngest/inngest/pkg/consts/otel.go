@@ -9,6 +9,8 @@ const (
 	OtelSpanInvoke       = "invoke"
 	OtelSpanWaitForEvent = "wait"
 	OtelSpanSleep        = "sleep"
+	OtelSpanExecute      = "execute"
+	OtelSpanRerun        = "rerun"
 
 	// system attributes
 	OtelSysAccountID      = "sys.account.id"
@@ -22,6 +24,7 @@ const (
 	OtelSysEventIDs        = "sys.event.ids"
 
 	OtelSysBatchID      = "sys.batch.id"
+	OtelSysBatchTS      = "sys.batch.timestamp"
 	OtelSysBatchFull    = "sys.batch.full"
 	OtelSysBatchTimeout = "sys.batch.timeout"
 
@@ -36,6 +39,7 @@ const (
 	OtelSysFunctionEndAt      = "sys.function.time.end"
 	OtelSysFunctionStatusCode = "sys.function.status.code"
 	OtelSysFunctionOutput     = "sys.function.output"
+	OtelSysFunctionLink       = "sys.function.link"
 
 	OtelSysStepDisplayName     = "sys.step.display.name"
 	OtelSysStepOpcode          = "sys.step.opcode"
@@ -66,11 +70,8 @@ const (
 	OtelSysStepInvokeRunID             = "sys.step.invoke.run.id"
 	OtelSysStepInvokeExpired           = "sys.step.invoke.expired"
 
-	OtelSysStepRetry         = "sys.step.retry"
-	OtelSysStepNextOpcode    = "sys.step.next.opcode"
-	OtelSysStepNextTimestamp = "sys.step.next.time"
-	OtelSysStepNextExpires   = "sys.step.next.expires"
-	OtelSysStepDelete        = "sys.step.delete"
+	OtelSysStepRetry  = "sys.step.retry"
+	OtelSysStepDelete = "sys.step.delete"
 
 	OtelSysCronTimestamp = "sys.cron.timestamp"
 	OtelSysCronExpr      = "sys.cron.expr"
@@ -89,6 +90,8 @@ const (
 	OtelScopeDebounce  = "debounce.inngest"
 	OtelScopeTrigger   = "trigger.inngest"
 	OtelScopeCron      = "cron.inngest"
+	OtelScopeInvoke    = "invoke.inngest"
+	OtelScopeRerun     = "rerun.inngest"
 	OtelScopeEnv       = "env.inngest"
 	OtelScopeApp       = "app.env.inngest"
 	OtelScopeFunction  = "function.app.env.inngest"
@@ -100,4 +103,9 @@ const (
 
 	OtelPropagationKey     = "sys.trace"
 	OtelPropagationLinkKey = "sys.trace.link"
+
+	// execution copies
+	OtelExecPlaceholder = "execute"
+	OtelExecFnOk        = "function success"
+	OtelExecFnErr       = "function error"
 )
