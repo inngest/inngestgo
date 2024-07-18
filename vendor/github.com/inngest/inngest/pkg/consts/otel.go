@@ -1,9 +1,16 @@
 package consts
 
 const (
-	OtelSpanEvent   = "event"
-	OtelSpanCron    = "cron"
-	OtelSpanTrigger = "trigger"
+	OtelSpanEvent        = "event"
+	OtelSpanCron         = "cron"
+	OtelSpanBatch        = "batch"
+	OtelSpanDebounce     = "debounce"
+	OtelSpanTrigger      = "trigger"
+	OtelSpanInvoke       = "invoke"
+	OtelSpanWaitForEvent = "wait"
+	OtelSpanSleep        = "sleep"
+	OtelSpanExecute      = "execute"
+	OtelSpanRerun        = "rerun"
 
 	// system attributes
 	OtelSysAccountID      = "sys.account.id"
@@ -15,7 +22,14 @@ const (
 	OtelSysEventRequestID  = "sys.event.request.id"
 	OtelSysEventInternalID = "sys.event.internal.id"
 	OtelSysEventIDs        = "sys.event.ids"
-	OtelSysBatchID         = "sys.batch.id"
+
+	OtelSysBatchID      = "sys.batch.id"
+	OtelSysBatchTS      = "sys.batch.timestamp"
+	OtelSysBatchFull    = "sys.batch.full"
+	OtelSysBatchTimeout = "sys.batch.timeout"
+
+	OtelSysDebounceID      = "sys.debounce.id"
+	OtelSysDebounceTimeout = "sys.debounce.timeout"
 
 	OtelSysFunctionID         = "sys.function.id"
 	OtelSysFunctionSlug       = "sys.function.slug"
@@ -23,26 +37,41 @@ const (
 	OtelSysFunctionScheduleAt = "sys.function.time.schedule"
 	OtelSysFunctionStartAt    = "sys.function.time.start"
 	OtelSysFunctionEndAt      = "sys.function.time.end"
-	OtelSysFunctionStatus     = "sys.function.status"
 	OtelSysFunctionStatusCode = "sys.function.status.code"
 	OtelSysFunctionOutput     = "sys.function.output"
+	OtelSysFunctionLink       = "sys.function.link"
 
+	OtelSysStepDisplayName     = "sys.step.display.name"
+	OtelSysStepOpcode          = "sys.step.opcode"
 	OtelSysStepScheduleAt      = "sys.step.time.schedule"
 	OtelSysStepStartAt         = "sys.step.time.start"
 	OtelSysStepEndAt           = "sys.step.time.end"
 	OtelSysStepStatus          = "sys.step.status"
 	OtelSysStepStatusCode      = "sys.step.status.code"
 	OtelSysStepAttempt         = "sys.step.attempt"
+	OtelSysStepMaxAttempt      = "sys.step.attempt.max"
 	OtelSysStepOutput          = "sys.step.output"
 	OtelSysStepOutputSizeBytes = "sys.step.output.size.bytes"
 	OtelSysStepFirst           = "sys.step.first"
 	OtelSysStepGroupID         = "sys.step.group.id"
 
-	OtelSysStepRetry         = "sys.step.retry"
-	OtelSysStepNextOpcode    = "sys.step.next.opcode"
-	OtelSysStepNextTimestamp = "sys.step.next.time"
-	OtelSysStepNextExpires   = "sys.step.next.expires"
-	OtelSysStepDelete        = "sys.step.delete"
+	OtelSysStepSleepEndAt = "sys.step.sleep.end"
+
+	OtelSysStepWaitExpires        = "sys.step.wait.expires"
+	OtelSysStepWaitExpired        = "sys.step.wait.expired"
+	OtelSysStepWaitEventName      = "sys.step.wait.event"
+	OtelSysStepWaitExpression     = "sys.step.wait.expr"
+	OtelSysStepWaitMatchedEventID = "sys.step.wait.matched.event.id"
+
+	OtelSysStepInvokeExpires           = "sys.step.invoke.expires"
+	OtelSysStepInvokeTargetFnID        = "sys.step.invoke.fn.id"
+	OtelSysStepInvokeTriggeringEventID = "sys.step.invoke.event.outgoing.id"
+	OtelSysStepInvokeReturnedEventID   = "sys.step.invoke.event.incoming.id"
+	OtelSysStepInvokeRunID             = "sys.step.invoke.run.id"
+	OtelSysStepInvokeExpired           = "sys.step.invoke.expired"
+
+	OtelSysStepRetry  = "sys.step.retry"
+	OtelSysStepDelete = "sys.step.delete"
 
 	OtelSysCronTimestamp = "sys.cron.timestamp"
 	OtelSysCronExpr      = "sys.cron.expr"
@@ -57,8 +86,12 @@ const (
 
 	// otel scopes
 	OtelScopeEvent     = "event.inngest"
+	OtelScopeBatch     = "batch.inngest"
+	OtelScopeDebounce  = "debounce.inngest"
 	OtelScopeTrigger   = "trigger.inngest"
 	OtelScopeCron      = "cron.inngest"
+	OtelScopeInvoke    = "invoke.inngest"
+	OtelScopeRerun     = "rerun.inngest"
 	OtelScopeEnv       = "env.inngest"
 	OtelScopeApp       = "app.env.inngest"
 	OtelScopeFunction  = "function.app.env.inngest"
@@ -68,5 +101,11 @@ const (
 	// otel collector filter keys
 	OtelUserTraceFilterKey = "inngest.user"
 
-	OtelPropagationKey = "sys.trace"
+	OtelPropagationKey     = "sys.trace"
+	OtelPropagationLinkKey = "sys.trace.link"
+
+	// execution copies
+	OtelExecPlaceholder = "execute"
+	OtelExecFnOk        = "function success"
+	OtelExecFnErr       = "function error"
 )
