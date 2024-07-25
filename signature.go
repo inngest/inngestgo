@@ -68,25 +68,37 @@ func validateSignature(ctx context.Context, sig string, key, body []byte) (bool,
 
 // ValidateSignature ensures that the signature for the given body is signed with
 // the given key within a given time period to prevent invalid requests or
-// replay attacks. A signing key fallback is used if provided
+// replay attacks. A signing key fallback is used if provided. Returns the
+// correct signing key, which is useful when signing responses
 func ValidateSignature(
 	ctx context.Context,
 	sig string,
 	signingKey string,
 	signingKeyFallback string,
 	body []byte,
-) (bool, error) {
+) (bool, string, error) {
+	// The key that was used to sign the request
+	correctKey := ""
+
 	if IsDev() {
-		return true, nil
+		return true, correctKey, nil
 	}
 
 	valid, err := validateSignature(ctx, sig, []byte(signingKey), body)
-	if !valid && signingKeyFallback != "" {
-		// Validation failed with the primary key, so try the fallback key
-		valid, err = validateSignature(ctx, sig, []byte(signingKeyFallback), body)
+	if !valid {
+		if signingKeyFallback != "" {
+			// Validation failed with the primary key, so try the fallback key
+			valid, err := validateSignature(ctx, sig, []byte(signingKeyFallback), body)
+			if valid {
+				correctKey = signingKeyFallback
+			}
+			return valid, correctKey, err
+		}
+	} else {
+		correctKey = signingKey
 	}
 
-	return valid, err
+	return valid, correctKey, err
 }
 
 func normalizeKey(key []byte) []byte {

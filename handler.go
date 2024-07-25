@@ -38,6 +38,10 @@ var (
 	// DefaultMaxBodySize is the default maximum size read within a single incoming
 	// invoke request (100MB).
 	DefaultMaxBodySize = 1024 * 1024 * 100
+
+	capabilities = sdk.Capabilities{
+		TrustProbe: true,
+	}
 )
 
 const (
@@ -234,6 +238,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	case http.MethodPost:
+		probe := r.URL.Query().Get("probe")
+		if probe == "trust" {
+			h.trust(r.Context(), w, r)
+			return
+		}
+
 		if err := h.invoke(w, r); err != nil {
 			_ = publicerr.WriteHTTP(w, err)
 		}
@@ -285,6 +295,7 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 			Env:      h.GetEnv(),
 			Platform: platform(),
 		},
+		Capabilities: capabilities,
 	}
 
 	for _, fn := range h.funcs {
@@ -475,7 +486,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
-	if valid, err := ValidateSignature(
+	if valid, _, err := ValidateSignature(
 		r.Context(),
 		sig,
 		h.GetSigningKey(),
@@ -647,7 +658,7 @@ func (h *handler) introspect(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	sig := r.Header.Get(HeaderKeySignature)
-	valid, _ := ValidateSignature(
+	valid, _, _ := ValidateSignature(
 		r.Context(),
 		sig,
 		h.GetSigningKey(),
@@ -700,6 +711,57 @@ func (h *handler) introspect(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set(HeaderKeyContentType, "application/json")
 	return json.NewEncoder(w).Encode(introspection)
 
+}
+
+type trustProbeResponse struct {
+	Error *string `json:"error,omitempty"`
+}
+
+func (h *handler) trust(
+	ctx context.Context,
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	w.Header().Add("Content-Type", "application/json")
+	sig := r.Header.Get(HeaderKeySignature)
+	if sig == "" {
+		_ = publicerr.WriteHTTP(w, publicerr.Error{
+			Message: fmt.Sprintf("missing %s header", HeaderKeySignature),
+			Status:  401,
+		})
+		return
+	}
+
+	valid, key, err := ValidateSignature(
+		ctx,
+		r.Header.Get("X-Inngest-Signature"),
+		h.GetSigningKey(),
+		h.GetSigningKeyFallback(),
+		[]byte{},
+	)
+	if err != nil {
+		_ = publicerr.WriteHTTP(w, publicerr.Error{
+			Message: fmt.Sprintf("error validating signature: %s", err),
+		})
+		return
+	}
+	if !valid {
+		_ = publicerr.WriteHTTP(w, publicerr.Error{
+			Message: "invalid signature",
+			Status:  401,
+		})
+		return
+	}
+
+	byt, err := json.Marshal(trustProbeResponse{})
+	if err != nil {
+		_ = publicerr.WriteHTTP(w, err)
+		return
+	}
+
+	w.Header().Add("X-Inngest-Signature", Sign(ctx, time.Now(), []byte(key), byt))
+	w.WriteHeader(200)
+	w.Write(byt)
 }
 
 type StreamResponse struct {

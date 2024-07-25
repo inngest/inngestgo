@@ -9,7 +9,7 @@ replace github.com/tencentcloud/tencentcloud-sdk-go v3.0.82+incompatible => gith
 require (
 	github.com/gosimple/slug v1.12.0
 	github.com/gowebpki/jcs v1.0.0
-	github.com/inngest/inngest v0.29.4-0.20240715161914-8a28f85fdcdc
+	github.com/inngest/inngest v0.29.4-0.20240726163936-6b26ad286424
 	github.com/stretchr/testify v1.9.0
 	github.com/xhit/go-str2duration/v2 v2.1.0
 	golang.org/x/exp v0.0.0-20240416160154-fe59bbe5cc7f
@@ -37,7 +37,7 @@ require (
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/hashicorp/hcl/v2 v2.10.0 // indirect
 	github.com/hashicorp/terraform v0.15.3 // indirect
-	github.com/inngest/expr v0.0.0-20240521153320-6f549d6745fd // indirect
+	github.com/inngest/expr v0.0.0-20240717151033-03e4378c436c // indirect
 	github.com/karlseguin/ccache/v2 v2.0.8 // indirect
 	github.com/magiconair/properties v1.8.5 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
