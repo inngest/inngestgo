@@ -761,7 +761,10 @@ func (h *handler) trust(
 
 	w.Header().Add("X-Inngest-Signature", Sign(ctx, time.Now(), []byte(key), byt))
 	w.WriteHeader(200)
-	w.Write(byt)
+	_, err = w.Write(byt)
+	if err != nil {
+		h.Logger.Error("error writing trust probe response", "error", err)
+	}
 }
 
 type StreamResponse struct {
