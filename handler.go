@@ -645,8 +645,9 @@ type insecureIntrospection struct {
 
 type secureIntrospection struct {
 	insecureIntrospection
-	SigningKeyFallbackHash *string `json:"signing_key_fallback_hash"`
-	SigningKeyHash         *string `json:"signing_key_hash"`
+	Capabilities           sdk.Capabilities `json:"capabilities"`
+	SigningKeyFallbackHash *string          `json:"signing_key_fallback_hash"`
+	SigningKeyHash         *string          `json:"signing_key_hash"`
 }
 
 func (h *handler) introspect(w http.ResponseWriter, r *http.Request) error {
@@ -693,6 +694,7 @@ func (h *handler) introspect(w http.ResponseWriter, r *http.Request) error {
 				HasSigningKey: h.GetSigningKey() != "",
 				Mode:          mode,
 			},
+			Capabilities:           capabilities,
 			SigningKeyFallbackHash: signingKeyFallbackHash,
 			SigningKeyHash:         signingKeyHash,
 		}
