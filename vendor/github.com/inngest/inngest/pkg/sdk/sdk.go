@@ -84,7 +84,6 @@ type RegisterRequest struct {
 }
 
 type Capabilities struct {
-	InBandSync bool `json:"in_band_sync"`
 	TrustProbe bool `json:"trust_probe"`
 }
 
