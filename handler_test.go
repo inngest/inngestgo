@@ -511,6 +511,9 @@ func TestIntrospection(t *testing.T) {
 		signingKeyFallbackHash, err := hashedSigningKey([]byte(testKeyFallback))
 		r.NoError(err)
 		r.Equal(map[string]any{
+			"capabilities": map[string]any{
+				"trust_probe": true,
+			},
 			"function_count":            float64(1),
 			"has_event_key":             false,
 			"has_signing_key":           true,
