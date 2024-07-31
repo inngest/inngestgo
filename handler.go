@@ -40,7 +40,7 @@ var (
 	DefaultMaxBodySize = 1024 * 1024 * 100
 
 	capabilities = sdk.Capabilities{
-		TrustProbe: true,
+		TrustProbe: sdk.TrustProbeV1,
 	}
 )
 

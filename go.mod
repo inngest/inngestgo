@@ -9,7 +9,7 @@ replace github.com/tencentcloud/tencentcloud-sdk-go v3.0.82+incompatible => gith
 require (
 	github.com/gosimple/slug v1.12.0
 	github.com/gowebpki/jcs v1.0.0
-	github.com/inngest/inngest v0.29.4-0.20240726163936-6b26ad286424
+	github.com/inngest/inngest v0.29.4-0.20240731183027-6747274bfbba
 	github.com/stretchr/testify v1.9.0
 	github.com/xhit/go-str2duration/v2 v2.1.0
 	golang.org/x/exp v0.0.0-20240416160154-fe59bbe5cc7f

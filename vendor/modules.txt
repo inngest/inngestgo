@@ -102,7 +102,7 @@ github.com/hashicorp/terraform/tfdiags
 # github.com/inngest/expr v0.0.0-20240717151033-03e4378c436c
 ## explicit; go 1.21.0
 github.com/inngest/expr
-# github.com/inngest/inngest v0.29.4-0.20240726163936-6b26ad286424
+# github.com/inngest/inngest v0.29.4-0.20240731183027-6747274bfbba
 ## explicit; go 1.21.0
 github.com/inngest/inngest/pkg/consts
 github.com/inngest/inngest/pkg/dateutil
