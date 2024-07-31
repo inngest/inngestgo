@@ -83,8 +83,12 @@ type RegisterRequest struct {
 	Capabilities Capabilities `json:"capabilities"`
 }
 
+const (
+	TrustProbeV1 string = "v1"
+)
+
 type Capabilities struct {
-	TrustProbe bool `json:"trust_probe"`
+	TrustProbe string `json:"trust_probe"`
 }
 
 type Headers struct {
