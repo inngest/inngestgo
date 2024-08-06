@@ -97,7 +97,7 @@ func TestInvoke(t *testing.T) {
 		Register(a)
 
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, a, createRequest(t, input))
+			actual, op, err := invoke(ctx, a, createRequest(t, input), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -131,7 +131,7 @@ func TestInvoke(t *testing.T) {
 		Register(a)
 
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, a, createBatchRequest(t, input, 5))
+			actual, op, err := invoke(ctx, a, createBatchRequest(t, input, 5), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -166,7 +166,7 @@ func TestInvoke(t *testing.T) {
 		ctx := context.Background()
 
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, a, createRequest(t, input))
+			actual, op, err := invoke(ctx, a, createRequest(t, input), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -204,7 +204,7 @@ func TestInvoke(t *testing.T) {
 
 		ctx := context.Background()
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, a, createRequest(t, input))
+			actual, op, err := invoke(ctx, a, createRequest(t, input), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -241,7 +241,7 @@ func TestInvoke(t *testing.T) {
 
 		ctx := context.Background()
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, a, createRequest(t, input))
+			actual, op, err := invoke(ctx, a, createRequest(t, input), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)

@@ -37,6 +37,25 @@ jobs:
         uses: actions/setup-go@v3
         with:
           go-version: '1.21'
-      - name: Test
-        run: go test -v -race -count=1
+      - name: Unit test
+        run: go test -v -race -count=1 -short
+  itest:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: '1.21'
+      
+      # Need npx to start the Dev Server
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
 
+      - name: Integration test
+        run: make itest
