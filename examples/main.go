@@ -2,26 +2,38 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/inngest/inngestgo"
+	"github.com/inngest/inngestgo/errors"
 	"github.com/inngest/inngestgo/step"
 )
 
 func main() {
-	h := inngestgo.NewHandler("core", inngestgo.HandlerOpts{})
+	h := inngestgo.NewHandler("billing", inngestgo.HandlerOpts{})
+
+	// CreateFunction is a factory method which creates new Inngest functions (step functions,
+	// or workflows) with a specific configuration.
 	f := inngestgo.CreateFunction(
 		inngestgo.FunctionOpts{
-			ID:   "account-created",
-			Name: "Account creation flow",
+			ID:      "account-created",
+			Name:    "Account creation flow",
+			Retries: inngestgo.IntPtr(5),
 		},
 		// Run on every api/account.created event.
 		inngestgo.EventTrigger("api/account.created", nil),
+		// The function to run.
 		AccountCreated,
 	)
+
+	// Register the functions with your app/service.
 	h.Register(f)
+
+	// And serve the functions from an HTTP handler.
 	_ = http.ListenAndServe(":8080", h)
 }
 
@@ -37,12 +49,36 @@ func AccountCreated(ctx context.Context, input inngestgo.Input[AccountCreatedEve
 
 	// Run a step which emails the user.  This automatically retries on error.
 	// This returns the fully typed result of the lambda.
-	result, err := step.Run(ctx, "on-user-created", func(ctx context.Context) (bool, error) {
-		// Run any code inside a step.
-		return false, nil
+	//
+	// Each step.Run is a code-level transaction that commits its results to the function's
+	// state.
+	result, err := step.Run(ctx, "fetch todo", func(ctx context.Context) (*TodoItem, error) {
+		// Run any code inside a step, eg:
+
+		resp, err := http.Get("https://jsonplaceholder.typicode.com/todos/1")
+		if err != nil {
+			// This will retry automatically according to the function's Retry count.
+			return nil, err
+		}
+		if retryAfter := parseRetryAfter(resp.Header.Get("Retry-After")); !retryAfter.IsZero() {
+			// Return a RetryAtError to manually control when to retry the step on transient
+			// errors such as rate limits.
+			return nil, errors.RetryAtError(fmt.Errorf("rate-limited"), retryAfter)
+		}
+		defer resp.Body.Close()
+
+		item := &TodoItem{}
+		err = json.NewDecoder(resp.Body).Decode(item)
+		return item, err
 	})
-	// `result` is  fully typed from the lambda
-	_ = result
+	if result == nil || err != nil {
+		return nil, err
+	}
+
+	// You can access the previous step.Run's return values as expected.
+	_, _ = step.Run(ctx, "load todo author", func(ctx context.Context) (any, error) {
+		return loadUser(result.UserID)
+	})
 
 	// Sample from the event stream for new events.  The function will stop
 	// running and automatially resume when a matching event is found, or if
@@ -92,4 +128,39 @@ type AccountCreatedEventData struct {
 type FunctionCreatedEvent inngestgo.GenericEvent[FunctionCreatedEventData, any]
 type FunctionCreatedEventData struct {
 	FunctionID string
+}
+
+//
+// Utility helpers
+//
+
+type TodoItem struct {
+	ID        int    `json:"id"`
+	UserID    int    `json:"userId"`
+	Title     string `json:"title"`
+	Completed bool   `json:"bool"`
+}
+
+func parseRetryAfter(input string) time.Time {
+	// We must parse this according to RFC9110 / RFC5322.
+	fmts := []string{
+		time.RFC1123, time.RFC850, time.ANSIC, // In spec
+		time.RFC3339, // Not part of the spec
+	}
+	for _, format := range fmts {
+		if t, err := time.Parse(format, input); err == nil {
+			return t
+		}
+	}
+	// Attempt to parse this as delay in seconds
+	if delay, err := strconv.Atoi(input); err != nil {
+		return time.Now().Add(time.Duration(delay) * time.Second)
+	}
+	// Return zero time
+	return time.Time{}
+}
+
+func loadUser(id int) (any, error) {
+	// eg. fetch from DB
+	return nil, nil
 }
