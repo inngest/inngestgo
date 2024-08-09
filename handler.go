@@ -734,12 +734,25 @@ func (h *handler) trust(
 		return
 	}
 
+	max := h.HandlerOpts.MaxBodySize
+	if max == 0 {
+		max = DefaultMaxBodySize
+	}
+	byt, err := io.ReadAll(http.MaxBytesReader(w, r.Body, int64(max)))
+	if err != nil {
+		h.Logger.Error("error decoding function request", "error", err)
+		_ = publicerr.WriteHTTP(w, publicerr.Error{
+			Message: fmt.Sprintf("error decoding function request: %s", err),
+		})
+		return
+	}
+
 	valid, key, err := ValidateSignature(
 		ctx,
 		r.Header.Get("X-Inngest-Signature"),
 		h.GetSigningKey(),
 		h.GetSigningKeyFallback(),
-		[]byte{},
+		byt,
 	)
 	if err != nil {
 		_ = publicerr.WriteHTTP(w, publicerr.Error{
@@ -755,7 +768,7 @@ func (h *handler) trust(
 		return
 	}
 
-	byt, err := json.Marshal(trustProbeResponse{})
+	byt, err = json.Marshal(trustProbeResponse{})
 	if err != nil {
 		_ = publicerr.WriteHTTP(w, err)
 		return
