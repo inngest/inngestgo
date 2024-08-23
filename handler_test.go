@@ -494,7 +494,7 @@ func TestIntrospection(t *testing.T) {
 		r := require.New(t)
 
 		reqBody := []byte("")
-		sig := Sign(context.Background(), time.Now(), []byte(testKey), reqBody)
+		sig, _ := Sign(context.Background(), time.Now(), []byte(testKey), reqBody)
 		req, err := http.NewRequest(http.MethodGet, server.URL, bytes.NewReader(reqBody))
 		r.NoError(err)
 		req.Header.Set("X-Inngest-Signature", sig)
@@ -531,7 +531,7 @@ func TestIntrospection(t *testing.T) {
 
 		reqBody := []byte("")
 		invalidKey := "deadbeef"
-		sig := Sign(context.Background(), time.Now(), []byte(invalidKey), reqBody)
+		sig, _ := Sign(context.Background(), time.Now(), []byte(invalidKey), reqBody)
 		req, err := http.NewRequest(http.MethodGet, server.URL, bytes.NewReader(reqBody))
 		r.NoError(err)
 		req.Header.Set("X-Inngest-Signature", sig)
@@ -591,7 +591,7 @@ func handlerPost(t *testing.T, url string, r *sdkrequest.Request) *http.Response
 	t.Helper()
 
 	body := marshalRequest(t, r)
-	sig := Sign(context.Background(), time.Now(), []byte(testKey), body)
+	sig, _ := Sign(context.Background(), time.Now(), []byte(testKey), body)
 
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	require.NoError(t, err)
