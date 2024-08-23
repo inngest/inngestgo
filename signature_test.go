@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	testBody        = []byte(`hey!  if you're reading this come work with us: careers@inngest.com`)
+	testBody        = []byte(`{"msg": "hey!  if you're reading this come work with us: careers@inngest.com"}`)
 	testKey         = "signkey-test-12345678"
 	testKeyFallback = "signkey-test-00000000"
 )
