@@ -774,7 +774,13 @@ func (h *handler) trust(
 		return
 	}
 
-	w.Header().Add("X-Inngest-Signature", Sign(ctx, time.Now(), []byte(key), byt))
+	resSig, err := Sign(ctx, time.Now(), []byte(key), byt)
+	if err != nil {
+		_ = publicerr.WriteHTTP(w, err)
+		return
+	}
+
+	w.Header().Add("X-Inngest-Signature", resSig)
 	w.WriteHeader(200)
 	_, err = w.Write(byt)
 	if err != nil {

@@ -23,9 +23,9 @@ func TestSign(t *testing.T) {
 		keyA := []byte("signkey-test-12345678")
 		keyB := []byte("signkey-prod-12345678")
 		keyC := []byte("12345678")
-		a := Sign(ctx, at, keyA, testBody)
-		b := Sign(ctx, at, keyB, testBody)
-		c := Sign(ctx, at, keyC, testBody)
+		a, _ := Sign(ctx, at, keyA, testBody)
+		b, _ := Sign(ctx, at, keyB, testBody)
+		c, _ := Sign(ctx, at, keyC, testBody)
 		require.Equal(t, a, b)
 		require.Equal(t, a, c)
 	})
@@ -54,7 +54,7 @@ func TestValidateSignature(t *testing.T) {
 
 		t.Run("with the wrong key it fails", func(t *testing.T) {
 			at := time.Now()
-			sig := Sign(ctx, at, []byte(testKey), testBody)
+			sig, _ := Sign(ctx, at, []byte(testKey), testBody)
 
 			ok, _, err := ValidateSignature(ctx, sig, "signkey-test-lolwtf", "", testBody)
 			require.False(t, ok)
@@ -64,7 +64,7 @@ func TestValidateSignature(t *testing.T) {
 
 	t.Run("with the same key and within a reasonable time it succeeds", func(t *testing.T) {
 		at := time.Now().Add(-5 * time.Second)
-		sig := Sign(ctx, at, []byte(testKey), testBody)
+		sig, _ := Sign(ctx, at, []byte(testKey), testBody)
 
 		ok, _, err := ValidateSignature(ctx, sig, testKey, "", testBody)
 		require.True(t, ok)

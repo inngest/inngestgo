@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strconv"
 	"time"
+
+	"github.com/gowebpki/jcs"
 )
 
 var (
@@ -22,8 +24,13 @@ var (
 )
 
 // Sign signs a request body with the given key at the given timestamp.
-func Sign(ctx context.Context, at time.Time, key, body []byte) string {
+func Sign(ctx context.Context, at time.Time, key, body []byte) (string, error) {
 	key = normalizeKey(key)
+
+	body, err := jcs.Transform(body)
+	if err != nil {
+		return "", fmt.Errorf("failed to canonicalize body: %w", err)
+	}
 
 	ts := at.Unix()
 	if at.IsZero() {
@@ -36,7 +43,7 @@ func Sign(ctx context.Context, at time.Time, key, body []byte) string {
 	// timing attacks.
 	_, _ = mac.Write([]byte(fmt.Sprintf("%d", ts)))
 	sig := hex.EncodeToString(mac.Sum(nil))
-	return fmt.Sprintf("t=%d&s=%s", ts, sig)
+	return fmt.Sprintf("t=%d&s=%s", ts, sig), nil
 }
 
 // validateSignature ensures that the signature for the given body is signed with
@@ -58,7 +65,10 @@ func validateSignature(ctx context.Context, sig string, key, body []byte) (bool,
 		return false, ErrExpiredSignature
 	}
 
-	actual := Sign(ctx, ts, key, body)
+	actual, err := Sign(ctx, ts, key, body)
+	if err != nil {
+		return false, err
+	}
 	if actual != sig {
 		return false, ErrInvalidSignature
 	}
