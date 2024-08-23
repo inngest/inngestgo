@@ -14,9 +14,7 @@ import (
 )
 
 func main() {
-	h := inngestgo.NewHandler("billing", inngestgo.HandlerOpts{
-		RegisterURL: inngestgo.StrPtr("http://localhost:8090/fn/register"),
-	})
+	h := inngestgo.NewHandler("billing", inngestgo.HandlerOpts{})
 
 	// CreateFunction is a factory method which creates new Inngest functions (step functions,
 	// or workflows) with a specific configuration.
@@ -24,7 +22,7 @@ func main() {
 		inngestgo.FunctionOpts{
 			ID:      "account-created",
 			Name:    "Account creation flow",
-			Retries: inngestgo.IntPtr(0),
+			Retries: inngestgo.IntPtr(5),
 		},
 		// Run on every api/account.created event.
 		inngestgo.EventTrigger("api/account.created", nil),
@@ -46,7 +44,6 @@ func main() {
 // Function state is automatically managed, and persists across server restarts,
 // cloud migrations, and language changes.
 func AccountCreated(ctx context.Context, input inngestgo.Input[AccountCreatedEvent]) (any, error) {
-	return nil, nil
 	// Sleep for a second, minute, hour, week across server restarts.
 	step.Sleep(ctx, "initial-delay", time.Second)
 
