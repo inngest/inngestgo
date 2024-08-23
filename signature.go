@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gowebpki/jcs"
+	"github.com/inngest/inngest/pkg/logger"
 )
 
 var (
@@ -27,9 +28,12 @@ var (
 func Sign(ctx context.Context, at time.Time, key, body []byte) (string, error) {
 	key = normalizeKey(key)
 
-	body, err := jcs.Transform(body)
-	if err != nil {
-		return "", fmt.Errorf("failed to canonicalize body: %w", err)
+	var err error
+	if len(body) > 0 {
+		body, err = jcs.Transform(body)
+		if err != nil {
+			logger.StdlibLogger(ctx).Warn("failed to canonicalize body", "error", err)
+		}
 	}
 
 	ts := at.Unix()
