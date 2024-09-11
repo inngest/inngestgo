@@ -20,6 +20,7 @@ import (
 	"github.com/inngest/inngest/pkg/sdk"
 	"github.com/inngest/inngestgo/errors"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
+	"github.com/inngest/inngestgo/internal/types"
 	"github.com/inngest/inngestgo/step"
 	"golang.org/x/exp/slog"
 )
@@ -40,6 +41,7 @@ var (
 	DefaultMaxBodySize = 1024 * 1024 * 100
 
 	capabilities = sdk.Capabilities{
+		InBandSync: sdk.InBandSyncV1,
 		TrustProbe: sdk.TrustProbeV1,
 	}
 )
@@ -266,39 +268,185 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // all functions and automatically allows all functions to immediately be triggered
 // by incoming events or schedules.
 func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
-	h.l.Lock()
-	defer h.l.Unlock()
-
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	host := r.Host
-
-	// Get the sync ID from the URL and then remove it, since we don't want the
-	// sync ID to show in the function URLs (that would affect the checksum and
-	// is ugly in the UI)
-	qp := r.URL.Query()
-	syncID := qp.Get("deployId")
-	qp.Del("deployId")
-	r.URL.RawQuery = qp.Encode()
-
-	pathAndParams := r.URL.String()
-
-	config := sdk.RegisterRequest{
-		URL:        fmt.Sprintf("%s://%s%s", scheme, host, pathAndParams),
-		V:          "1",
-		DeployType: "ping",
-		SDK:        HeaderValueSDK,
-		AppName:    h.appName,
-		Headers: sdk.Headers{
-			Env:      h.GetEnv(),
-			Platform: platform(),
-		},
-		Capabilities: capabilities,
+	var err error
+	if r.Header.Get(HeaderKeySyncKind) == SyncKindInBand && allowInBandSync() {
+		err = h.inBandSync(w, r)
+	} else {
+		err = h.outOfBandSync(w, r)
 	}
 
-	for _, fn := range h.funcs {
+	if err != nil {
+		h.Logger.Error("out-of-band sync error", "error", err)
+	}
+	return err
+}
+
+type inBandSynchronizeRequest struct {
+	URL string `json:"url"`
+}
+
+func (i inBandSynchronizeRequest) Validate() error {
+	if i.URL == "" {
+		return fmt.Errorf("missing URL")
+	}
+	return nil
+}
+
+type inBandSynchronizeResponse struct {
+	AppID       string            `json:"app_id"`
+	Env         *string           `json:"env"`
+	Framework   *string           `json:"framework"`
+	Functions   []sdk.SDKFunction `json:"functions"`
+	Inspection  map[string]any    `json:"inspection"`
+	Platform    *string           `json:"platform"`
+	SDKAuthor   string            `json:"sdk_author"`
+	SDKLanguage string            `json:"sdk_language"`
+	SDKVersion  string            `json:"sdk_version"`
+	URL         string            `json:"url"`
+}
+
+func (h *handler) inBandSync(
+	w http.ResponseWriter,
+	r *http.Request,
+) error {
+	ctx := r.Context()
+	defer r.Body.Close()
+
+	var sig string
+	if !IsDev() {
+		if sig = r.Header.Get(HeaderKeySignature); sig == "" {
+			return publicerr.Error{
+				Message: fmt.Sprintf("missing %s header", HeaderKeySignature),
+				Status:  401,
+			}
+		}
+	}
+
+	max := h.HandlerOpts.MaxBodySize
+	if max == 0 {
+		max = DefaultMaxBodySize
+	}
+	reqByt, err := io.ReadAll(http.MaxBytesReader(w, r.Body, int64(max)))
+	if err != nil {
+		return publicerr.Error{
+			Message: "error reading request body",
+			Status:  500,
+		}
+	}
+
+	valid, skey, err := ValidateSignature(
+		ctx,
+		sig,
+		h.GetSigningKey(),
+		h.GetSigningKeyFallback(),
+		reqByt,
+	)
+	if err != nil {
+		return publicerr.Error{
+			Message: "error validating signature",
+			Status:  401,
+		}
+	}
+	if !valid {
+		return publicerr.Error{
+			Message: "invalid signature",
+			Status:  401,
+		}
+	}
+
+	var reqBody inBandSynchronizeRequest
+	err = json.Unmarshal(reqByt, &reqBody)
+	if err != nil {
+		return publicerr.Error{
+			Message: fmt.Errorf("malformed input: %w", err).Error(),
+			Status:  400,
+		}
+	}
+	err = reqBody.Validate()
+	if err != nil {
+		return publicerr.Error{
+			Message: fmt.Errorf("malformed input: %w", err).Error(),
+			Status:  400,
+		}
+	}
+
+	appURL, err := url.Parse(reqBody.URL)
+	if err != nil {
+		return publicerr.Error{
+			Message: fmt.Errorf("malformed input: %w", err).Error(),
+			Status:  400,
+		}
+	}
+	if h.URL != nil {
+		appURL = h.URL
+	}
+
+	fns, err := createFunctionConfigs(h.appName, h.funcs, *appURL)
+	if err != nil {
+		return fmt.Errorf("error creating function configs: %w", err)
+	}
+
+	var env *string
+	if h.GetEnv() != "" {
+		val := h.GetEnv()
+		env = &val
+	}
+
+	inspection, err := h.createSecureInspection()
+	if err != nil {
+		return fmt.Errorf("error creating inspection: %w", err)
+	}
+	inspectionMap, err := types.StructToMap(inspection)
+	if err != nil {
+		return fmt.Errorf("error converting inspection to map: %w", err)
+	}
+
+	respBody := inBandSynchronizeResponse{
+		AppID:       h.appName,
+		Env:         env,
+		Functions:   fns,
+		Inspection:  inspectionMap,
+		SDKAuthor:   SDKAuthor,
+		SDKLanguage: SDKLanguage,
+		SDKVersion:  SDKVersion,
+		URL:         appURL.String(),
+	}
+
+	respByt, err := json.Marshal(respBody)
+	if err != nil {
+		return fmt.Errorf("error marshalling response: %w", err)
+	}
+
+	resSig, err := Sign(ctx, time.Now(), []byte(skey), respByt)
+	if err != nil {
+		return fmt.Errorf("error signing response: %w", err)
+	}
+	w.Header().Add(HeaderKeySignature, resSig)
+	w.Header().Add(HeaderKeyContentType, "application/json")
+	w.Header().Add(HeaderKeySyncKind, SyncKindInBand)
+
+	err = json.NewEncoder(w).Encode(respBody)
+	if err != nil {
+		return fmt.Errorf("error writing response: %w", err)
+	}
+
+	return nil
+}
+
+func createFunctionConfigs(
+	appName string,
+	fns []ServableFunction,
+	appURL url.URL,
+) ([]sdk.SDKFunction, error) {
+	if appName == "" {
+		return nil, fmt.Errorf("missing app name")
+	}
+	if appURL == (url.URL{}) {
+		return nil, fmt.Errorf("missing URL")
+	}
+
+	fnConfigs := make([]sdk.SDKFunction, len(fns))
+	for i, fn := range fns {
 		c := fn.Config()
 
 		var retries *sdk.StepRetries
@@ -309,15 +457,14 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 		}
 
 		// Modify URL to contain fn ID, step params
-		url := h.url(r)
-		values := url.Query()
+		values := appURL.Query()
 		values.Set("fnId", fn.Slug())
 		values.Set("step", "step")
-		url.RawQuery = values.Encode()
+		appURL.RawQuery = values.Encode()
 
 		f := sdk.SDKFunction{
 			Name:        fn.Name(),
-			Slug:        h.appName + "-" + fn.Slug(),
+			Slug:        appName + "-" + fn.Slug(),
 			Idempotency: c.Idempotency,
 			Priority:    fn.Config().Priority,
 			Triggers:    inngest.MultipleTriggers{},
@@ -331,7 +478,7 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 					Name:    fn.Name(),
 					Retries: retries,
 					Runtime: map[string]any{
-						"url": url.String(),
+						"url": appURL.String(),
 					},
 				},
 			},
@@ -379,8 +526,50 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 			}
 		}
 
-		config.Functions = append(config.Functions, f)
+		fnConfigs[i] = f
 	}
+
+	return fnConfigs, nil
+}
+
+func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
+	h.l.Lock()
+	defer h.l.Unlock()
+
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	host := r.Host
+
+	// Get the sync ID from the URL and then remove it, since we don't want the
+	// sync ID to show in the function URLs (that would affect the checksum and
+	// is ugly in the UI)
+	qp := r.URL.Query()
+	syncID := qp.Get("deployId")
+	qp.Del("deployId")
+	r.URL.RawQuery = qp.Encode()
+
+	pathAndParams := r.URL.String()
+
+	config := sdk.RegisterRequest{
+		URL:        fmt.Sprintf("%s://%s%s", scheme, host, pathAndParams),
+		V:          "1",
+		DeployType: "ping",
+		SDK:        HeaderValueSDK,
+		AppName:    h.appName,
+		Headers: sdk.Headers{
+			Env:      h.GetEnv(),
+			Platform: platform(),
+		},
+		Capabilities: capabilities,
+	}
+
+	fns, err := createFunctionConfigs(h.appName, h.funcs, *h.url(r))
+	if err != nil {
+		return fmt.Errorf("error creating function configs: %w", err)
+	}
+	config.Functions = fns
 
 	registerURL := defaultRegisterURL
 	if IsDev() {
@@ -650,6 +839,45 @@ type secureIntrospection struct {
 	SigningKeyHash         *string          `json:"signing_key_hash"`
 }
 
+func (h *handler) createSecureInspection() (*secureIntrospection, error) {
+	mode := "cloud"
+	if IsDev() {
+		mode = "dev"
+	}
+
+	var signingKeyHash *string
+	if h.GetSigningKey() != "" {
+		key, err := hashedSigningKey([]byte(h.GetSigningKey()))
+		if err != nil {
+			return nil, fmt.Errorf("error hashing signing key: %w", err)
+		}
+		hash := string(key)
+		signingKeyHash = &hash
+	}
+
+	var signingKeyFallbackHash *string
+	if h.GetSigningKeyFallback() != "" {
+		key, err := hashedSigningKey([]byte(h.GetSigningKeyFallback()))
+		if err != nil {
+			return nil, fmt.Errorf("error hashing signing key fallback: %w", err)
+		}
+		hash := string(key)
+		signingKeyFallbackHash = &hash
+	}
+
+	return &secureIntrospection{
+		insecureIntrospection: insecureIntrospection{
+			FunctionCount: len(h.funcs),
+			HasEventKey:   os.Getenv("INNGEST_EVENT_KEY") != "",
+			HasSigningKey: h.GetSigningKey() != "",
+			Mode:          mode,
+		},
+		Capabilities:           capabilities,
+		SigningKeyFallbackHash: signingKeyFallbackHash,
+		SigningKeyHash:         signingKeyHash,
+	}, nil
+}
+
 func (h *handler) introspect(w http.ResponseWriter, r *http.Request) error {
 	defer r.Body.Close()
 
@@ -667,36 +895,9 @@ func (h *handler) introspect(w http.ResponseWriter, r *http.Request) error {
 		[]byte{},
 	)
 	if valid {
-		var signingKeyHash *string
-		if h.GetSigningKey() != "" {
-			key, err := hashedSigningKey([]byte(h.GetSigningKey()))
-			if err != nil {
-				return fmt.Errorf("error hashing signing key: %w", err)
-			}
-			hash := string(key)
-			signingKeyHash = &hash
-		}
-
-		var signingKeyFallbackHash *string
-		if h.GetSigningKeyFallback() != "" {
-			key, err := hashedSigningKey([]byte(h.GetSigningKeyFallback()))
-			if err != nil {
-				return fmt.Errorf("error hashing signing key fallback: %w", err)
-			}
-			hash := string(key)
-			signingKeyFallbackHash = &hash
-		}
-
-		introspection := secureIntrospection{
-			insecureIntrospection: insecureIntrospection{
-				FunctionCount: len(h.funcs),
-				HasEventKey:   os.Getenv("INNGEST_EVENT_KEY") != "",
-				HasSigningKey: h.GetSigningKey() != "",
-				Mode:          mode,
-			},
-			Capabilities:           capabilities,
-			SigningKeyFallbackHash: signingKeyFallbackHash,
-			SigningKeyHash:         signingKeyHash,
+		introspection, err := h.createSecureInspection()
+		if err != nil {
+			return err
 		}
 
 		w.Header().Set(HeaderKeyContentType, "application/json")

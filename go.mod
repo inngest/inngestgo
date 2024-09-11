@@ -7,7 +7,7 @@ toolchain go1.21.5
 require (
 	github.com/gosimple/slug v1.12.0
 	github.com/gowebpki/jcs v1.0.0
-	github.com/inngest/inngest v0.30.0-beta-2.0.20240905105759-4df2bfd0dd29
+	github.com/inngest/inngest v0.30.0-beta-2.0.20240912142400-4c207d8fb0ce
 	github.com/stretchr/testify v1.9.0
 	github.com/xhit/go-str2duration/v2 v2.1.0
 	golang.org/x/exp v0.0.0-20240416160154-fe59bbe5cc7f

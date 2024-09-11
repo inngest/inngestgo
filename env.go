@@ -3,6 +3,7 @@ package inngestgo
 import (
 	"net/url"
 	"os"
+	"strings"
 )
 
 const (
@@ -15,8 +16,8 @@ const (
 // To use the dev server, set INNGEST_DEV to any non-empty value OR the URL of the development
 // server, eg:
 //
-//     INNGEST_DEV=1
-//     INNGEST_DEV=http://192.168.1.254:8288
+//	INNGEST_DEV=1
+//	INNGEST_DEV=http://192.168.1.254:8288
 func IsDev() bool {
 	return os.Getenv("INNGEST_DEV") != ""
 }
@@ -31,4 +32,23 @@ func DevServerURL() string {
 		}
 	}
 	return devServerURL
+}
+
+func allowInBandSync() bool {
+	val := os.Getenv("INNGEST_ALLOW_IN_BAND_SYNC")
+	if val == "" {
+		// TODO: Default to true once in-band syncing is stable
+		return false
+	}
+
+	return isTruthy(val)
+}
+
+func isTruthy(val string) bool {
+	val = strings.ToLower(val)
+	if val == "false" || val == "0" || val == "" {
+		return false
+	}
+
+	return true
 }
