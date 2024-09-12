@@ -8,6 +8,8 @@ import (
 
 const (
 	devServerURL = "http://127.0.0.1:8288"
+
+	envKeyAllowInBandSync = "INNGEST_ALLOW_IN_BAND_SYNC"
 )
 
 // IsDev returns whether to use the dev server, by checking the presence of the INNGEST_DEV
@@ -35,7 +37,7 @@ func DevServerURL() string {
 }
 
 func allowInBandSync() bool {
-	val := os.Getenv("INNGEST_ALLOW_IN_BAND_SYNC")
+	val := os.Getenv(envKeyAllowInBandSync)
 	if val == "" {
 		// TODO: Default to true once in-band syncing is stable
 		return false

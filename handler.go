@@ -254,7 +254,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := h.register(w, r); err != nil {
 			h.Logger.Error("error registering functions", "error", err.Error())
 
-			w.WriteHeader(500)
+			status := http.StatusInternalServerError
+			if err, ok := err.(publicerr.Error); ok {
+				status = err.Status
+			}
+			w.WriteHeader(status)
+
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"message": err.Error(),
@@ -316,8 +321,8 @@ func (h *handler) inBandSync(
 	if !IsDev() {
 		if sig = r.Header.Get(HeaderKeySignature); sig == "" {
 			return publicerr.Error{
-				Message: fmt.Sprintf("missing %s header", HeaderKeySignature),
-				Status:  401,
+				Err:    fmt.Errorf("missing %s header", HeaderKeySignature),
+				Status: 401,
 			}
 		}
 	}
@@ -329,8 +334,8 @@ func (h *handler) inBandSync(
 	reqByt, err := io.ReadAll(http.MaxBytesReader(w, r.Body, int64(max)))
 	if err != nil {
 		return publicerr.Error{
-			Message: "error reading request body",
-			Status:  500,
+			Err:    fmt.Errorf("error reading request body"),
+			Status: 500,
 		}
 	}
 
@@ -343,14 +348,14 @@ func (h *handler) inBandSync(
 	)
 	if err != nil {
 		return publicerr.Error{
-			Message: "error validating signature",
-			Status:  401,
+			Err:    fmt.Errorf("error validating signature"),
+			Status: 401,
 		}
 	}
 	if !valid {
 		return publicerr.Error{
-			Message: "invalid signature",
-			Status:  401,
+			Err:    fmt.Errorf("invalid signature"),
+			Status: 401,
 		}
 	}
 
@@ -358,23 +363,23 @@ func (h *handler) inBandSync(
 	err = json.Unmarshal(reqByt, &reqBody)
 	if err != nil {
 		return publicerr.Error{
-			Message: fmt.Errorf("malformed input: %w", err).Error(),
-			Status:  400,
+			Err:    fmt.Errorf("malformed input: %w", err),
+			Status: 400,
 		}
 	}
 	err = reqBody.Validate()
 	if err != nil {
 		return publicerr.Error{
-			Message: fmt.Errorf("malformed input: %w", err).Error(),
-			Status:  400,
+			Err:    fmt.Errorf("malformed input: %w", err),
+			Status: 400,
 		}
 	}
 
 	appURL, err := url.Parse(reqBody.URL)
 	if err != nil {
 		return publicerr.Error{
-			Message: fmt.Errorf("malformed input: %w", err).Error(),
-			Status:  400,
+			Err:    fmt.Errorf("malformed input: %w", err),
+			Status: 400,
 		}
 	}
 	if h.URL != nil {
@@ -431,105 +436,6 @@ func (h *handler) inBandSync(
 	}
 
 	return nil
-}
-
-func createFunctionConfigs(
-	appName string,
-	fns []ServableFunction,
-	appURL url.URL,
-) ([]sdk.SDKFunction, error) {
-	if appName == "" {
-		return nil, fmt.Errorf("missing app name")
-	}
-	if appURL == (url.URL{}) {
-		return nil, fmt.Errorf("missing URL")
-	}
-
-	fnConfigs := make([]sdk.SDKFunction, len(fns))
-	for i, fn := range fns {
-		c := fn.Config()
-
-		var retries *sdk.StepRetries
-		if c.Retries != nil {
-			retries = &sdk.StepRetries{
-				Attempts: *c.Retries,
-			}
-		}
-
-		// Modify URL to contain fn ID, step params
-		values := appURL.Query()
-		values.Set("fnId", fn.Slug())
-		values.Set("step", "step")
-		appURL.RawQuery = values.Encode()
-
-		f := sdk.SDKFunction{
-			Name:        fn.Name(),
-			Slug:        appName + "-" + fn.Slug(),
-			Idempotency: c.Idempotency,
-			Priority:    fn.Config().Priority,
-			Triggers:    inngest.MultipleTriggers{},
-			RateLimit:   fn.Config().GetRateLimit(),
-			Cancel:      fn.Config().Cancel,
-			Timeouts:    (*inngest.Timeouts)(fn.Config().Timeouts),
-			Throttle:    (*inngest.Throttle)(fn.Config().Throttle),
-			Steps: map[string]sdk.SDKStep{
-				"step": {
-					ID:      "step",
-					Name:    fn.Name(),
-					Retries: retries,
-					Runtime: map[string]any{
-						"url": appURL.String(),
-					},
-				},
-			},
-		}
-
-		if c.Debounce != nil {
-			f.Debounce = &inngest.Debounce{
-				Key:    &c.Debounce.Key,
-				Period: c.Debounce.Period.String(),
-			}
-			if c.Debounce.Timeout != nil {
-				str := c.Debounce.Timeout.String()
-				f.Debounce.Timeout = &str
-			}
-		}
-
-		if c.BatchEvents != nil {
-			f.EventBatch = map[string]any{
-				"maxSize": c.BatchEvents.MaxSize,
-				"timeout": c.BatchEvents.Timeout,
-				"key":     c.BatchEvents.Key,
-			}
-		}
-
-		if len(c.Concurrency) > 0 {
-			// Marshal as an array, as the sdk/handler unmarshals correctly.
-			f.Concurrency = &inngest.ConcurrencyLimits{Limits: c.Concurrency}
-		}
-
-		triggers := fn.Trigger().Triggers()
-		for _, trigger := range triggers {
-			if trigger.EventTrigger != nil {
-				f.Triggers = append(f.Triggers, inngest.Trigger{
-					EventTrigger: &inngest.EventTrigger{
-						Event:      trigger.Event,
-						Expression: trigger.Expression,
-					},
-				})
-			} else {
-				f.Triggers = append(f.Triggers, inngest.Trigger{
-					CronTrigger: &inngest.CronTrigger{
-						Cron: trigger.Cron,
-					},
-				})
-			}
-		}
-
-		fnConfigs[i] = f
-	}
-
-	return fnConfigs, nil
 }
 
 func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
@@ -630,6 +536,9 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 		}
 		return fmt.Errorf("Error registering functions: %s", body["error"])
 	}
+
+	w.Header().Add(HeaderKeySyncKind, SyncKindOutOfBand)
+
 	return nil
 }
 
@@ -645,6 +554,105 @@ func (h *handler) url(r *http.Request) *url.URL {
 	}
 	u, _ := url.Parse(fmt.Sprintf("%s://%s%s", scheme, r.Host, r.RequestURI))
 	return u
+}
+
+func createFunctionConfigs(
+	appName string,
+	fns []ServableFunction,
+	appURL url.URL,
+) ([]sdk.SDKFunction, error) {
+	if appName == "" {
+		return nil, fmt.Errorf("missing app name")
+	}
+	if appURL == (url.URL{}) {
+		return nil, fmt.Errorf("missing URL")
+	}
+
+	fnConfigs := make([]sdk.SDKFunction, len(fns))
+	for i, fn := range fns {
+		c := fn.Config()
+
+		var retries *sdk.StepRetries
+		if c.Retries != nil {
+			retries = &sdk.StepRetries{
+				Attempts: *c.Retries,
+			}
+		}
+
+		// Modify URL to contain fn ID, step params
+		values := appURL.Query()
+		values.Set("fnId", fn.Slug())
+		values.Set("step", "step")
+		appURL.RawQuery = values.Encode()
+
+		f := sdk.SDKFunction{
+			Name:        fn.Name(),
+			Slug:        appName + "-" + fn.Slug(),
+			Idempotency: c.Idempotency,
+			Priority:    fn.Config().Priority,
+			Triggers:    inngest.MultipleTriggers{},
+			RateLimit:   fn.Config().GetRateLimit(),
+			Cancel:      fn.Config().Cancel,
+			Timeouts:    (*inngest.Timeouts)(fn.Config().Timeouts),
+			Throttle:    (*inngest.Throttle)(fn.Config().Throttle),
+			Steps: map[string]sdk.SDKStep{
+				"step": {
+					ID:      "step",
+					Name:    fn.Name(),
+					Retries: retries,
+					Runtime: map[string]any{
+						"url": appURL.String(),
+					},
+				},
+			},
+		}
+
+		if c.Debounce != nil {
+			f.Debounce = &inngest.Debounce{
+				Key:    &c.Debounce.Key,
+				Period: c.Debounce.Period.String(),
+			}
+			if c.Debounce.Timeout != nil {
+				str := c.Debounce.Timeout.String()
+				f.Debounce.Timeout = &str
+			}
+		}
+
+		if c.BatchEvents != nil {
+			f.EventBatch = map[string]any{
+				"maxSize": c.BatchEvents.MaxSize,
+				"timeout": c.BatchEvents.Timeout,
+				"key":     c.BatchEvents.Key,
+			}
+		}
+
+		if len(c.Concurrency) > 0 {
+			// Marshal as an array, as the sdk/handler unmarshals correctly.
+			f.Concurrency = &inngest.ConcurrencyLimits{Limits: c.Concurrency}
+		}
+
+		triggers := fn.Trigger().Triggers()
+		for _, trigger := range triggers {
+			if trigger.EventTrigger != nil {
+				f.Triggers = append(f.Triggers, inngest.Trigger{
+					EventTrigger: &inngest.EventTrigger{
+						Event:      trigger.Event,
+						Expression: trigger.Expression,
+					},
+				})
+			} else {
+				f.Triggers = append(f.Triggers, inngest.Trigger{
+					CronTrigger: &inngest.CronTrigger{
+						Cron: trigger.Cron,
+					},
+				})
+			}
+		}
+
+		fnConfigs[i] = f
+	}
+
+	return fnConfigs, nil
 }
 
 // invoke handles incoming POST calls to invoke a function, delegating to invoke() after validating
