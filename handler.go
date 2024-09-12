@@ -20,6 +20,7 @@ import (
 	"github.com/inngest/inngest/pkg/sdk"
 	"github.com/inngest/inngestgo/errors"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
+	"github.com/inngest/inngestgo/internal/types"
 	"github.com/inngest/inngestgo/step"
 	"golang.org/x/exp/slog"
 )
@@ -40,6 +41,7 @@ var (
 	DefaultMaxBodySize = 1024 * 1024 * 100
 
 	capabilities = sdk.Capabilities{
+		InBandSync: sdk.InBandSyncV1,
 		TrustProbe: sdk.TrustProbeV1,
 	}
 )
@@ -252,7 +254,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := h.register(w, r); err != nil {
 			h.Logger.Error("error registering functions", "error", err.Error())
 
-			w.WriteHeader(500)
+			status := http.StatusInternalServerError
+			if err, ok := err.(publicerr.Error); ok {
+				status = err.Status
+			}
+			w.WriteHeader(status)
+
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"message": err.Error(),
@@ -266,6 +273,172 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // all functions and automatically allows all functions to immediately be triggered
 // by incoming events or schedules.
 func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
+	var err error
+	if r.Header.Get(HeaderKeySyncKind) == SyncKindInBand && allowInBandSync() {
+		err = h.inBandSync(w, r)
+	} else {
+		err = h.outOfBandSync(w, r)
+	}
+
+	if err != nil {
+		h.Logger.Error("out-of-band sync error", "error", err)
+	}
+	return err
+}
+
+type inBandSynchronizeRequest struct {
+	URL string `json:"url"`
+}
+
+func (i inBandSynchronizeRequest) Validate() error {
+	if i.URL == "" {
+		return fmt.Errorf("missing URL")
+	}
+	return nil
+}
+
+type inBandSynchronizeResponse struct {
+	AppID       string            `json:"app_id"`
+	Env         *string           `json:"env"`
+	Framework   *string           `json:"framework"`
+	Functions   []sdk.SDKFunction `json:"functions"`
+	Inspection  map[string]any    `json:"inspection"`
+	Platform    *string           `json:"platform"`
+	SDKAuthor   string            `json:"sdk_author"`
+	SDKLanguage string            `json:"sdk_language"`
+	SDKVersion  string            `json:"sdk_version"`
+	URL         string            `json:"url"`
+}
+
+func (h *handler) inBandSync(
+	w http.ResponseWriter,
+	r *http.Request,
+) error {
+	ctx := r.Context()
+	defer r.Body.Close()
+
+	var sig string
+	if !IsDev() {
+		if sig = r.Header.Get(HeaderKeySignature); sig == "" {
+			return publicerr.Error{
+				Err:    fmt.Errorf("missing %s header", HeaderKeySignature),
+				Status: 401,
+			}
+		}
+	}
+
+	max := h.HandlerOpts.MaxBodySize
+	if max == 0 {
+		max = DefaultMaxBodySize
+	}
+	reqByt, err := io.ReadAll(http.MaxBytesReader(w, r.Body, int64(max)))
+	if err != nil {
+		return publicerr.Error{
+			Err:    fmt.Errorf("error reading request body"),
+			Status: 500,
+		}
+	}
+
+	valid, skey, err := ValidateSignature(
+		ctx,
+		sig,
+		h.GetSigningKey(),
+		h.GetSigningKeyFallback(),
+		reqByt,
+	)
+	if err != nil {
+		return publicerr.Error{
+			Err:    fmt.Errorf("error validating signature"),
+			Status: 401,
+		}
+	}
+	if !valid {
+		return publicerr.Error{
+			Err:    fmt.Errorf("invalid signature"),
+			Status: 401,
+		}
+	}
+
+	var reqBody inBandSynchronizeRequest
+	err = json.Unmarshal(reqByt, &reqBody)
+	if err != nil {
+		return publicerr.Error{
+			Err:    fmt.Errorf("malformed input: %w", err),
+			Status: 400,
+		}
+	}
+	err = reqBody.Validate()
+	if err != nil {
+		return publicerr.Error{
+			Err:    fmt.Errorf("malformed input: %w", err),
+			Status: 400,
+		}
+	}
+
+	appURL, err := url.Parse(reqBody.URL)
+	if err != nil {
+		return publicerr.Error{
+			Err:    fmt.Errorf("malformed input: %w", err),
+			Status: 400,
+		}
+	}
+	if h.URL != nil {
+		appURL = h.URL
+	}
+
+	fns, err := createFunctionConfigs(h.appName, h.funcs, *appURL)
+	if err != nil {
+		return fmt.Errorf("error creating function configs: %w", err)
+	}
+
+	var env *string
+	if h.GetEnv() != "" {
+		val := h.GetEnv()
+		env = &val
+	}
+
+	inspection, err := h.createSecureInspection()
+	if err != nil {
+		return fmt.Errorf("error creating inspection: %w", err)
+	}
+	inspectionMap, err := types.StructToMap(inspection)
+	if err != nil {
+		return fmt.Errorf("error converting inspection to map: %w", err)
+	}
+
+	respBody := inBandSynchronizeResponse{
+		AppID:       h.appName,
+		Env:         env,
+		Functions:   fns,
+		Inspection:  inspectionMap,
+		SDKAuthor:   SDKAuthor,
+		SDKLanguage: SDKLanguage,
+		SDKVersion:  SDKVersion,
+		URL:         appURL.String(),
+	}
+
+	respByt, err := json.Marshal(respBody)
+	if err != nil {
+		return fmt.Errorf("error marshalling response: %w", err)
+	}
+
+	resSig, err := Sign(ctx, time.Now(), []byte(skey), respByt)
+	if err != nil {
+		return fmt.Errorf("error signing response: %w", err)
+	}
+	w.Header().Add(HeaderKeySignature, resSig)
+	w.Header().Add(HeaderKeyContentType, "application/json")
+	w.Header().Add(HeaderKeySyncKind, SyncKindInBand)
+
+	err = json.NewEncoder(w).Encode(respBody)
+	if err != nil {
+		return fmt.Errorf("error writing response: %w", err)
+	}
+
+	return nil
+}
+
+func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 	h.l.Lock()
 	defer h.l.Unlock()
 
@@ -298,89 +471,11 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 		Capabilities: capabilities,
 	}
 
-	for _, fn := range h.funcs {
-		c := fn.Config()
-
-		var retries *sdk.StepRetries
-		if c.Retries != nil {
-			retries = &sdk.StepRetries{
-				Attempts: *c.Retries,
-			}
-		}
-
-		// Modify URL to contain fn ID, step params
-		url := h.url(r)
-		values := url.Query()
-		values.Set("fnId", fn.Slug())
-		values.Set("step", "step")
-		url.RawQuery = values.Encode()
-
-		f := sdk.SDKFunction{
-			Name:        fn.Name(),
-			Slug:        h.appName + "-" + fn.Slug(),
-			Idempotency: c.Idempotency,
-			Priority:    fn.Config().Priority,
-			Triggers:    inngest.MultipleTriggers{},
-			RateLimit:   fn.Config().GetRateLimit(),
-			Cancel:      fn.Config().Cancel,
-			Timeouts:    (*inngest.Timeouts)(fn.Config().Timeouts),
-			Throttle:    (*inngest.Throttle)(fn.Config().Throttle),
-			Steps: map[string]sdk.SDKStep{
-				"step": {
-					ID:      "step",
-					Name:    fn.Name(),
-					Retries: retries,
-					Runtime: map[string]any{
-						"url": url.String(),
-					},
-				},
-			},
-		}
-
-		if c.Debounce != nil {
-			f.Debounce = &inngest.Debounce{
-				Key:    &c.Debounce.Key,
-				Period: c.Debounce.Period.String(),
-			}
-			if c.Debounce.Timeout != nil {
-				str := c.Debounce.Timeout.String()
-				f.Debounce.Timeout = &str
-			}
-		}
-
-		if c.BatchEvents != nil {
-			f.EventBatch = map[string]any{
-				"maxSize": c.BatchEvents.MaxSize,
-				"timeout": c.BatchEvents.Timeout,
-				"key":     c.BatchEvents.Key,
-			}
-		}
-
-		if len(c.Concurrency) > 0 {
-			// Marshal as an array, as the sdk/handler unmarshals correctly.
-			f.Concurrency = &inngest.ConcurrencyLimits{Limits: c.Concurrency}
-		}
-
-		triggers := fn.Trigger().Triggers()
-		for _, trigger := range triggers {
-			if trigger.EventTrigger != nil {
-				f.Triggers = append(f.Triggers, inngest.Trigger{
-					EventTrigger: &inngest.EventTrigger{
-						Event:      trigger.Event,
-						Expression: trigger.Expression,
-					},
-				})
-			} else {
-				f.Triggers = append(f.Triggers, inngest.Trigger{
-					CronTrigger: &inngest.CronTrigger{
-						Cron: trigger.Cron,
-					},
-				})
-			}
-		}
-
-		config.Functions = append(config.Functions, f)
+	fns, err := createFunctionConfigs(h.appName, h.funcs, *h.url(r))
+	if err != nil {
+		return fmt.Errorf("error creating function configs: %w", err)
 	}
+	config.Functions = fns
 
 	registerURL := defaultRegisterURL
 	if IsDev() {
@@ -441,6 +536,9 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 		}
 		return fmt.Errorf("Error registering functions: %s", body["error"])
 	}
+
+	w.Header().Add(HeaderKeySyncKind, SyncKindOutOfBand)
+
 	return nil
 }
 
@@ -456,6 +554,105 @@ func (h *handler) url(r *http.Request) *url.URL {
 	}
 	u, _ := url.Parse(fmt.Sprintf("%s://%s%s", scheme, r.Host, r.RequestURI))
 	return u
+}
+
+func createFunctionConfigs(
+	appName string,
+	fns []ServableFunction,
+	appURL url.URL,
+) ([]sdk.SDKFunction, error) {
+	if appName == "" {
+		return nil, fmt.Errorf("missing app name")
+	}
+	if appURL == (url.URL{}) {
+		return nil, fmt.Errorf("missing URL")
+	}
+
+	fnConfigs := make([]sdk.SDKFunction, len(fns))
+	for i, fn := range fns {
+		c := fn.Config()
+
+		var retries *sdk.StepRetries
+		if c.Retries != nil {
+			retries = &sdk.StepRetries{
+				Attempts: *c.Retries,
+			}
+		}
+
+		// Modify URL to contain fn ID, step params
+		values := appURL.Query()
+		values.Set("fnId", fn.Slug())
+		values.Set("step", "step")
+		appURL.RawQuery = values.Encode()
+
+		f := sdk.SDKFunction{
+			Name:        fn.Name(),
+			Slug:        appName + "-" + fn.Slug(),
+			Idempotency: c.Idempotency,
+			Priority:    fn.Config().Priority,
+			Triggers:    inngest.MultipleTriggers{},
+			RateLimit:   fn.Config().GetRateLimit(),
+			Cancel:      fn.Config().Cancel,
+			Timeouts:    (*inngest.Timeouts)(fn.Config().Timeouts),
+			Throttle:    (*inngest.Throttle)(fn.Config().Throttle),
+			Steps: map[string]sdk.SDKStep{
+				"step": {
+					ID:      "step",
+					Name:    fn.Name(),
+					Retries: retries,
+					Runtime: map[string]any{
+						"url": appURL.String(),
+					},
+				},
+			},
+		}
+
+		if c.Debounce != nil {
+			f.Debounce = &inngest.Debounce{
+				Key:    &c.Debounce.Key,
+				Period: c.Debounce.Period.String(),
+			}
+			if c.Debounce.Timeout != nil {
+				str := c.Debounce.Timeout.String()
+				f.Debounce.Timeout = &str
+			}
+		}
+
+		if c.BatchEvents != nil {
+			f.EventBatch = map[string]any{
+				"maxSize": c.BatchEvents.MaxSize,
+				"timeout": c.BatchEvents.Timeout,
+				"key":     c.BatchEvents.Key,
+			}
+		}
+
+		if len(c.Concurrency) > 0 {
+			// Marshal as an array, as the sdk/handler unmarshals correctly.
+			f.Concurrency = &inngest.ConcurrencyLimits{Limits: c.Concurrency}
+		}
+
+		triggers := fn.Trigger().Triggers()
+		for _, trigger := range triggers {
+			if trigger.EventTrigger != nil {
+				f.Triggers = append(f.Triggers, inngest.Trigger{
+					EventTrigger: &inngest.EventTrigger{
+						Event:      trigger.Event,
+						Expression: trigger.Expression,
+					},
+				})
+			} else {
+				f.Triggers = append(f.Triggers, inngest.Trigger{
+					CronTrigger: &inngest.CronTrigger{
+						Cron: trigger.Cron,
+					},
+				})
+			}
+		}
+
+		fnConfigs[i] = f
+	}
+
+	return fnConfigs, nil
 }
 
 // invoke handles incoming POST calls to invoke a function, delegating to invoke() after validating
@@ -650,6 +847,45 @@ type secureIntrospection struct {
 	SigningKeyHash         *string          `json:"signing_key_hash"`
 }
 
+func (h *handler) createSecureInspection() (*secureIntrospection, error) {
+	mode := "cloud"
+	if IsDev() {
+		mode = "dev"
+	}
+
+	var signingKeyHash *string
+	if h.GetSigningKey() != "" {
+		key, err := hashedSigningKey([]byte(h.GetSigningKey()))
+		if err != nil {
+			return nil, fmt.Errorf("error hashing signing key: %w", err)
+		}
+		hash := string(key)
+		signingKeyHash = &hash
+	}
+
+	var signingKeyFallbackHash *string
+	if h.GetSigningKeyFallback() != "" {
+		key, err := hashedSigningKey([]byte(h.GetSigningKeyFallback()))
+		if err != nil {
+			return nil, fmt.Errorf("error hashing signing key fallback: %w", err)
+		}
+		hash := string(key)
+		signingKeyFallbackHash = &hash
+	}
+
+	return &secureIntrospection{
+		insecureIntrospection: insecureIntrospection{
+			FunctionCount: len(h.funcs),
+			HasEventKey:   os.Getenv("INNGEST_EVENT_KEY") != "",
+			HasSigningKey: h.GetSigningKey() != "",
+			Mode:          mode,
+		},
+		Capabilities:           capabilities,
+		SigningKeyFallbackHash: signingKeyFallbackHash,
+		SigningKeyHash:         signingKeyHash,
+	}, nil
+}
+
 func (h *handler) introspect(w http.ResponseWriter, r *http.Request) error {
 	defer r.Body.Close()
 
@@ -667,36 +903,9 @@ func (h *handler) introspect(w http.ResponseWriter, r *http.Request) error {
 		[]byte{},
 	)
 	if valid {
-		var signingKeyHash *string
-		if h.GetSigningKey() != "" {
-			key, err := hashedSigningKey([]byte(h.GetSigningKey()))
-			if err != nil {
-				return fmt.Errorf("error hashing signing key: %w", err)
-			}
-			hash := string(key)
-			signingKeyHash = &hash
-		}
-
-		var signingKeyFallbackHash *string
-		if h.GetSigningKeyFallback() != "" {
-			key, err := hashedSigningKey([]byte(h.GetSigningKeyFallback()))
-			if err != nil {
-				return fmt.Errorf("error hashing signing key fallback: %w", err)
-			}
-			hash := string(key)
-			signingKeyFallbackHash = &hash
-		}
-
-		introspection := secureIntrospection{
-			insecureIntrospection: insecureIntrospection{
-				FunctionCount: len(h.funcs),
-				HasEventKey:   os.Getenv("INNGEST_EVENT_KEY") != "",
-				HasSigningKey: h.GetSigningKey() != "",
-				Mode:          mode,
-			},
-			Capabilities:           capabilities,
-			SigningKeyFallbackHash: signingKeyFallbackHash,
-			SigningKeyHash:         signingKeyHash,
+		introspection, err := h.createSecureInspection()
+		if err != nil {
+			return err
 		}
 
 		w.Header().Set(HeaderKeyContentType, "application/json")
