@@ -513,7 +513,8 @@ func TestIntrospection(t *testing.T) {
 		r.NoError(err)
 		r.Equal(map[string]any{
 			"capabilities": map[string]any{
-				"trust_probe": "v1",
+				"in_band_sync": "v1",
+				"trust_probe":  "v1",
 			},
 			"function_count":            float64(1),
 			"has_event_key":             false,
