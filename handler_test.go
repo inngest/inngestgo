@@ -265,6 +265,34 @@ func TestInvoke(t *testing.T) {
 			)
 		})
 	})
+
+	t.Run("captures panic stack", func(t *testing.T) {
+		ctx := context.Background()
+		r := require.New(t)
+
+		a := CreateFunction(
+			FunctionOpts{Name: "my-fn"},
+			EventTrigger("my-event", nil),
+			func(ctx context.Context, event Input[any]) (any, error) {
+				panic("oh no!")
+			},
+		)
+		Register(a)
+
+		actual, op, err := invoke(
+			ctx, a,
+			createRequest(t, EventA{Name: "my-event"}),
+		)
+		r.Nil(actual)
+		r.Nil(op)
+
+		// Contains the panic message
+		r.Contains(err.Error(), "oh no!")
+
+		// Hacky checks to ensure the stack trace is present
+		r.Contains(err.Error(), "inngestgo/handler.go")
+		r.Contains(err.Error(), "inngestgo/handler_test.go")
+	})
 }
 
 func TestServe(t *testing.T) {
