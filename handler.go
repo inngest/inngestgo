@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -1117,7 +1118,8 @@ func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request)
 				if _, ok := r.(step.ControlHijack); ok {
 					return
 				}
-				panickErr = fmt.Errorf("function panicked: %v", r)
+				stack := string(debug.Stack())
+				panickErr = fmt.Errorf("function panicked: %v.  stack:\n%s", r, stack)
 			}
 		}()
 
