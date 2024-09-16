@@ -36,21 +36,11 @@ func DevServerURL() string {
 	return devServerURL
 }
 
-func allowInBandSync() bool {
-	val := os.Getenv(envKeyAllowInBandSync)
-	if val == "" {
-		// TODO: Default to true once in-band syncing is stable
-		return false
-	}
-
-	return isTruthy(val)
-}
-
-func isTruthy(val string) bool {
+func isTrue(val string) bool {
 	val = strings.ToLower(val)
-	if val == "false" || val == "0" || val == "" {
-		return false
+	if val == "true" || val == "1" {
+		return true
 	}
 
-	return true
+	return false
 }
