@@ -95,6 +95,10 @@ type HandlerOpts struct {
 	// UseStreaming enables streaming - continued writes to the HTTP writer.  This
 	// differs from true streaming in that we don't support server-sent events.
 	UseStreaming bool
+
+	// AllowInBandSync allows in-band syncs to occur. If nil, in-band syncs are
+	// disallowed.
+	AllowInBandSync *bool
 }
 
 // GetSigningKey returns the signing key defined within HandlerOpts, or the default
@@ -140,6 +144,19 @@ func (h HandlerOpts) GetRegisterURL() string {
 		return "https://www.inngest.com/fn/register"
 	}
 	return *h.RegisterURL
+}
+
+func (h HandlerOpts) IsInBandSyncAllowed() bool {
+	if h.AllowInBandSync != nil {
+		return *h.AllowInBandSync
+	}
+
+	// TODO: Default to true once in-band syncing is stable
+	if isTrue(os.Getenv(envKeyAllowInBandSync)) {
+		return true
+	}
+
+	return false
 }
 
 // Handler represents a handler which serves the Inngest API via HTTP.  This provides
@@ -274,7 +291,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // by incoming events or schedules.
 func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 	var err error
-	if r.Header.Get(HeaderKeySyncKind) == SyncKindInBand && allowInBandSync() {
+	if r.Header.Get(HeaderKeySyncKind) == SyncKindInBand && h.IsInBandSyncAllowed() {
 		err = h.inBandSync(w, r)
 	} else {
 		err = h.outOfBandSync(w, r)

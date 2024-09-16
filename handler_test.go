@@ -555,9 +555,6 @@ func TestIntrospection(t *testing.T) {
 }
 
 func TestInBandSync(t *testing.T) {
-	os.Setenv(envKeyAllowInBandSync, "1")
-	defer os.Unsetenv(envKeyAllowInBandSync)
-
 	appID := "test-in-band-sync"
 
 	fn := CreateFunction(
@@ -568,7 +565,8 @@ func TestInBandSync(t *testing.T) {
 		},
 	)
 	h := NewHandler(appID, HandlerOpts{
-		Env: toPtr("my-env"),
+		AllowInBandSync: toPtr(true),
+		Env:             toPtr("my-env"),
 	})
 	h.Register(fn)
 	server := httptest.NewServer(h)
