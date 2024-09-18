@@ -771,8 +771,13 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 		}()
 	}
 
+	var stepID *string
+	if rawStepID := r.URL.Query().Get("stepId"); rawStepID != "" && rawStepID != "step" {
+		stepID = &rawStepID
+	}
+
 	// Invoke the function, then immediately stop the streaming buffer.
-	resp, ops, err := invoke(r.Context(), fn, request)
+	resp, ops, err := invoke(r.Context(), fn, request, stepID)
 	streamCancel()
 
 	// NOTE: When triggering step errors, we should have an OpcodeStepError
@@ -1025,7 +1030,12 @@ type StreamResponse struct {
 
 // invoke calls a given servable function with the specified input event.  The input event must
 // be fully typed.
-func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request) (any, []state.GeneratorOpcode, error) {
+func invoke(
+	ctx context.Context,
+	sf ServableFunction,
+	input *sdkrequest.Request,
+	stepID *string,
+) (any, []state.GeneratorOpcode, error) {
 	if sf.Func() == nil {
 		// This should never happen, but as sf.Func returns a nillable type we
 		// must check that the function exists.
@@ -1036,6 +1046,10 @@ func invoke(ctx context.Context, sf ServableFunction, input *sdkrequest.Request)
 	// within a step.  This allows us to prevent any execution of future tools after a
 	// tool has run.
 	fCtx, cancel := context.WithCancel(context.Background())
+	if stepID != nil {
+		fCtx = step.SetTargetStepID(fCtx, *stepID)
+	}
+
 	// This must be a pointer so that it can be mutated from within function tools.
 	mgr := sdkrequest.NewManager(cancel, input)
 	fCtx = sdkrequest.SetManager(fCtx, mgr)
