@@ -18,6 +18,7 @@ import (
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/execution/state"
 	"github.com/inngest/inngest/pkg/inngest"
+	"github.com/inngest/inngest/pkg/sdk"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/step"
 	"github.com/stretchr/testify/require"
@@ -264,6 +265,34 @@ func TestInvoke(t *testing.T) {
 			)
 		})
 	})
+
+	t.Run("captures panic stack", func(t *testing.T) {
+		ctx := context.Background()
+		r := require.New(t)
+
+		a := CreateFunction(
+			FunctionOpts{Name: "my-fn"},
+			EventTrigger("my-event", nil),
+			func(ctx context.Context, event Input[any]) (any, error) {
+				panic("oh no!")
+			},
+		)
+		Register(a)
+
+		actual, op, err := invoke(
+			ctx, a,
+			createRequest(t, EventA{Name: "my-event"}),
+		)
+		r.Nil(actual)
+		r.Nil(op)
+
+		// Contains the panic message
+		r.Contains(err.Error(), "oh no!")
+
+		// Hacky checks to ensure the stack trace is present
+		r.Contains(err.Error(), "inngestgo/handler.go")
+		r.Contains(err.Error(), "inngestgo/handler_test.go")
+	})
 }
 
 func TestServe(t *testing.T) {
@@ -494,7 +523,7 @@ func TestIntrospection(t *testing.T) {
 		r := require.New(t)
 
 		reqBody := []byte("")
-		sig := Sign(context.Background(), time.Now(), []byte(testKey), reqBody)
+		sig, _ := Sign(context.Background(), time.Now(), []byte(testKey), reqBody)
 		req, err := http.NewRequest(http.MethodGet, server.URL, bytes.NewReader(reqBody))
 		r.NoError(err)
 		req.Header.Set("X-Inngest-Signature", sig)
@@ -512,7 +541,8 @@ func TestIntrospection(t *testing.T) {
 		r.NoError(err)
 		r.Equal(map[string]any{
 			"capabilities": map[string]any{
-				"trust_probe": "v1",
+				"in_band_sync": "v1",
+				"trust_probe":  "v1",
 			},
 			"function_count":            float64(1),
 			"has_event_key":             false,
@@ -531,7 +561,7 @@ func TestIntrospection(t *testing.T) {
 
 		reqBody := []byte("")
 		invalidKey := "deadbeef"
-		sig := Sign(context.Background(), time.Now(), []byte(invalidKey), reqBody)
+		sig, _ := Sign(context.Background(), time.Now(), []byte(invalidKey), reqBody)
 		req, err := http.NewRequest(http.MethodGet, server.URL, bytes.NewReader(reqBody))
 		r.NoError(err)
 		req.Header.Set("X-Inngest-Signature", sig)
@@ -549,6 +579,198 @@ func TestIntrospection(t *testing.T) {
 			"has_signing_key": true,
 			"mode":            "cloud",
 		}, respBody)
+	})
+}
+
+func TestInBandSync(t *testing.T) {
+	appID := "test-in-band-sync"
+
+	fn := CreateFunction(
+		FunctionOpts{Name: "my-fn"},
+		EventTrigger("my-event", nil),
+		func(ctx context.Context, input Input[any]) (any, error) {
+			return nil, nil
+		},
+	)
+	h := NewHandler(appID, HandlerOpts{
+		AllowInBandSync: toPtr(true),
+		Env:             toPtr("my-env"),
+	})
+	h.Register(fn)
+	server := httptest.NewServer(h)
+	defer server.Close()
+
+	reqBodyByt, _ := json.Marshal(inBandSynchronizeRequest{
+		URL: "http://test.local",
+	})
+
+	t.Run("success", func(t *testing.T) {
+		// SDK responds with sync data when receiving a valid in-band sync
+		// request
+
+		r := require.New(t)
+		ctx := context.Background()
+
+		sig, _ := Sign(ctx, time.Now(), []byte(testKey), reqBodyByt)
+		req, err := http.NewRequest(
+			http.MethodPut,
+			server.URL,
+			bytes.NewReader(reqBodyByt),
+		)
+		r.NoError(err)
+		req.Header.Set("x-inngest-signature", sig)
+		req.Header.Set("x-inngest-sync-kind", "in_band")
+		resp, err := http.DefaultClient.Do(req)
+		r.NoError(err)
+		r.Equal(http.StatusOK, resp.StatusCode)
+		r.Equal(resp.Header.Get("x-inngest-sync-kind"), "in_band")
+
+		var respBody inBandSynchronizeResponse
+		err = json.NewDecoder(resp.Body).Decode(&respBody)
+		r.NoError(err)
+
+		r.Equal(
+			inBandSynchronizeResponse{
+				AppID: appID,
+				Env:   toPtr("my-env"),
+				Functions: []sdk.SDKFunction{{
+					Name: "my-fn",
+					Slug: fmt.Sprintf("%s-my-fn", appID),
+					Steps: map[string]sdk.SDKStep{
+						"step": {
+							ID:   "step",
+							Name: "my-fn",
+							Runtime: map[string]any{
+								"url": "http://test.local?fnId=my-fn&step=step",
+							},
+						},
+					},
+					Triggers: []inngest.Trigger{EventTrigger("my-event", nil)},
+				}},
+				Inspection: map[string]any{
+					"capabilities": map[string]any{
+						"in_band_sync": "v1",
+						"trust_probe":  "v1",
+					},
+					"function_count":            float64(1),
+					"has_event_key":             false,
+					"has_signing_key":           true,
+					"mode":                      "cloud",
+					"signing_key_fallback_hash": "signkey-test-df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+					"signing_key_hash":          "signkey-test-b2ed992186a5cb19f6668aade821f502c1d00970dfd0e35128d51bac4649916c",
+				},
+				SDKAuthor:   "inngest",
+				SDKLanguage: "go",
+				SDKVersion:  SDKVersion,
+				URL:         "http://test.local",
+			},
+			respBody,
+		)
+	})
+
+	t.Run("invalid signature", func(t *testing.T) {
+		// SDK responds with an error when receiving an in-band sync request
+		// with an invalid signature
+
+		r := require.New(t)
+		ctx := context.Background()
+
+		invalidKey := "deadbeef"
+		sig, _ := Sign(ctx, time.Now(), []byte(invalidKey), reqBodyByt)
+		req, err := http.NewRequest(
+			http.MethodPut,
+			server.URL,
+			bytes.NewReader(reqBodyByt),
+		)
+		r.NoError(err)
+		req.Header.Set("x-inngest-signature", sig)
+		req.Header.Set("x-inngest-sync-kind", "in_band")
+		resp, err := http.DefaultClient.Do(req)
+		r.NoError(err)
+		r.Equal(http.StatusUnauthorized, resp.StatusCode)
+		r.Equal(resp.Header.Get("x-inngest-sync-kind"), "")
+
+		var respBody map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&respBody)
+		r.NoError(err)
+
+		r.Equal(map[string]any{
+			"message": "error validating signature",
+		}, respBody)
+	})
+
+	t.Run("missing signature", func(t *testing.T) {
+		// SDK responds with an error when receiving an in-band sync request
+		// with a missing signature
+
+		r := require.New(t)
+
+		req, err := http.NewRequest(
+			http.MethodPut,
+			server.URL,
+			bytes.NewReader(reqBodyByt),
+		)
+		r.NoError(err)
+		req.Header.Set("x-inngest-sync-kind", "in_band")
+		resp, err := http.DefaultClient.Do(req)
+		r.NoError(err)
+		r.Equal(http.StatusUnauthorized, resp.StatusCode)
+		r.Equal(resp.Header.Get("x-inngest-sync-kind"), "")
+
+		var respBody map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&respBody)
+		r.NoError(err)
+
+		r.Equal(map[string]any{
+			"message": "missing X-Inngest-Signature header",
+		}, respBody)
+	})
+
+	t.Run("missing sync kind header", func(t *testing.T) {
+		// SDK attempts an out-of-band sync when the sync kind header is missing
+
+		r := require.New(t)
+		ctx := context.Background()
+
+		// Create a simple Go HTTP mockCloud that responds with hello world
+		mockCloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true,"modified":true}`))
+		}))
+		defer mockCloud.Close()
+
+		appID := "test-in-band-sync-missing-header"
+		fn := CreateFunction(
+			FunctionOpts{Name: "my-fn"},
+			EventTrigger("my-event", nil),
+			func(ctx context.Context, input Input[any]) (any, error) {
+				return nil, nil
+			},
+		)
+		h := NewHandler(appID, HandlerOpts{
+			Env:         toPtr("my-env"),
+			RegisterURL: &mockCloud.URL,
+		})
+		h.Register(fn)
+		server := httptest.NewServer(h)
+		defer server.Close()
+
+		sig, _ := Sign(ctx, time.Now(), []byte(testKey), reqBodyByt)
+		req, err := http.NewRequest(
+			http.MethodPut,
+			server.URL,
+			bytes.NewReader(reqBodyByt),
+		)
+		r.NoError(err)
+		req.Header.Set("x-inngest-signature", sig)
+		resp, err := http.DefaultClient.Do(req)
+		r.NoError(err)
+		r.Equal(http.StatusOK, resp.StatusCode)
+		r.Equal("out_of_band", resp.Header.Get("x-inngest-sync-kind"))
+
+		respByt, err := io.ReadAll(resp.Body)
+		r.NoError(err)
+		r.Equal("", string(respByt))
 	})
 }
 
@@ -591,7 +813,7 @@ func handlerPost(t *testing.T, url string, r *sdkrequest.Request) *http.Response
 	t.Helper()
 
 	body := marshalRequest(t, r)
-	sig := Sign(context.Background(), time.Now(), []byte(testKey), body)
+	sig, _ := Sign(context.Background(), time.Now(), []byte(testKey), body)
 
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	require.NoError(t, err)
@@ -610,4 +832,8 @@ func marshalRequest(t *testing.T, r *sdkrequest.Request) []byte {
 	byt, err = jcs.Transform(byt)
 	require.NoError(t, err)
 	return byt
+}
+
+func toPtr[T any](v T) *T {
+	return &v
 }
