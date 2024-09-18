@@ -2,7 +2,6 @@ package group
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/inngest/inngestgo/step"
 )
@@ -21,6 +20,7 @@ func Parallel(
 	results := []Result{}
 	isPlanned := false
 	ch := make(chan struct{}, 1)
+	var unexpectedPanic any
 	for _, fn := range fns {
 		fn := fn
 		go func(fn func(ctx context.Context) (any, error)) {
@@ -29,8 +29,7 @@ func Parallel(
 					if _, ok := r.(step.ControlHijack); ok {
 						isPlanned = true
 					} else {
-						// TODO: What to do here?
-						fmt.Println("TODO")
+						unexpectedPanic = r
 					}
 				}
 				ch <- struct{}{}
@@ -40,6 +39,11 @@ func Parallel(
 			results = append(results, Result{Error: err, Value: value})
 		}(fn)
 		<-ch
+	}
+
+	if unexpectedPanic != nil {
+		// Repanic to let our normal panic recovery handle it
+		panic(unexpectedPanic)
 	}
 
 	if isPlanned {

@@ -282,6 +282,7 @@ func TestInvoke(t *testing.T) {
 		actual, op, err := invoke(
 			ctx, a,
 			createRequest(t, EventA{Name: "my-event"}),
+			nil,
 		)
 		r.Nil(actual)
 		r.Nil(op)
