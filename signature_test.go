@@ -1,7 +1,9 @@
 package inngestgo
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -31,23 +33,23 @@ func TestSign(t *testing.T) {
 	})
 }
 
-func TestValidateSignature(t *testing.T) {
+func TestValidateRequestSignature(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("failures", func(t *testing.T) {
 		t.Run("With an invalid sig it fails", func(t *testing.T) {
-			ok, _, err := ValidateSignature(ctx, "lol", testKey, "", testBody)
+			ok, _, err := ValidateRequestSignature(ctx, "lol", testKey, "", testBody)
 			require.False(t, ok)
 			require.ErrorContains(t, err, "invalid signature")
 		})
 		t.Run("With an invalid ts it fails", func(t *testing.T) {
-			ok, _, err := ValidateSignature(ctx, "t=what&s=yea", testKey, "", testBody)
+			ok, _, err := ValidateRequestSignature(ctx, "t=what&s=yea", testKey, "", testBody)
 			require.False(t, ok)
 			require.ErrorContains(t, err, "invalid timestamp")
 		})
 		t.Run("With an expired ts it fails", func(t *testing.T) {
 			ts := time.Now().Add(-1 * time.Hour).Unix()
-			ok, _, err := ValidateSignature(ctx, fmt.Sprintf("t=%d&s=yea", ts), testKey, "", testBody)
+			ok, _, err := ValidateRequestSignature(ctx, fmt.Sprintf("t=%d&s=yea", ts), testKey, "", testBody)
 			require.False(t, ok)
 			require.ErrorContains(t, err, "expired signature")
 		})
@@ -56,7 +58,7 @@ func TestValidateSignature(t *testing.T) {
 			at := time.Now()
 			sig, _ := Sign(ctx, at, []byte(testKey), testBody)
 
-			ok, _, err := ValidateSignature(ctx, sig, "signkey-test-lolwtf", "", testBody)
+			ok, _, err := ValidateRequestSignature(ctx, sig, "signkey-test-lolwtf", "", testBody)
 			require.False(t, ok)
 			require.ErrorContains(t, err, "invalid signature")
 		})
@@ -66,9 +68,61 @@ func TestValidateSignature(t *testing.T) {
 		at := time.Now().Add(-5 * time.Second)
 		sig, _ := Sign(ctx, at, []byte(testKey), testBody)
 
-		ok, _, err := ValidateSignature(ctx, sig, testKey, "", testBody)
+		ok, _, err := ValidateRequestSignature(ctx, sig, testKey, "", testBody)
 		require.True(t, ok)
 		require.NoError(t, err)
+	})
+
+	t.Run("successful response signature validation", func(t *testing.T) {
+		at := time.Now().Add(-5 * time.Second)
+		sig, _ := signWithoutJCS(at, []byte(testKey), testBody)
+
+		ok, err := ValidateResponseSignature(ctx, sig, []byte(testKey), testBody)
+		require.True(t, ok)
+		require.NoError(t, err)
+	})
+}
+
+func TestValidateResponseSignature(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("successful response signature validation", func(t *testing.T) {
+		r := require.New(t)
+		at := time.Now().Add(-5 * time.Second)
+		sig, err := signWithoutJCS(at, []byte(testKey), testBody)
+		r.NoError(err)
+
+		ok, err := ValidateResponseSignature(ctx, sig, []byte(testKey), testBody)
+		r.True(ok)
+		r.NoError(err)
+	})
+
+	t.Run("successful response signature with JSON encoder", func(t *testing.T) {
+		// Ensure that validation still works even after the JSON encoder adds a
+		// trailing newline
+
+		r := require.New(t)
+		at := time.Now().Add(-5 * time.Second)
+
+		body := map[string]string{"msg": "hi ☃"}
+		bodyByt, err := json.Marshal(body)
+		r.NoError(err)
+
+		sig, err := signWithoutJCS(at, []byte(testKey), bodyByt)
+		r.NoError(err)
+
+		var buf bytes.Buffer
+		encoder := json.NewEncoder(&buf)
+		err = encoder.Encode(body)
+		r.NoError(err)
+		encodedBody := buf.Bytes()
+
+		// Prove that the JSON encoder adds a trailing newline
+		r.Equal(string(bodyByt)+"\n", string(encodedBody))
+
+		ok, err := ValidateResponseSignature(ctx, sig, []byte(testKey), encodedBody)
+		r.True(ok)
+		r.NoError(err)
 	})
 }
 
