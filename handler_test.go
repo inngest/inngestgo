@@ -25,6 +25,7 @@ import (
 )
 
 func init() {
+	os.Setenv("INNGEST_EVENT_KEY", "abc123")
 	os.Setenv("INNGEST_SIGNING_KEY", string(testKey))
 	os.Setenv("INNGEST_SIGNING_KEY_FALLBACK", string(testKeyFallback))
 }
@@ -479,7 +480,7 @@ func TestSteps(t *testing.T) {
 
 }
 
-func TestIntrospection(t *testing.T) {
+func TestInspection(t *testing.T) {
 	fn := CreateFunction(
 		FunctionOpts{Name: "My servable function!"},
 		EventTrigger("test/event.a", nil),
@@ -487,14 +488,14 @@ func TestIntrospection(t *testing.T) {
 			return nil, nil
 		},
 	)
-	h := NewHandler("introspection", HandlerOpts{})
+	h := NewHandler("inspection", HandlerOpts{})
 	h.Register(fn)
 	server := httptest.NewServer(h)
 	defer server.Close()
 
 	t.Run("no signature", func(t *testing.T) {
 		// When the request has no signature, respond with the insecure
-		// introspection body
+		// inspection body
 
 		r := require.New(t)
 
@@ -510,16 +511,19 @@ func TestIntrospection(t *testing.T) {
 		r.NoError(err)
 
 		r.Equal(map[string]any{
-			"function_count":  float64(1),
-			"has_event_key":   false,
-			"has_signing_key": true,
-			"mode":            "cloud",
+			"authentication_succeeded": nil,
+			"function_count":           float64(1),
+			"has_event_key":            true,
+			"has_signing_key":          true,
+			"has_signing_key_fallback": true,
+			"mode":                     "cloud",
+			"schema_version":           "2024-05-24",
 		}, respBody)
 	})
 
 	t.Run("valid signature", func(t *testing.T) {
 		// When the request has a valid signature, respond with the secure
-		// introspection body
+		// inspection body
 
 		r := require.New(t)
 
@@ -541,14 +545,27 @@ func TestIntrospection(t *testing.T) {
 		signingKeyFallbackHash, err := hashedSigningKey([]byte(testKeyFallback))
 		r.NoError(err)
 		r.Equal(map[string]any{
+			"api_origin":               "https://api.inngest.com",
+			"app_id":                   "inspection",
+			"authentication_succeeded": true,
 			"capabilities": map[string]any{
 				"in_band_sync": "v1",
 				"trust_probe":  "v1",
 			},
+			"env":                       nil,
+			"event_api_origin":          "https://inn.gs",
+			"event_key_hash":            "6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090",
+			"framework":                 "",
 			"function_count":            float64(1),
-			"has_event_key":             false,
+			"has_event_key":             true,
 			"has_signing_key":           true,
+			"has_signing_key_fallback":  true,
 			"mode":                      "cloud",
+			"schema_version":            "2024-05-24",
+			"sdk_language":              "go",
+			"sdk_version":               SDKVersion,
+			"serve_origin":              nil,
+			"serve_path":                nil,
 			"signing_key_fallback_hash": string(signingKeyFallbackHash),
 			"signing_key_hash":          string(signingKeyHash),
 		}, respBody)
@@ -556,7 +573,7 @@ func TestIntrospection(t *testing.T) {
 
 	t.Run("invalid signature", func(t *testing.T) {
 		// When the request has an invalid signature, respond with the insecure
-		// introspection body
+		// inspection body
 
 		r := require.New(t)
 
@@ -575,10 +592,13 @@ func TestIntrospection(t *testing.T) {
 		r.NoError(err)
 
 		r.Equal(map[string]any{
-			"function_count":  float64(1),
-			"has_event_key":   false,
-			"has_signing_key": true,
-			"mode":            "cloud",
+			"authentication_succeeded": false,
+			"function_count":           float64(1),
+			"has_event_key":            true,
+			"has_signing_key":          true,
+			"has_signing_key_fallback": true,
+			"mode":                     "cloud",
+			"schema_version":           "2024-05-24",
 		}, respBody)
 	})
 }
