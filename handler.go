@@ -287,15 +287,22 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // all functions and automatically allows all functions to immediately be triggered
 // by incoming events or schedules.
 func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
+	var syncKind string
 	var err error
 	if r.Header.Get(HeaderKeySyncKind) == SyncKindInBand && h.IsInBandSyncAllowed() {
+		syncKind = SyncKindInBand
 		err = h.inBandSync(w, r)
 	} else {
+		syncKind = SyncKindOutOfBand
 		err = h.outOfBandSync(w, r)
 	}
 
 	if err != nil {
-		h.Logger.Error("out-of-band sync error", "error", err)
+		h.Logger.Error(
+			"sync error",
+			"error", err,
+			"syncKind", syncKind,
+		)
 	}
 	return err
 }
