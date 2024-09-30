@@ -35,21 +35,22 @@ func TestSign(t *testing.T) {
 
 func TestValidateRequestSignature(t *testing.T) {
 	ctx := context.Background()
+	isDev := false
 
 	t.Run("failures", func(t *testing.T) {
 		t.Run("With an invalid sig it fails", func(t *testing.T) {
-			ok, _, err := ValidateRequestSignature(ctx, "lol", testKey, "", testBody)
+			ok, _, err := ValidateRequestSignature(ctx, "lol", testKey, "", testBody, isDev)
 			require.False(t, ok)
 			require.ErrorContains(t, err, "invalid signature")
 		})
 		t.Run("With an invalid ts it fails", func(t *testing.T) {
-			ok, _, err := ValidateRequestSignature(ctx, "t=what&s=yea", testKey, "", testBody)
+			ok, _, err := ValidateRequestSignature(ctx, "t=what&s=yea", testKey, "", testBody, isDev)
 			require.False(t, ok)
 			require.ErrorContains(t, err, "invalid timestamp")
 		})
 		t.Run("With an expired ts it fails", func(t *testing.T) {
 			ts := time.Now().Add(-1 * time.Hour).Unix()
-			ok, _, err := ValidateRequestSignature(ctx, fmt.Sprintf("t=%d&s=yea", ts), testKey, "", testBody)
+			ok, _, err := ValidateRequestSignature(ctx, fmt.Sprintf("t=%d&s=yea", ts), testKey, "", testBody, isDev)
 			require.False(t, ok)
 			require.ErrorContains(t, err, "expired signature")
 		})
@@ -58,7 +59,7 @@ func TestValidateRequestSignature(t *testing.T) {
 			at := time.Now()
 			sig, _ := Sign(ctx, at, []byte(testKey), testBody)
 
-			ok, _, err := ValidateRequestSignature(ctx, sig, "signkey-test-lolwtf", "", testBody)
+			ok, _, err := ValidateRequestSignature(ctx, sig, "signkey-test-lolwtf", "", testBody, isDev)
 			require.False(t, ok)
 			require.ErrorContains(t, err, "invalid signature")
 		})
@@ -68,7 +69,7 @@ func TestValidateRequestSignature(t *testing.T) {
 		at := time.Now().Add(-5 * time.Second)
 		sig, _ := Sign(ctx, at, []byte(testKey), testBody)
 
-		ok, _, err := ValidateRequestSignature(ctx, sig, testKey, "", testBody)
+		ok, _, err := ValidateRequestSignature(ctx, sig, testKey, "", testBody, isDev)
 		require.True(t, ok)
 		require.NoError(t, err)
 	})
