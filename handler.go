@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,7 +20,7 @@ import (
 	"github.com/inngest/inngest/pkg/inngest"
 	"github.com/inngest/inngest/pkg/publicerr"
 	"github.com/inngest/inngest/pkg/sdk"
-	"github.com/inngest/inngestgo/errors"
+	sdkerrors "github.com/inngest/inngestgo/errors"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/internal/types"
 	"github.com/inngest/inngestgo/step"
@@ -96,6 +97,8 @@ type HandlerOpts struct {
 	// AllowInBandSync allows in-band syncs to occur. If nil, in-band syncs are
 	// disallowed.
 	AllowInBandSync *bool
+
+	Dev *bool
 }
 
 // GetSigningKey returns the signing key defined within HandlerOpts, or the default
@@ -256,7 +259,23 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		probe := r.URL.Query().Get("probe")
 		if probe == "trust" {
-			h.trust(r.Context(), w, r)
+			err := h.trust(r.Context(), w, r)
+			if err != nil {
+				var perr publicerr.Error
+				if !errors.As(err, &perr) {
+					perr = publicerr.Error{
+						Err:     err,
+						Message: err.Error(),
+						Status:  500,
+					}
+				}
+
+				if perr.Status == 0 {
+					perr.Status = http.StatusInternalServerError
+				}
+
+				_ = publicerr.WriteHTTP(w, perr)
+			}
 			return
 		}
 
@@ -339,7 +358,7 @@ func (h *handler) inBandSync(
 	defer r.Body.Close()
 
 	var sig string
-	if !IsDev() {
+	if !h.isDev() {
 		if sig = r.Header.Get(HeaderKeySignature); sig == "" {
 			return publicerr.Error{
 				Err:    fmt.Errorf("missing %s header", HeaderKeySignature),
@@ -366,6 +385,7 @@ func (h *handler) inBandSync(
 		h.GetSigningKey(),
 		h.GetSigningKeyFallback(),
 		reqByt,
+		h.isDev(),
 	)
 	if err != nil {
 		return publicerr.Error{
@@ -499,7 +519,7 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 	config.Functions = fns
 
 	registerURL := fmt.Sprintf("%s/fn/register", defaultAPIOrigin)
-	if IsDev() {
+	if h.isDev() {
 		// TODO: Check if dev server is up.  If not, error.  We can't deploy to production.
 		registerURL = fmt.Sprintf("%s/fn/register", DevServerURL())
 	}
@@ -575,6 +595,14 @@ func (h *handler) url(r *http.Request) *url.URL {
 	}
 	u, _ := url.Parse(fmt.Sprintf("%s://%s%s", scheme, r.Host, r.RequestURI))
 	return u
+}
+
+func (h *handler) isDev() bool {
+	if h.Dev != nil {
+		return *h.Dev
+	}
+
+	return IsDev()
 }
 
 func createFunctionConfigs(
@@ -682,7 +710,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	var sig string
 	defer r.Body.Close()
 
-	if !IsDev() {
+	if !h.isDev() {
 		if sig = r.Header.Get(HeaderKeySignature); sig == "" {
 			return publicerr.Error{
 				Message: "unauthorized",
@@ -710,6 +738,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 		h.GetSigningKey(),
 		h.GetSigningKeyFallback(),
 		byt,
+		h.isDev(),
 	); !valid {
 		h.Logger.Error("unauthorized inngest invoke request", "error", err)
 		return publicerr.Error{
@@ -788,8 +817,8 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	// onyl used for checking wither the step used a NoRetryError or RetryAtError
 	//
 	// For that reason, we check those values first.
-	noRetry := errors.IsNoRetryError(err)
-	retryAt := errors.GetRetryAtTime(err)
+	noRetry := sdkerrors.IsNoRetryError(err)
+	retryAt := sdkerrors.GetRetryAtTime(err)
 	if len(ops) == 1 && ops[0].Op == enums.OpcodeStepError {
 		// Now we've handled error types we can ignore step
 		// errors safely.
@@ -804,7 +833,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	// 	if err != nil {
 	// 	     return err
 	// 	}
-	if errors.IsStepError(err) {
+	if sdkerrors.IsStepError(err) {
 		err = fmt.Errorf("Unhandled step error: %s", err)
 		noRetry = true
 	}
@@ -892,7 +921,7 @@ func (h *handler) createInsecureInspection(
 	authenticationSucceeded *bool,
 ) (*insecureInspection, error) {
 	mode := "cloud"
-	if IsDev() {
+	if h.isDev() {
 		mode = "dev"
 	}
 
@@ -910,7 +939,7 @@ func (h *handler) createInsecureInspection(
 func (h *handler) createSecureInspection() (*secureInspection, error) {
 	apiOrigin := defaultAPIOrigin
 	eventAPIOrigin := defaultEventAPIOrigin
-	if IsDev() {
+	if h.isDev() {
 		apiOrigin = DevServerURL()
 		eventAPIOrigin = DevServerURL()
 	}
@@ -991,6 +1020,7 @@ func (h *handler) inspect(w http.ResponseWriter, r *http.Request) error {
 			h.GetSigningKey(),
 			h.GetSigningKeyFallback(),
 			[]byte{},
+			h.isDev(),
 		)
 		if valid {
 			inspection, err := h.createSecureInspection()
@@ -1027,15 +1057,19 @@ func (h *handler) trust(
 	ctx context.Context,
 	w http.ResponseWriter,
 	r *http.Request,
-) {
+) error {
+	if h.isDev() {
+		w.WriteHeader(200)
+		return nil
+	}
+
 	w.Header().Add("Content-Type", "application/json")
 	sig := r.Header.Get(HeaderKeySignature)
 	if sig == "" {
-		_ = publicerr.WriteHTTP(w, publicerr.Error{
+		return publicerr.Error{
 			Message: fmt.Sprintf("missing %s header", HeaderKeySignature),
 			Status:  401,
-		})
-		return
+		}
 	}
 
 	max := h.HandlerOpts.MaxBodySize
@@ -1045,10 +1079,10 @@ func (h *handler) trust(
 	byt, err := io.ReadAll(http.MaxBytesReader(w, r.Body, int64(max)))
 	if err != nil {
 		h.Logger.Error("error decoding function request", "error", err)
-		_ = publicerr.WriteHTTP(w, publicerr.Error{
+		return publicerr.Error{
 			Message: fmt.Sprintf("error decoding function request: %s", err),
-		})
-		return
+			Status:  400,
+		}
 	}
 
 	valid, key, err := ValidateRequestSignature(
@@ -1057,31 +1091,32 @@ func (h *handler) trust(
 		h.GetSigningKey(),
 		h.GetSigningKeyFallback(),
 		byt,
+		h.isDev(),
 	)
 	if err != nil {
-		_ = publicerr.WriteHTTP(w, publicerr.Error{
+		return publicerr.Error{
 			Message: fmt.Sprintf("error validating signature: %s", err),
-		})
-		return
+			Status:  401,
+		}
 	}
 	if !valid {
-		_ = publicerr.WriteHTTP(w, publicerr.Error{
+		return publicerr.Error{
 			Message: "invalid signature",
 			Status:  401,
-		})
-		return
+		}
 	}
 
 	byt, err = json.Marshal(trustProbeResponse{})
 	if err != nil {
-		_ = publicerr.WriteHTTP(w, err)
-		return
+		return err
 	}
 
 	resSig, err := signWithoutJCS(time.Now(), []byte(key), byt)
 	if err != nil {
-		_ = publicerr.WriteHTTP(w, err)
-		return
+		return publicerr.Error{
+			Message: fmt.Sprintf("error signing response: %s", err),
+			Status:  500,
+		}
 	}
 
 	w.Header().Add("X-Inngest-Signature", resSig)
@@ -1090,6 +1125,8 @@ func (h *handler) trust(
 	if err != nil {
 		h.Logger.Error("error writing trust probe response", "error", err)
 	}
+
+	return nil
 }
 
 type StreamResponse struct {
