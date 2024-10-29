@@ -11,6 +11,7 @@ const (
 
 const (
 	defaultAPIOrigin      = "https://api.inngest.com"
+	defaultConnectOrigin  = "wss://connect.inngest.com"
 	defaultEventAPIOrigin = "https://inn.gs"
 	devServerOrigin       = "http://127.0.0.1:8288"
 )

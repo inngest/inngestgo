@@ -59,6 +59,10 @@ func Serve(w http.ResponseWriter, r *http.Request) {
 	DefaultHandler.ServeHTTP(w, r)
 }
 
+func Connect(ctx context.Context) error {
+	return DefaultHandler.Connect(ctx)
+}
+
 type HandlerOpts struct {
 	// Logger is the structured logger to use from Go's builtin structured
 	// logging package.
@@ -82,6 +86,12 @@ type HandlerOpts struct {
 	//
 	// This only needs to be set when self hosting.
 	RegisterURL *string
+
+	// ConnectURL is the URL to use for establishing outbound connections.  If nil
+	// this defaults to Inngest's Connect endpoint.
+	//
+	// This only needs to be set when self hosting.
+	ConnectURL *string
 
 	// MaxBodySize is the max body size to read for incoming invoke requests
 	MaxBodySize int
@@ -175,6 +185,9 @@ type Handler interface {
 	// Register registers the given functions with the handler, allowing them to
 	// be invoked by Inngest.
 	Register(...ServableFunction)
+
+	// Connect establishes an outbound connection to Inngest
+	Connect(ctx context.Context) error
 }
 
 // NewHandler returns a new Handler for serving Inngest functions.
