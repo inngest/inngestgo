@@ -100,6 +100,10 @@ type HandlerOpts struct {
 	// If nil, this defaults to the current machine's hostname.
 	InstanceId *string
 
+	// BuildId supplies an application version identifier. This should change
+	// whenever code within one of your Inngest function or any dependency thereof changes.
+	BuildId *string
+
 	// MaxBodySize is the max body size to read for incoming invoke requests
 	MaxBodySize int
 
@@ -449,7 +453,7 @@ func (h *handler) inBandSync(
 		appURL = h.URL
 	}
 
-	fns, err := createFunctionConfigs(h.appName, h.funcs, *appURL)
+	fns, err := createFunctionConfigs(h.appName, h.funcs, *appURL, false)
 	if err != nil {
 		return fmt.Errorf("error creating function configs: %w", err)
 	}
@@ -535,7 +539,7 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 		UseConnect:   h.useConnect,
 	}
 
-	fns, err := createFunctionConfigs(h.appName, h.funcs, *h.url(r))
+	fns, err := createFunctionConfigs(h.appName, h.funcs, *h.url(r), false)
 	if err != nil {
 		return fmt.Errorf("error creating function configs: %w", err)
 	}
@@ -632,11 +636,12 @@ func createFunctionConfigs(
 	appName string,
 	fns []ServableFunction,
 	appURL url.URL,
+	isConnect bool,
 ) ([]sdk.SDKFunction, error) {
 	if appName == "" {
 		return nil, fmt.Errorf("missing app name")
 	}
-	if appURL == (url.URL{}) {
+	if !isConnect && appURL == (url.URL{}) {
 		return nil, fmt.Errorf("missing URL")
 	}
 
@@ -657,6 +662,11 @@ func createFunctionConfigs(
 		values.Set("step", "step")
 		appURL.RawQuery = values.Encode()
 
+		runtime := make(map[string]any)
+		if !isConnect {
+			runtime["url"] = appURL.String()
+		}
+
 		f := sdk.SDKFunction{
 			Name:        fn.Name(),
 			Slug:        appName + "-" + fn.Slug(),
@@ -672,9 +682,7 @@ func createFunctionConfigs(
 					ID:      "step",
 					Name:    fn.Name(),
 					Retries: retries,
-					Runtime: map[string]any{
-						"url": appURL.String(),
-					},
+					Runtime: runtime,
 				},
 			},
 		}
