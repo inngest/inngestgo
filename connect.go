@@ -274,23 +274,33 @@ func (h *connectHandler) connectInvoke(ctx context.Context, msg connect.GatewayM
 		// TODO Make sure this is properly surfaced in the executor!
 		return &connect.SdkResponse{
 			Status: connect.SdkResponseStatusError,
-			Err:    StrPtr(fmt.Sprintf("error calling function: %s", err.Error())),
+			Body:   []byte(fmt.Sprintf("error calling function: %s", err.Error())),
 		}, nil
 	}
 
 	if len(ops) > 0 {
+		serializedOps, err := json.Marshal(ops)
+		if err != nil {
+			return nil, fmt.Errorf("could not serialize ops: %w", err)
+		}
+
 		// Return the function opcode returned here so that we can re-invoke this
 		// function and manage state appropriately.  Any opcode here takes precedence
 		// over function return values as the function has not yet finished.
 		return &connect.SdkResponse{
 			Status: connect.SdkResponseStatusNotCompleted,
-			Ops:    ops,
+			Body:   serializedOps,
 		}, nil
+	}
+
+	serializedResp, err := json.Marshal(resp)
+	if err != nil {
+		return nil, fmt.Errorf("could not serialize resp: %w", err)
 	}
 
 	// Return the function response.
 	return &connect.SdkResponse{
 		Status: connect.SdkResponseStatusDone,
-		Resp:   resp,
+		Body:   serializedResp,
 	}, nil
 }

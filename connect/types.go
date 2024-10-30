@@ -2,7 +2,6 @@ package connect
 
 import (
 	"encoding/json"
-	"github.com/inngest/inngest/pkg/execution/state"
 	"net/http"
 )
 
@@ -63,10 +62,8 @@ const (
 )
 
 type SdkResponse struct {
-	Status SdkResponseStatus       `json:"status"`
-	Ops    []state.GeneratorOpcode `json:"ops"`
-	Resp   any                     `json:"resp"`
-	Err    *string                 `json:"err"`
+	Status SdkResponseStatus `json:"status"`
+	Body   []byte            `json:"body"`
 
 	// These are modeled after the headers for code reuse in httpdriver.ShouldRetry
 	NoRetry    string `json:"no_retry"`
