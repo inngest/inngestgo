@@ -67,6 +67,11 @@ type SdkResponse struct {
 	Ops    []state.GeneratorOpcode `json:"ops"`
 	Resp   any                     `json:"resp"`
 	Err    *string                 `json:"err"`
+
+	// These are modeled after the headers for code reuse in httpdriver.ShouldRetry
+	NoRetry    string `json:"no_retry"`
+	RetryAfter string `json:"retry_after"`
+	SdkVersion string `json:"sdk_version"`
 }
 
 type GatewayMessage struct {
