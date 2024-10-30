@@ -21,18 +21,18 @@ import (
 
 const GatewaySubProtocol = "v0.connect.inngest.com"
 
-type gatewayMessageType string
+type GatewayMessageType string
 
-const gatewayMessageTypeHello gatewayMessageType = "gateway-hello"
+const GatewayMessageTypeHello GatewayMessageType = "gateway-hello"
 
-const gatewayMessageTypeSDKConnect gatewayMessageType = "sdk-connect"
+const GatewayMessageTypeSDKConnect GatewayMessageType = "sdk-connect"
 
-type connectAuthData struct {
+type AuthData struct {
 	Challenge []byte `json:"challenge"`
 	Signature []byte `json:"signature"`
 }
 
-type sessionDetails struct {
+type SessionDetails struct {
 	// InstanceId represents the persistent identifier for this connection.
 	// This must not change across the lifetime of the connection, including reconnects.
 	InstanceId string `json:"instance_id"`
@@ -43,10 +43,10 @@ type sessionDetails struct {
 	ConnectionId string `json:"connectionId"`
 }
 
-type gatewayMessageTypeSDKConnectData struct {
-	Session sessionDetails `json:"session"`
+type GatewayMessageTypeSDKConnectData struct {
+	Session SessionDetails `json:"session"`
 
-	Authz connectAuthData `json:"authz"`
+	Authz AuthData `json:"authz"`
 
 	AppName     string  `json:"app_name"`
 	Env         *string `json:"env"`
@@ -57,18 +57,33 @@ type gatewayMessageTypeSDKConnectData struct {
 	SDKVersion  string  `json:"sdk_version"`
 }
 
-const gatewayMessageTypeExecutorRequest gatewayMessageType = "executor-request"
+const GatewayMessageTypeExecutorRequest GatewayMessageType = "executor-request"
 
-type gatewayMessageTypeExecutorRequestData struct {
+type GatewayMessageTypeExecutorRequestData struct {
 	FunctionSlug string             `json:"fn_slug"`
 	StepId       *string            `json:"step_id"`
 	Request      sdkrequest.Request `json:"req"`
 }
 
-const gatewayMessageTypeSDKReply gatewayMessageType = "sdk-reply"
+const GatewayMessageTypeSDKReply GatewayMessageType = "sdk-reply"
 
-type gatewayMessage struct {
-	Kind gatewayMessageType `json:"kind"`
+type SdkResponseStatus int
+
+const (
+	SdkResponseStatusNotCompleted SdkResponseStatus = http.StatusPartialContent
+	SdkResponseStatusDone         SdkResponseStatus = http.StatusOK
+	SdkResponseStatusError        SdkResponseStatus = http.StatusInternalServerError
+)
+
+type SdkResponse struct {
+	Status SdkResponseStatus       `json:"status"`
+	Ops    []state.GeneratorOpcode `json:"ops"`
+	Resp   any                     `json:"resp"`
+	Err    *string                 `json:"err"`
+}
+
+type GatewayMessage struct {
+	Kind GatewayMessageType `json:"kind"`
 	Data json.RawMessage    `json:"data"`
 }
 
@@ -144,26 +159,26 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 	{
 		initialMessageTimeout, cancelInitialTimeout := context.WithTimeout(ctx, 5*time.Second)
 		defer cancelInitialTimeout()
-		var helloMessage gatewayMessage
+		var helloMessage GatewayMessage
 		err = wsjson.Read(initialMessageTimeout, ws, &helloMessage)
 		if err != nil {
 			return fmt.Errorf("did not receive gateway hello message: %w", err)
 		}
 
-		if helloMessage.Kind != gatewayMessageTypeHello {
+		if helloMessage.Kind != GatewayMessageTypeHello {
 			return fmt.Errorf("expected gateway hello message, got %s", helloMessage.Kind)
 		}
 	}
 
 	// Send connect message
 	{
-		data, err := json.Marshal(gatewayMessageTypeSDKConnectData{
+		data, err := json.Marshal(GatewayMessageTypeSDKConnectData{
 			AppName: h.h.appName,
-			Session: sessionDetails{
+			Session: SessionDetails{
 				InstanceId:   h.instanceId(),
 				ConnectionId: h.connectionId.String(),
 			},
-			Authz:       connectAuthData{},
+			Authz:       AuthData{},
 			Env:         nil,
 			Framework:   nil,
 			Platform:    nil,
@@ -176,8 +191,8 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 		}
 
 		// TODO Include authz data, version data (SDK version, code build tag), instance identifier
-		err = wsjson.Write(ctx, ws, gatewayMessage{
-			Kind: gatewayMessageTypeSDKConnect,
+		err = wsjson.Write(ctx, ws, GatewayMessage{
+			Kind: GatewayMessageTypeSDKConnect,
 			Data: data,
 		})
 		if err != nil {
@@ -190,7 +205,7 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 			break
 		}
 
-		var msg gatewayMessage
+		var msg GatewayMessage
 		err = wsjson.Read(ctx, ws, &msg)
 		if err != nil {
 			// TODO Handle issues reading message: Should we re-establish the connection?
@@ -200,7 +215,7 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 		h.h.Logger.Debug("received gateway request", "msg", msg)
 
 		switch msg.Kind {
-		case gatewayMessageTypeExecutorRequest:
+		case GatewayMessageTypeExecutorRequest:
 			resp, err := h.connectInvoke(ctx, msg)
 			if err != nil {
 				h.h.Logger.Error("failed to handle sdk request", "err", err)
@@ -215,8 +230,8 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 				continue
 			}
 
-			err = wsjson.Write(ctx, ws, gatewayMessage{
-				Kind: gatewayMessageTypeSDKReply,
+			err = wsjson.Write(ctx, ws, GatewayMessage{
+				Kind: GatewayMessageTypeSDKReply,
 				Data: data,
 			})
 			if err != nil {
@@ -235,24 +250,9 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 	return nil
 }
 
-type SdkResponseStatus int
-
-const (
-	SdkResponseStatusNotCompleted SdkResponseStatus = http.StatusPartialContent
-	SdkResponseStatusDone         SdkResponseStatus = http.StatusOK
-	SdkResponseStatusError        SdkResponseStatus = http.StatusInternalServerError
-)
-
-type sdkResponse struct {
-	Status SdkResponseStatus       `json:"status"`
-	Ops    []state.GeneratorOpcode `json:"ops"`
-	Resp   any                     `json:"resp"`
-	Err    *string                 `json:"err"`
-}
-
 // connectInvoke is the counterpart to invoke for connect
-func (h *connectHandler) connectInvoke(ctx context.Context, msg gatewayMessage) (*sdkResponse, error) {
-	body := &gatewayMessageTypeExecutorRequestData{}
+func (h *connectHandler) connectInvoke(ctx context.Context, msg GatewayMessage) (*SdkResponse, error) {
+	body := &GatewayMessageTypeExecutorRequestData{}
 	if err := json.Unmarshal(msg.Data, body); err != nil {
 		h.h.Logger.Error("error decoding sdk request", "error", err)
 		return nil, publicerr.Error{
@@ -335,7 +335,7 @@ func (h *connectHandler) connectInvoke(ctx context.Context, msg gatewayMessage) 
 	if err != nil {
 		h.h.Logger.Error("error calling function", "error", err)
 		// TODO Make sure this is properly surfaced in the executor!
-		return &sdkResponse{
+		return &SdkResponse{
 			Status: SdkResponseStatusError,
 			Err:    StrPtr(fmt.Sprintf("error calling function: %s", err.Error())),
 		}, nil
@@ -345,14 +345,14 @@ func (h *connectHandler) connectInvoke(ctx context.Context, msg gatewayMessage) 
 		// Return the function opcode returned here so that we can re-invoke this
 		// function and manage state appropriately.  Any opcode here takes precedence
 		// over function return values as the function has not yet finished.
-		return &sdkResponse{
+		return &SdkResponse{
 			Status: SdkResponseStatusNotCompleted,
 			Ops:    ops,
 		}, nil
 	}
 
 	// Return the function response.
-	return &sdkResponse{
+	return &SdkResponse{
 		Status: SdkResponseStatusDone,
 		Resp:   resp,
 	}, nil
