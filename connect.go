@@ -59,6 +59,7 @@ func (h *connectHandler) connectToGateway(ctx context.Context) (*websocket.Conn,
 }
 
 func (h *handler) Connect(ctx context.Context) error {
+	h.useConnect = true
 	ch := connectHandler{h: h}
 	return ch.Connect(ctx)
 }

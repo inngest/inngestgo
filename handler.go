@@ -45,6 +45,7 @@ var (
 	capabilities = sdk.Capabilities{
 		InBandSync: sdk.InBandSyncV1,
 		TrustProbe: sdk.TrustProbeV1,
+		Connect:    sdk.ConnectV1,
 	}
 )
 
@@ -220,6 +221,8 @@ type handler struct {
 	funcs   []ServableFunction
 	// lock prevents reading the function maps while serving
 	l sync.RWMutex
+
+	useConnect bool
 }
 
 func (h *handler) SetOptions(opts HandlerOpts) Handler {
@@ -529,6 +532,7 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 			Platform: platform(),
 		},
 		Capabilities: capabilities,
+		UseConnect:   h.useConnect,
 	}
 
 	fns, err := createFunctionConfigs(h.appName, h.funcs, *h.url(r))
