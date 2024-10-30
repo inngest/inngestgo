@@ -87,11 +87,17 @@ type HandlerOpts struct {
 	// This only needs to be set when self hosting.
 	RegisterURL *string
 
-	// ConnectURL is the URL to use for establishing outbound connections.  If nil
+	// ConnectURLs are the URLs to use for establishing outbound connections.  If nil
 	// this defaults to Inngest's Connect endpoint.
 	//
 	// This only needs to be set when self hosting.
-	ConnectURL *string
+	ConnectURLs []string
+
+	// InstanceId represents a stable identifier to be used for identifying connected SDKs.
+	// This can be a hostname or other identifier that remains stable across restarts.
+	//
+	// If nil, this defaults to the current machine's hostname.
+	InstanceId *string
 
 	// MaxBodySize is the max body size to read for incoming invoke requests
 	MaxBodySize int
@@ -826,8 +832,8 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	streamCancel()
 
 	// NOTE: When triggering step errors, we should have an OpcodeStepError
-	// within ops alongside an error.  We can safely ignore that error, as its
-	// onyl used for checking wither the step used a NoRetryError or RetryAtError
+	// within ops alongside an error.  We can safely ignore that error, as it's
+	// only used for checking whether the step used a NoRetryError or RetryAtError
 	//
 	// For that reason, we check those values first.
 	noRetry := sdkerrors.IsNoRetryError(err)
