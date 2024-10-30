@@ -3,7 +3,6 @@ package connect
 import (
 	"encoding/json"
 	"github.com/inngest/inngest/pkg/execution/state"
-	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"net/http"
 )
 
@@ -48,9 +47,9 @@ type GatewayMessageTypeSDKConnectData struct {
 const GatewayMessageTypeExecutorRequest GatewayMessageType = "executor-request"
 
 type GatewayMessageTypeExecutorRequestData struct {
-	FunctionSlug string             `json:"fn_slug"`
-	StepId       *string            `json:"step_id"`
-	Request      sdkrequest.Request `json:"req"`
+	FunctionSlug string  `json:"fn_slug"`
+	StepId       *string `json:"step_id"`
+	RequestBytes []byte  `json:"req"`
 }
 
 const GatewayMessageTypeSDKReply GatewayMessageType = "sdk-reply"
