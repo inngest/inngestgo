@@ -49,6 +49,8 @@ func (h *connectHandler) connectToGateway(ctx context.Context) (*websocket.Conn,
 	}
 
 	for _, gatewayHost := range hosts {
+		h.h.Logger.Debug("attempting to connect", "host", gatewayHost)
+
 		// Establish WebSocket connection to one of the gateways
 		ws, _, err := websocket.Dial(ctx, gatewayHost, &websocket.DialOptions{
 			Subprotocols: []string{
@@ -87,7 +89,7 @@ func (h *connectHandler) instanceId() string {
 }
 
 func (h *connectHandler) Connect(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	signingKey := h.h.GetSigningKey()
@@ -111,13 +113,18 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 		functionHash = res[:]
 	}
 
-	ws, err := h.connectToGateway(ctx)
+	connectTimeout, cancelConnectTimeout := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelConnectTimeout()
+
+	ws, err := h.connectToGateway(connectTimeout)
 	if err != nil {
 		return fmt.Errorf("could not connect: %w", err)
 	}
 	defer ws.CloseNow()
 
 	h.connectionId = ulid.MustNew(ulid.Now(), rand.Reader)
+
+	h.h.Logger.Debug("connection established")
 
 	// Wait for gateway hello message
 	{
@@ -132,6 +139,8 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 		if helloMessage.Kind != connect.GatewayMessageTypeHello {
 			return fmt.Errorf("expected gateway hello message, got %s", helloMessage.Kind)
 		}
+
+		h.h.Logger.Debug("received gateway hello message")
 	}
 
 	// Send connect message
@@ -179,7 +188,7 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 		err = wsjson.Read(ctx, ws, &msg)
 		if err != nil {
 			// TODO Handle issues reading message: Should we re-establish the connection?
-			continue
+			return err
 		}
 
 		h.h.Logger.Debug("received gateway request", "msg", msg)
@@ -189,21 +198,21 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 			var data connect.GatewayMessageTypeSyncData
 			if err := json.Unmarshal(msg.Data, &data); err != nil {
 				h.h.Logger.Error("error decoding sync message", "error", err)
-				continue
+				return err
 			}
 
 			err := h.h.connectSync(data.DeployId)
 			if err != nil {
 				h.h.Logger.Error("error syncing", "error", err)
 				// TODO Should we drop the connection? Continue receiving messages?
-				continue
+				return err
 			}
 		case connect.GatewayMessageTypeExecutorRequest:
 			resp, err := h.connectInvoke(ctx, msg)
 			if err != nil {
 				h.h.Logger.Error("failed to handle sdk request", "err", err)
 				// TODO Should we drop the connection? Continue receiving messages?
-				continue
+				return err
 			}
 
 			data, err := json.Marshal(resp)
@@ -420,6 +429,7 @@ func (h *handler) connectSync(deployId *string) error {
 		h.GetSigningKeyFallback(),
 	)
 	if err != nil {
+		fmt.Printf("error performing connect registration request: %s\n", err.Error())
 		return fmt.Errorf("error performing connect registration request: %w", err)
 	}
 	if resp.StatusCode > 299 {
@@ -428,6 +438,7 @@ func (h *handler) connectSync(deployId *string) error {
 		if err := json.Unmarshal(byt, &body); err != nil {
 			return fmt.Errorf("error reading register response: %w\n\n%s", err, byt)
 		}
+		fmt.Printf("error registering fns: %s\n", body["error"])
 		return fmt.Errorf("Error registering functions: %s", body["error"])
 	}
 
