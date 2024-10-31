@@ -55,9 +55,9 @@ type GatewayMessageTypeSyncData struct {
 const GatewayMessageTypeExecutorRequest GatewayMessageType = "executor-request"
 
 type GatewayMessageTypeExecutorRequestData struct {
-	RequestId string `json:"replyId"`
+	RequestId string `json:"request_id"`
 
-	AppId uuid.UUID `json:"appId"`
+	AppId uuid.UUID `json:"app_id"`
 
 	FunctionSlug string  `json:"fn_slug"`
 	StepId       *string `json:"step_id"`
