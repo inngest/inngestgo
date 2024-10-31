@@ -2,6 +2,7 @@ package connect
 
 import (
 	"encoding/json"
+	"github.com/google/uuid"
 	"net/http"
 )
 
@@ -55,6 +56,8 @@ const GatewayMessageTypeExecutorRequest GatewayMessageType = "executor-request"
 
 type GatewayMessageTypeExecutorRequestData struct {
 	RequestId string `json:"replyId"`
+
+	AppId uuid.UUID `json:"appId"`
 
 	FunctionSlug string  `json:"fn_slug"`
 	StepId       *string `json:"step_id"`
