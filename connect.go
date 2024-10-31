@@ -370,8 +370,14 @@ func (h *connectHandler) connectInvoke(ctx context.Context, msg connect.GatewayM
 }
 
 func (h *handler) connectSync(deployId *string) error {
+	connectPlaceholder := url.URL{
+		Scheme: "ws",
+		Host:   "connect",
+	}
+
 	config := sdk.RegisterRequest{
 		V:          "1",
+		URL:        connectPlaceholder.String(),
 		DeployType: "ping",
 		SDK:        HeaderValueSDK,
 		AppName:    h.appName,
@@ -383,7 +389,7 @@ func (h *handler) connectSync(deployId *string) error {
 		UseConnect:   h.useConnect,
 	}
 
-	fns, err := createFunctionConfigs(h.appName, h.funcs, url.URL{}, true)
+	fns, err := createFunctionConfigs(h.appName, h.funcs, connectPlaceholder, true)
 	if err != nil {
 		return fmt.Errorf("error creating function configs: %w", err)
 	}
