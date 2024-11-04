@@ -18,11 +18,6 @@ func TestConnectEstablish(t *testing.T) {
 	}
 	type AccountCreatedEvent GenericEvent[AccountCreatedEventData, any]
 
-	type FunctionCreatedEventData struct {
-		FunctionID string
-	}
-	type FunctionCreatedEvent GenericEvent[FunctionCreatedEventData, any]
-
 	// AccountCreated is a durable function which runs any time the "api/account.created"
 	// event is received by Inngest.
 	//

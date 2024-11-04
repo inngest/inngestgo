@@ -98,8 +98,9 @@ github.com/hashicorp/hcl/json/token
 # github.com/inngest/expr v0.0.0-20241023211115-139798ff6d8a
 ## explicit; go 1.21.0
 github.com/inngest/expr
-# github.com/inngest/inngest v1.1.1-beta.1.0.20241030142544-6fb27aeb1b07
+# github.com/inngest/inngest v1.1.1-beta.1.0.20241104093128-b9afe20de60d
 ## explicit; go 1.22.0
+github.com/inngest/inngest/pkg/connect/types
 github.com/inngest/inngest/pkg/consts
 github.com/inngest/inngest/pkg/dateutil
 github.com/inngest/inngest/pkg/enums

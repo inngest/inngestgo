@@ -1,9 +1,8 @@
-package connect
+package types
 
 import (
 	"encoding/json"
 	"github.com/google/uuid"
-	"net/http"
 )
 
 const GatewaySubProtocol = "v0.connect.inngest.com"
@@ -65,26 +64,6 @@ type GatewayMessageTypeExecutorRequestData struct {
 }
 
 const GatewayMessageTypeSDKReply GatewayMessageType = "sdk-reply"
-
-type SdkResponseStatus int
-
-const (
-	SdkResponseStatusNotCompleted SdkResponseStatus = http.StatusPartialContent
-	SdkResponseStatusDone         SdkResponseStatus = http.StatusOK
-	SdkResponseStatusError        SdkResponseStatus = http.StatusInternalServerError
-)
-
-type SdkResponse struct {
-	RequestId string `json:"replyId"`
-
-	Status SdkResponseStatus `json:"status"`
-	Body   []byte            `json:"body"`
-
-	// These are modeled after the headers for code reuse in httpdriver.ShouldRetry
-	NoRetry    string `json:"no_retry"`
-	RetryAfter string `json:"retry_after"`
-	SdkVersion string `json:"sdk_version"`
-}
 
 type GatewayMessage struct {
 	Kind GatewayMessageType `json:"kind"`
