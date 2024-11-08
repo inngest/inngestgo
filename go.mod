@@ -1,10 +1,9 @@
 module github.com/inngest/inngestgo
 
-go 1.21.0
-
-toolchain go1.21.5
+go 1.23.2
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/gosimple/slug v1.12.0
 	github.com/gowebpki/jcs v1.0.0
 	github.com/inngest/inngest v0.30.0-beta-2.0.20240912142400-4c207d8fb0ce
@@ -25,7 +24,6 @@ require (
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/cel-go v0.18.2 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/gosimple/unidecode v1.0.1 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.20.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
