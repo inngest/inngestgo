@@ -326,6 +326,13 @@ func (p Predicate) String() string {
 	switch str := p.Literal.(type) {
 	case string:
 		return fmt.Sprintf("%s %s %v", p.Ident, strings.ReplaceAll(p.Operator, "_", ""), strconv.Quote(str))
+	case nil:
+		if p.LiteralIdent == nil {
+			// print `foo == null` instead of `foo == <nil>`, the Golang default.
+			// We onyl do this if we're not comparing to an identifier.
+			return fmt.Sprintf("%s %s null", p.Ident, strings.ReplaceAll(p.Operator, "_", ""))
+		}
+		return fmt.Sprintf("%s %s %v", p.Ident, strings.ReplaceAll(p.Operator, "_", ""), lit)
 	default:
 		return fmt.Sprintf("%s %s %v", p.Ident, strings.ReplaceAll(p.Operator, "_", ""), lit)
 	}
@@ -376,9 +383,20 @@ func navigateAST(nav expr, parent *Node, vars LiftedArgs, rand RandomReader) ([]
 		stack = stack[1:]
 
 		switch item.ast.Kind() {
+		case celast.SelectKind:
+			c := item.ast.AsSelect()
+			child := &Node{
+				Predicate: &Predicate{
+					Ident:    c.FieldName(),
+					Operator: "select",
+				},
+			}
+			child.normalize()
+			result = append(result, child)
+			hasMacros = true
 		case celast.ComprehensionKind:
 			// These are not supported.  A comprehension is eg. `.exists` and must
-			// awlays run naively right now.
+			// always run naively right now.
 			c := item.ast.AsComprehension()
 			child := &Node{
 				Predicate: &Predicate{

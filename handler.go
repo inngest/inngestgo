@@ -45,6 +45,7 @@ var (
 	capabilities = sdk.Capabilities{
 		InBandSync: sdk.InBandSyncV1,
 		TrustProbe: sdk.TrustProbeV1,
+		Connect:    sdk.ConnectV1,
 	}
 )
 
@@ -57,6 +58,10 @@ func Register(funcs ...ServableFunction) {
 // Serve serves all registered functions within the default handler.
 func Serve(w http.ResponseWriter, r *http.Request) {
 	DefaultHandler.ServeHTTP(w, r)
+}
+
+func Connect(ctx context.Context) error {
+	return DefaultHandler.Connect(ctx)
 }
 
 type HandlerOpts struct {
@@ -82,6 +87,22 @@ type HandlerOpts struct {
 	//
 	// This only needs to be set when self hosting.
 	RegisterURL *string
+
+	// ConnectURLs are the URLs to use for establishing outbound connections.  If nil
+	// this defaults to Inngest's Connect endpoint.
+	//
+	// This only needs to be set when self hosting.
+	ConnectURLs []string
+
+	// InstanceId represents a stable identifier to be used for identifying connected SDKs.
+	// This can be a hostname or other identifier that remains stable across restarts.
+	//
+	// If nil, this defaults to the current machine's hostname.
+	InstanceId *string
+
+	// BuildId supplies an application version identifier. This should change
+	// whenever code within one of your Inngest function or any dependency thereof changes.
+	BuildId *string
 
 	// MaxBodySize is the max body size to read for incoming invoke requests
 	MaxBodySize int
@@ -175,6 +196,9 @@ type Handler interface {
 	// Register registers the given functions with the handler, allowing them to
 	// be invoked by Inngest.
 	Register(...ServableFunction)
+
+	// Connect establishes an outbound connection to Inngest
+	Connect(ctx context.Context) error
 }
 
 // NewHandler returns a new Handler for serving Inngest functions.
@@ -201,6 +225,8 @@ type handler struct {
 	funcs   []ServableFunction
 	// lock prevents reading the function maps while serving
 	l sync.RWMutex
+
+	useConnect bool
 }
 
 func (h *handler) SetOptions(opts HandlerOpts) Handler {
@@ -427,7 +453,7 @@ func (h *handler) inBandSync(
 		appURL = h.URL
 	}
 
-	fns, err := createFunctionConfigs(h.appName, h.funcs, *appURL)
+	fns, err := createFunctionConfigs(h.appName, h.funcs, *appURL, false)
 	if err != nil {
 		return fmt.Errorf("error creating function configs: %w", err)
 	}
@@ -510,9 +536,10 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 			Platform: platform(),
 		},
 		Capabilities: capabilities,
+		UseConnect:   h.useConnect,
 	}
 
-	fns, err := createFunctionConfigs(h.appName, h.funcs, *h.url(r))
+	fns, err := createFunctionConfigs(h.appName, h.funcs, *h.url(r), false)
 	if err != nil {
 		return fmt.Errorf("error creating function configs: %w", err)
 	}
@@ -609,11 +636,12 @@ func createFunctionConfigs(
 	appName string,
 	fns []ServableFunction,
 	appURL url.URL,
+	isConnect bool,
 ) ([]sdk.SDKFunction, error) {
 	if appName == "" {
 		return nil, fmt.Errorf("missing app name")
 	}
-	if appURL == (url.URL{}) {
+	if !isConnect && appURL == (url.URL{}) {
 		return nil, fmt.Errorf("missing URL")
 	}
 
@@ -813,8 +841,8 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	streamCancel()
 
 	// NOTE: When triggering step errors, we should have an OpcodeStepError
-	// within ops alongside an error.  We can safely ignore that error, as its
-	// onyl used for checking wither the step used a NoRetryError or RetryAtError
+	// within ops alongside an error.  We can safely ignore that error, as it's
+	// only used for checking whether the step used a NoRetryError or RetryAtError
 	//
 	// For that reason, we check those values first.
 	noRetry := sdkerrors.IsNoRetryError(err)
