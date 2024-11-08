@@ -552,6 +552,7 @@ func TestInspection(t *testing.T) {
 				"capabilities": map[string]any{
 					"in_band_sync": "v1",
 					"trust_probe":  "v1",
+					"connect":      "v1",
 				},
 				"env":                       nil,
 				"event_api_origin":          "https://inn.gs",
@@ -675,6 +676,7 @@ func TestInspection(t *testing.T) {
 				"capabilities": map[string]any{
 					"in_band_sync": "v1",
 					"trust_probe":  "v1",
+					"connect":      "v1",
 				},
 				"env":                       nil,
 				"event_api_origin":          "https://inn.gs",
@@ -800,6 +802,7 @@ func TestInBandSync(t *testing.T) {
 					"capabilities": map[string]any{
 						"in_band_sync": "v1",
 						"trust_probe":  "v1",
+						"connect":      "v1",
 					},
 					"env":                       "my-env",
 					"event_api_origin":          "https://inn.gs",
