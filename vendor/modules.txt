@@ -18,7 +18,6 @@ github.com/coder/websocket/internal/errd
 github.com/coder/websocket/internal/util
 github.com/coder/websocket/internal/wsjs
 github.com/coder/websocket/internal/xsync
-github.com/coder/websocket/wsjson
 # github.com/davecgh/go-spew v1.1.1
 ## explicit
 github.com/davecgh/go-spew/spew
@@ -95,11 +94,11 @@ github.com/hashicorp/hcl/hcl/token
 github.com/hashicorp/hcl/json/parser
 github.com/hashicorp/hcl/json/scanner
 github.com/hashicorp/hcl/json/token
-# github.com/inngest/expr v0.0.0-20241023211115-139798ff6d8a
-## explicit; go 1.21.0
+# github.com/inngest/expr v0.0.0-20241106234328-863dff7deec0
+## explicit; go 1.23.2
 github.com/inngest/expr
-# github.com/inngest/inngest v1.1.1-beta.1.0.20241104134158-d1f0bff09b25
-## explicit; go 1.22.0
+# github.com/inngest/inngest v1.1.1-beta.1.0.20241113071815-8a1f46789db5
+## explicit; go 1.23.2
 github.com/inngest/inngest/pkg/connect/types
 github.com/inngest/inngest/pkg/connect/wsproto
 github.com/inngest/inngest/pkg/consts
@@ -193,6 +192,12 @@ github.com/robfig/cron/v3
 github.com/rs/zerolog
 github.com/rs/zerolog/internal/cbor
 github.com/rs/zerolog/internal/json
+# github.com/sourcegraph/conc v0.3.0
+## explicit; go 1.19
+github.com/sourcegraph/conc
+github.com/sourcegraph/conc/internal/multierror
+github.com/sourcegraph/conc/panics
+github.com/sourcegraph/conc/pool
 # github.com/spf13/afero v1.6.0
 ## explicit; go 1.13
 github.com/spf13/afero
@@ -321,6 +326,9 @@ go.opentelemetry.io/proto/otlp/common/v1
 go.opentelemetry.io/proto/otlp/metrics/v1
 go.opentelemetry.io/proto/otlp/resource/v1
 go.opentelemetry.io/proto/otlp/trace/v1
+# go.uber.org/multierr v1.11.0
+## explicit; go 1.19
+go.uber.org/multierr
 # golang.org/x/crypto v0.28.0
 ## explicit; go 1.20
 golang.org/x/crypto/blake2b
@@ -349,7 +357,6 @@ golang.org/x/net/trace
 # golang.org/x/sync v0.8.0
 ## explicit; go 1.18
 golang.org/x/sync/errgroup
-golang.org/x/sync/semaphore
 # golang.org/x/sys v0.26.0
 ## explicit; go 1.18
 golang.org/x/sys/cpu
