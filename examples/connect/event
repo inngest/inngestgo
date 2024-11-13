@@ -1,0 +1,3 @@
+#!/bin/bash
+
+curl -X POST http://127.0.0.1:8288/e/test -d '{ "name": "test/connect.run", "data": {} }'
