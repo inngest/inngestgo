@@ -97,7 +97,7 @@ github.com/hashicorp/hcl/json/token
 # github.com/inngest/expr v0.0.0-20241106234328-863dff7deec0
 ## explicit; go 1.23.2
 github.com/inngest/expr
-# github.com/inngest/inngest v1.1.1-beta.1.0.20241113071815-8a1f46789db5
+# github.com/inngest/inngest v1.1.1-beta.1.0.20241114092623-00eeff1d18a7
 ## explicit; go 1.23.2
 github.com/inngest/inngest/pkg/connect/types
 github.com/inngest/inngest/pkg/connect/wsproto
@@ -158,6 +158,9 @@ github.com/ohler55/ojg/jp
 # github.com/oklog/ulid/v2 v2.1.0
 ## explicit; go 1.15
 github.com/oklog/ulid/v2
+# github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
+## explicit; go 1.16
+github.com/pbnjay/memory
 # github.com/pelletier/go-toml v1.9.4
 ## explicit; go 1.12
 github.com/pelletier/go-toml
