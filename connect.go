@@ -220,8 +220,9 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 
 		switch msg.Kind {
 		case connectproto.GatewayMessageType_GATEWAY_EXECUTOR_REQUEST:
+			// TODO: this should be a pool instead of dynamic goroutines
 			// Handle invoke in a non-blocking way to allow for other messages to be processed
-			go h.handleInvokeMessage(ctx, &msg)
+			go h.handleInvokeMessage(ctx, ws, &msg)
 		default:
 			h.h.Logger.Error("got unknown gateway request", "err", err)
 			continue
@@ -234,19 +235,19 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 	return nil
 }
 
-func (h *connectHandler) handleInvokeMessage(ctx context.Context, msg *connectproto.ConnectMessage) {
+func (h *connectHandler) handleInvokeMessage(ctx context.Context, ws *websocket.Conn, msg *connectproto.ConnectMessage) {
 	resp, err := h.connectInvoke(ctx, msg)
 	if err != nil {
 		h.h.Logger.Error("failed to handle sdk request", "err", err)
-		// TODO Should we drop the connection? Continue receiving messages?
-		return err
+		// TODO Should we drop the connection? Continue receiving messages? handle error
+		return
 	}
 
 	data, err := proto.Marshal(resp)
 	if err != nil {
 		h.h.Logger.Error("failed to serialize sdk response", "err", err)
 		// TODO This should never happen; Signal that we should retry
-		continue
+		return
 	}
 
 	err = wsproto.Write(ctx, ws, &connectproto.ConnectMessage{
@@ -256,7 +257,8 @@ func (h *connectHandler) handleInvokeMessage(ctx context.Context, msg *connectpr
 	if err != nil {
 		h.h.Logger.Error("failed to send sdk response", "err", err)
 		// TODO This should never happen; Signal that we should retry
-		continue
+		// continue
+		return
 	}
 }
 
