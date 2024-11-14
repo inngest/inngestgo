@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/coder/websocket"
 	"github.com/inngest/inngest/pkg/connect/types"
@@ -206,6 +207,11 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 		var msg connectproto.ConnectMessage
 		err = wsproto.Read(ctx, ws, &msg)
 		if err != nil {
+			closeErr := websocket.CloseError{}
+			if errors.As(err, &closeErr) {
+				h.h.Logger.Error("connection closed unexpectedly", "reason", closeErr.Reason)
+				return err
+			}
 			// TODO Handle issues reading message: Should we re-establish the connection?
 			return err
 		}
@@ -214,29 +220,8 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 
 		switch msg.Kind {
 		case connectproto.GatewayMessageType_GATEWAY_EXECUTOR_REQUEST:
-			resp, err := h.connectInvoke(ctx, &msg)
-			if err != nil {
-				h.h.Logger.Error("failed to handle sdk request", "err", err)
-				// TODO Should we drop the connection? Continue receiving messages?
-				return err
-			}
-
-			data, err := proto.Marshal(resp)
-			if err != nil {
-				h.h.Logger.Error("failed to serialize sdk response", "err", err)
-				// TODO This should never happen; Signal that we should retry
-				continue
-			}
-
-			err = wsproto.Write(ctx, ws, &connectproto.ConnectMessage{
-				Kind:    connectproto.GatewayMessageType_WORKER_REPLY,
-				Payload: data,
-			})
-			if err != nil {
-				h.h.Logger.Error("failed to send sdk response", "err", err)
-				// TODO This should never happen; Signal that we should retry
-				continue
-			}
+			// Handle invoke in a non-blocking way to allow for other messages to be processed
+			go h.handleInvokeMessage(ctx, &msg)
 		default:
 			h.h.Logger.Error("got unknown gateway request", "err", err)
 			continue
@@ -247,6 +232,32 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 	_ = ws.Close(websocket.StatusNormalClosure, "")
 
 	return nil
+}
+
+func (h *connectHandler) handleInvokeMessage(ctx context.Context, msg *connectproto.ConnectMessage) {
+	resp, err := h.connectInvoke(ctx, msg)
+	if err != nil {
+		h.h.Logger.Error("failed to handle sdk request", "err", err)
+		// TODO Should we drop the connection? Continue receiving messages?
+		return err
+	}
+
+	data, err := proto.Marshal(resp)
+	if err != nil {
+		h.h.Logger.Error("failed to serialize sdk response", "err", err)
+		// TODO This should never happen; Signal that we should retry
+		continue
+	}
+
+	err = wsproto.Write(ctx, ws, &connectproto.ConnectMessage{
+		Kind:    connectproto.GatewayMessageType_WORKER_REPLY,
+		Payload: data,
+	})
+	if err != nil {
+		h.h.Logger.Error("failed to send sdk response", "err", err)
+		// TODO This should never happen; Signal that we should retry
+		continue
+	}
 }
 
 // connectInvoke is the counterpart to invoke for connect
