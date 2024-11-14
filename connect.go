@@ -181,7 +181,6 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 				Os:       runtime.GOOS,
 			},
 			Environment: h.h.Env,
-			// Framework:        ?,
 			Platform:    Ptr(platform()),
 			SdkVersion:  SDKVersion,
 			SdkLanguage: SDKLanguage,
