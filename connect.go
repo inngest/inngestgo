@@ -37,6 +37,12 @@ type connectHandler struct {
 	messageBufferLock sync.Mutex
 }
 
+// authContext is wrapper for information related to authentication
+type authContext struct {
+	signingKey string
+	fallback   bool
+}
+
 func (h *connectHandler) connectURLs() []string {
 	if h.h.isDev() {
 		return []string{fmt.Sprintf("%s/connect", strings.Replace(DevServerURL(), "http", "ws", 1))}
@@ -100,6 +106,7 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 	if signingKey == "" {
 		return fmt.Errorf("must provide signing key")
 	}
+	auth := authContext{signingKey: signingKey}
 
 	numCpuCores := runtime.NumCPU()
 	totalMem := memory.TotalMemory()
@@ -129,7 +136,7 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 		attempts++
 
 		shouldReconnect, err := h.connect(ctx, connectionEstablishData{
-			signingKey:            signingKey,
+			signingKey:            auth.signingKey,
 			numCpuCores:           int32(numCpuCores),
 			totalMem:              int64(totalMem),
 			marshaledFns:          marshaledFns,
@@ -147,24 +154,21 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 			switch closeErr.Reason {
 			// If auth failed, retry with fallback key
 			case syscode.CodeConnectAuthFailed:
+				if auth.fallback {
+					return fmt.Errorf("failed to authenticate with fallback key, exiting")
+				}
+
 				signingKeyFallback := h.h.GetSigningKeyFallback()
-
-				if signingKey == signingKeyFallback {
-					return fmt.Errorf("invalid fallback signing key")
-				}
-
 				if signingKeyFallback != "" {
-					signingKey = signingKeyFallback
+					auth = authContext{signingKey: signingKeyFallback, fallback: true}
 				}
 
 				continue
+
 			// Retry on the following error codes
-			case syscode.CodeConnectGatewayClosing:
+			case syscode.CodeConnectGatewayClosing, syscode.CodeConnectInternal, syscode.CodeConnectWorkerHelloTimeout:
 				continue
-			case syscode.CodeConnectInternal:
-				continue
-			case syscode.CodeConnectWorkerHelloTimeout:
-				continue
+
 			default:
 				// If we received a reason  that's non-retriable, stop here.
 				return fmt.Errorf("connect failed with error code %q", closeErr.Reason)
@@ -181,7 +185,7 @@ type connectionEstablishData struct {
 	marshaledCapabilities []byte
 }
 
-func (h *connectHandler) connect(ctx context.Context, data connectionEstablishData) (bool, error) {
+func (h *connectHandler) connect(ctx context.Context, data connectionEstablishData) (reconnect bool, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
