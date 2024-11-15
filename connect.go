@@ -322,8 +322,8 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 			case connectproto.GatewayMessageType_GATEWAY_EXECUTOR_REQUEST:
 				// TODO: this should be a pool instead of dynamic goroutines
 				// Handle invoke in a non-blocking way to allow for other messages to be processed
+				inProgress.Add(1)
 				go func() {
-					inProgress.Add(1)
 					defer inProgress.Done()
 
 					// Always make sure the invoke finishes properly
