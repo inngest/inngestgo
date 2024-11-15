@@ -99,11 +99,9 @@ func Infer[InputT any, OutputT any](
 
 		// Grab the data as the step output type.
 		out = v.(OutputT)
-		if err := json.Unmarshal(val, out); err != nil {
-			mgr.SetErr(fmt.Errorf("error unmarshalling state for step '%s': %w", id, err))
-			panic(ControlHijack{})
-		}
-		return out, nil
+		err := json.Unmarshal(val, out)
+		// NOTE: API responses may change, so return both the val and the error.
+		return out, err
 	}
 
 	reqBytes, err := json.Marshal(in.Body)
