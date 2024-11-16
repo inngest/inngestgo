@@ -97,10 +97,20 @@ func Infer[InputT any, OutputT any](
 			return val, nil
 		}
 
-		// Grab the data as the step output type.
-		out = v.(OutputT)
-		err := json.Unmarshal(val, out)
+		// Check to see if we were passed a pointer or not. If not, we must make this a pointer.
+		if reflect.TypeOf(out).Kind() != reflect.Ptr {
+			v := reflect.New(reflect.TypeOf(out)).Interface()
+			err := json.Unmarshal(val, v)
+			return reflect.ValueOf(v).Elem().Interface().(OutputT), err
+		}
+
 		// NOTE: API responses may change, so return both the val and the error.
+		v = reflect.New(reflect.TypeOf(out).Elem()).Interface()
+
+		err := json.Unmarshal(val, v)
+		res := reflect.ValueOf(v).Interface()
+		out, _ = res.(OutputT)
+
 		return out, err
 	}
 
