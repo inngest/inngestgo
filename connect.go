@@ -355,6 +355,8 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 							h.h.Logger.Error("gateway connection closed unexpectedly", "err", err)
 							return
 						}
+
+						// TODO If error is not connection-related, should we retry? Send the buffered message?
 					}
 				}()
 			default:
@@ -404,7 +406,7 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 }
 
 func (h *connectHandler) handleInvokeMessage(ctx context.Context, ws *websocket.Conn, msg *connectproto.ConnectMessage) error {
-	resp, err := h.connectInvoke(ctx, msg)
+	resp, err := h.connectInvoke(ctx, ws, msg)
 	if err != nil {
 		h.h.Logger.Error("failed to handle sdk request", "err", err)
 		// TODO Should we drop the connection? Continue receiving messages?
@@ -439,9 +441,10 @@ func (h *connectHandler) handleInvokeMessage(ctx context.Context, ws *websocket.
 }
 
 // connectInvoke is the counterpart to invoke for connect
-func (h *connectHandler) connectInvoke(ctx context.Context, msg *connectproto.ConnectMessage) (*connectproto.SDKResponse, error) {
+func (h *connectHandler) connectInvoke(ctx context.Context, ws *websocket.Conn, msg *connectproto.ConnectMessage) (*connectproto.SDKResponse, error) {
 	body := connectproto.GatewayExecutorRequestData{}
 	if err := proto.Unmarshal(msg.Payload, &body); err != nil {
+		// TODO Should we send this back to the gateway?
 		h.h.Logger.Error("error decoding gateway request data", "error", err)
 		return nil, fmt.Errorf("invalid gateway message data: %w", err)
 	}
@@ -450,12 +453,33 @@ func (h *connectHandler) connectInvoke(ctx context.Context, msg *connectproto.Co
 	// TODO Replace with Protobuf
 	var request sdkrequest.Request
 	if err := json.Unmarshal(body.RequestPayload, &request); err != nil {
+		// TODO Should we send this back to the gateway? Previously this was a status code 400 public error with "malformed input"
 		h.h.Logger.Error("error decoding sdk request", "error", err)
+		return nil, fmt.Errorf("invalid SDK request payload: %w", err)
+	}
+
+	ackPayload, err := proto.Marshal(&connectproto.WorkerRequestAckData{
+		RequestId:    body.RequestId,
+		AppId:        body.AppId,
+		FunctionSlug: body.FunctionSlug,
+		StepId:       body.StepId,
+	})
+	if err != nil {
+		h.h.Logger.Error("error marshaling request ack", "error", err)
 		return nil, publicerr.Error{
 			Message: "malformed input",
 			Status:  400,
 		}
 	}
+
+	// Ack message
+	err = wsproto.Write(ctx, ws, &connectproto.ConnectMessage{
+		Kind:    connectproto.GatewayMessageType_WORKER_REQUEST_ACK,
+		Payload: ackPayload,
+	})
+
+	// TODO Should we wait for a gateway response before starting to process? What if the gateway fails acking and we start too early?
+	// This should not happen but could lead to double processing of the same message
 
 	if request.UseAPI {
 		// TODO: implement this
