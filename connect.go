@@ -15,6 +15,7 @@ import (
 	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
 	sdkerrors "github.com/inngest/inngestgo/errors"
 	"github.com/pbnjay/memory"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"io"
 	"net/url"
@@ -279,45 +280,20 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 
 	inProgress := sync.WaitGroup{}
 
-	var (
-		closeErr     error
-		closeErrLock sync.Mutex
-	)
-
-	readLoopCtx, cancelReadLoop := context.WithCancel(ctx)
-	go func() {
-		// Close connection if run loop ends
-		defer cancelReadLoop()
-
+	eg := errgroup.Group{}
+	eg.Go(func() error {
 		for {
-			if readLoopCtx.Err() != nil {
-				break
+			if ctx.Err() != nil {
+				return ctx.Err()
 			}
 
 			var msg connectproto.ConnectMessage
-			err = wsproto.Read(readLoopCtx, ws, &msg)
+			err = wsproto.Read(ctx, ws, &msg)
 			if err != nil {
-				// connection lost with reason
-				cerr := websocket.CloseError{}
-				if errors.As(err, &cerr) {
-					h.h.Logger.Error("connection closed unexpectedly", "reason", cerr.Reason)
-					closeErrLock.Lock()
-					closeErr = cerr
-					closeErrLock.Unlock()
-					// Reconnect!
-					return
-				}
-
-				// connection lost without reason
-				if errors.Is(err, io.EOF) {
-					h.h.Logger.Error("failed to read message from gateway, lost connection unexpectedly", "err", err)
-					return
-				}
-
 				h.h.Logger.Error("failed to read message", "err", err)
 
 				// The connection may still be active, but for some reason we couldn't read the message
-				return
+				return err
 			}
 
 			h.h.Logger.Debug("received gateway request", "msg", &msg)
@@ -356,20 +332,31 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 				continue
 			}
 		}
-	}()
+	})
 
-	<-readLoopCtx.Done()
-
-	// In case the gateway intentionally closed the connection, we'll receive a close error
-	if closeErr != nil {
-		return true, fmt.Errorf("connection closed unexpectedly: %w", closeErr)
-	}
-
-	// If read loop ended, this could be for two reasons
-	// - Connection loss (io.EOF), read loop terminated intentionally
+	// If read loop ends, this can be for two reasons
+	// - Connection loss (io.EOF), read loop terminated intentionally (CloseError), other error (unexpected)
 	// - Worker shutdown, parent context got canceled
-	if ctx.Err() == nil {
-		return true, fmt.Errorf("connection closed unexpectedly")
+	if err := eg.Wait(); err != nil {
+		// In case the gateway intentionally closed the connection, we'll receive a close error
+		cerr := websocket.CloseError{}
+		if errors.As(err, &cerr) {
+			h.h.Logger.Error("connection closed with reason", "reason", cerr.Reason)
+
+			// Reconnect!
+			return true, fmt.Errorf("connection closed with reason %q: %w", cerr.Reason, cerr)
+		}
+
+		// connection closed without reason
+		if errors.Is(err, io.EOF) {
+			h.h.Logger.Error("failed to read message from gateway, lost connection unexpectedly", "err", err)
+			return true, fmt.Errorf("connection closed unexpectedly: %w", cerr)
+		}
+
+		// If this is not a worker shutdown, we should reconnect
+		if ctx.Err() == nil {
+			return true, fmt.Errorf("connection closed unexpectedly: %w", ctx.Err())
+		}
 	}
 
 	// Perform graceful shutdown routine
