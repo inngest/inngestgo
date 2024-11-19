@@ -274,9 +274,39 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 		}
 	}
 
-	// TODO Read gateway ready
+	// Wait for gateway ready message
+	{
+		connectionReadyTimeout, cancelConnectionReadyTimeout := context.WithTimeout(ctx, 20*time.Second)
+		defer cancelConnectionReadyTimeout()
+		var connectionReadyMsg connectproto.ConnectMessage
+		err = wsproto.Read(connectionReadyTimeout, ws, &connectionReadyMsg)
+		if err != nil {
+			return true, fmt.Errorf("did not receive gateway connection ready message: %w", err)
+		}
 
-	// TODO Send buffered but unsent messages if connection was re-established
+		if connectionReadyMsg.Kind != connectproto.GatewayMessageType_GATEWAY_CONNECTION_READY {
+			return true, fmt.Errorf("expected gateway connection ready message, got %s", connectionReadyMsg.Kind)
+		}
+
+		h.h.Logger.Debug("received gateway connection ready message")
+	}
+
+	// Send buffered but unsent messages if connection was re-established
+	if len(h.messageBuffer) > 0 {
+		processed := 0
+		for _, msg := range h.messageBuffer {
+			err := wsproto.Write(ctx, ws, msg)
+			if err != nil {
+				// Only send buffered messages once
+				h.messageBuffer = h.messageBuffer[processed:]
+
+				h.h.Logger.Error("failed to send buffered message", "err", err)
+				return true, fmt.Errorf("could not send buffered message: %w", err)
+			}
+			processed++
+		}
+		h.messageBuffer = nil
+	}
 
 	inProgress := sync.WaitGroup{}
 
