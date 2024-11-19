@@ -29,6 +29,11 @@ import (
 	"time"
 )
 
+type workerPoolMsg struct {
+	msg *connectproto.ConnectMessage
+	ws  *websocket.Conn
+}
+
 type connectHandler struct {
 	h *handler
 
@@ -36,6 +41,10 @@ type connectHandler struct {
 
 	messageBuffer     []*connectproto.ConnectMessage
 	messageBufferLock sync.Mutex
+
+	inProgress sync.WaitGroup
+
+	workerPoolMsgs chan workerPoolMsg
 }
 
 // authContext is wrapper for information related to authentication
@@ -84,7 +93,22 @@ func (h *connectHandler) connectToGateway(ctx context.Context) (*websocket.Conn,
 
 func (h *handler) Connect(ctx context.Context) error {
 	h.useConnect = true
-	ch := connectHandler{h: h}
+
+	// Should we make this configurable?
+	// This determines how many messages can be processed by each worker at once.
+	numGoroutineWorkers := 1_000
+
+	ch := connectHandler{
+		h: h,
+
+		// Should this use the same buffer size as the worker pool?
+		workerPoolMsgs: make(chan workerPoolMsg, numGoroutineWorkers),
+	}
+
+	for i := 0; i < numGoroutineWorkers; i++ {
+		go ch.workerPool(ctx)
+	}
+
 	return ch.Connect(ctx)
 }
 
@@ -100,6 +124,17 @@ func (h *connectHandler) instanceId() string {
 
 	// TODO Is there any stable identifier that can be used as a fallback?
 	return "<missing-instance-id>"
+}
+
+func (h *connectHandler) workerPool(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg := <-h.workerPoolMsgs:
+			h.processExecutorRequest(msg.ws, msg.msg)
+		}
+	}
 }
 
 func (h *connectHandler) Connect(ctx context.Context) error {
@@ -184,9 +219,10 @@ type connectionEstablishData struct {
 	totalMem              int64
 	marshaledFns          []byte
 	marshaledCapabilities []byte
+	manualReadinessAck    bool
 }
 
-func (h *connectHandler) connect(ctx context.Context, data connectionEstablishData) (reconnect bool, err error) {
+func (h *connectHandler) prepareConnection(ctx context.Context, data connectionEstablishData) (*websocket.Conn, bool, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -195,7 +231,7 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 
 	ws, err := h.connectToGateway(connectTimeout)
 	if err != nil {
-		return false, fmt.Errorf("could not connect: %w", err)
+		return nil, false, fmt.Errorf("could not connect: %w", err)
 	}
 	defer func() {
 		// TODO Do we need to include a reason here? If we only use this for unexpected disconnects, probably not
@@ -205,7 +241,7 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 	// Connection ID is unique per connection, reconnections should get a new ID
 	h.connectionId = ulid.MustNew(ulid.Now(), rand.Reader)
 
-	h.h.Logger.Debug("connection established")
+	h.h.Logger.Debug("websocket connection established")
 
 	// Wait for gateway hello message
 	{
@@ -214,11 +250,11 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 		var helloMessage connectproto.ConnectMessage
 		err = wsproto.Read(initialMessageTimeout, ws, &helloMessage)
 		if err != nil {
-			return true, fmt.Errorf("did not receive gateway hello message: %w", err)
+			return nil, true, fmt.Errorf("did not receive gateway hello message: %w", err)
 		}
 
 		if helloMessage.Kind != connectproto.GatewayMessageType_GATEWAY_HELLO {
-			return true, fmt.Errorf("expected gateway hello message, got %s", helloMessage.Kind)
+			return nil, true, fmt.Errorf("expected gateway hello message, got %s", helloMessage.Kind)
 		}
 
 		h.h.Logger.Debug("received gateway hello message")
@@ -228,7 +264,7 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 	{
 		hashedKey, err := hashedSigningKey([]byte(data.signingKey))
 		if err != nil {
-			return false, fmt.Errorf("could not hash signing key: %w", err)
+			return nil, false, fmt.Errorf("could not hash signing key: %w", err)
 		}
 
 		apiOrigin := defaultAPIOrigin
@@ -256,13 +292,14 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 				MemBytes: data.totalMem,
 				Os:       runtime.GOOS,
 			},
-			Environment: h.h.Env,
-			Platform:    Ptr(platform()),
-			SdkVersion:  SDKVersion,
-			SdkLanguage: SDKLanguage,
+			Environment:              h.h.Env,
+			Platform:                 Ptr(platform()),
+			SdkVersion:               SDKVersion,
+			SdkLanguage:              SDKLanguage,
+			WorkerManualReadinessAck: data.manualReadinessAck,
 		})
 		if err != nil {
-			return false, fmt.Errorf("could not serialize sdk connect message: %w", err)
+			return nil, false, fmt.Errorf("could not serialize sdk connect message: %w", err)
 		}
 
 		err = wsproto.Write(ctx, ws, &connectproto.ConnectMessage{
@@ -270,7 +307,7 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 			Payload: data,
 		})
 		if err != nil {
-			return true, fmt.Errorf("could not send initial message")
+			return nil, true, fmt.Errorf("could not send initial message")
 		}
 	}
 
@@ -281,34 +318,53 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 		var connectionReadyMsg connectproto.ConnectMessage
 		err = wsproto.Read(connectionReadyTimeout, ws, &connectionReadyMsg)
 		if err != nil {
-			return true, fmt.Errorf("did not receive gateway connection ready message: %w", err)
+			return nil, true, fmt.Errorf("did not receive gateway connection ready message: %w", err)
 		}
 
 		if connectionReadyMsg.Kind != connectproto.GatewayMessageType_GATEWAY_CONNECTION_READY {
-			return true, fmt.Errorf("expected gateway connection ready message, got %s", connectionReadyMsg.Kind)
+			return nil, true, fmt.Errorf("expected gateway connection ready message, got %s", connectionReadyMsg.Kind)
 		}
 
 		h.h.Logger.Debug("received gateway connection ready message")
 	}
 
-	// Send buffered but unsent messages if connection was re-established
-	if len(h.messageBuffer) > 0 {
-		processed := 0
-		for _, msg := range h.messageBuffer {
-			err := wsproto.Write(ctx, ws, msg)
-			if err != nil {
-				// Only send buffered messages once
-				h.messageBuffer = h.messageBuffer[processed:]
+	return ws, false, nil
+}
 
-				h.h.Logger.Error("failed to send buffered message", "err", err)
-				return true, fmt.Errorf("could not send buffered message: %w", err)
-			}
-			processed++
+func (h *connectHandler) sendBufferedMessages(ws *websocket.Conn) error {
+	processed := 0
+	for _, msg := range h.messageBuffer {
+		// always send the message, even if the context is canceled
+		err := wsproto.Write(context.Background(), ws, msg)
+		if err != nil {
+			// Only send buffered messages once
+			h.messageBuffer = h.messageBuffer[processed:]
+
+			h.h.Logger.Error("failed to send buffered message", "err", err)
+			return fmt.Errorf("could not send buffered message: %w", err)
 		}
-		h.messageBuffer = nil
+
+		h.h.Logger.Debug("sent buffered message", "msg", msg)
+		processed++
+	}
+	h.messageBuffer = nil
+	return nil
+}
+
+func (h *connectHandler) connect(ctx context.Context, data connectionEstablishData) (reconnect bool, err error) {
+	ws, reconnect, err := h.prepareConnection(ctx, data)
+	if err != nil {
+		return reconnect, fmt.Errorf("could not establish connection: %w", err)
 	}
 
-	inProgress := sync.WaitGroup{}
+	// Send buffered but unsent messages if connection was re-established
+	if len(h.messageBuffer) > 0 {
+		h.h.Logger.Debug("sending buffered messages", "count", len(h.messageBuffer))
+		err = h.sendBufferedMessages(ws)
+		if err != nil {
+			return true, fmt.Errorf("could not send buffered messages: %w", err)
+		}
+	}
 
 	eg := errgroup.Group{}
 	eg.Go(func() error {
@@ -330,35 +386,12 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 
 			switch msg.Kind {
 			case connectproto.GatewayMessageType_GATEWAY_EXECUTOR_REQUEST:
-				// TODO: this should be a pool instead of dynamic goroutines
 				// Handle invoke in a non-blocking way to allow for other messages to be processed
-				inProgress.Add(1)
-				go func() {
-					defer inProgress.Done()
-
-					// Always make sure the invoke finishes properly
-					processCtx := context.Background()
-
-					err := h.handleInvokeMessage(processCtx, ws, &msg)
-
-					// When we encounter an error, we cannot retry the connection from inside the goroutine.
-					// If we're dealing with connection loss, the next read loop will fail with the same error
-					// and handle the reconnection.
-					if err != nil {
-						cerr := websocket.CloseError{}
-						if errors.As(err, &cerr) {
-							h.h.Logger.Error("gateway connection closed with reason", "reason", cerr.Reason)
-							return
-						}
-
-						if errors.Is(err, io.EOF) {
-							h.h.Logger.Error("gateway connection closed unexpectedly", "err", err)
-							return
-						}
-
-						// TODO If error is not connection-related, should we retry? Send the buffered message?
-					}
-				}()
+				h.inProgress.Add(1)
+				h.workerPoolMsgs <- workerPoolMsg{
+					msg: &msg,
+					ws:  ws,
+				}
 			default:
 				h.h.Logger.Error("got unknown gateway request", "err", err)
 				continue
@@ -393,16 +426,102 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 
 	// Perform graceful shutdown routine
 
-	// TODO Signal gateway that we won't process additional messages!
+	// Signal gateway that we won't process additional messages!
+	{
+		err := wsproto.Write(context.Background(), ws, &connectproto.ConnectMessage{
+			Kind: connectproto.GatewayMessageType_WORKER_PAUSE,
+		})
+		if err != nil {
+			// We should not exit here, as we're already in the shutdown routine
+			h.h.Logger.Error("failed to serialize worker pause msg", "err", err)
+		}
+	}
 
 	// Wait until all in-progress requests are completed
-	inProgress.Wait()
+	h.inProgress.Wait()
 
-	// TODO Send out buffered messages, using new connection if necessary!
+	// Send out buffered messages, using new connection if necessary!
+	h.messageBufferLock.Lock()
+	defer h.messageBufferLock.Unlock()
+	if len(h.messageBuffer) > 0 {
+		attempts := 0
+		for {
+			attempts++
+			if attempts == 3 {
+				h.h.Logger.Error("could not establish connection after 3 attempts")
+				break
+			}
 
+			reconnect, err = h.withTemporaryConnection(data, func(ws *websocket.Conn) error {
+				// Send buffered messages
+				err := h.sendBufferedMessages(ws)
+				if err != nil {
+					return fmt.Errorf("could not send buffered messages: %w", err)
+				}
+
+				return nil
+			})
+			if err != nil {
+				if !reconnect {
+					h.h.Logger.Error("could not establish connection for sending buffered messages", "err", err)
+					break
+				}
+				continue
+			}
+		}
+	}
+
+	// Attempt to shut down connection if not already done
 	_ = ws.Close(websocket.StatusNormalClosure, connectproto.WorkerDisconnectReason_WORKER_SHUTDOWN.String())
 
 	return false, nil
+}
+
+func (h *connectHandler) withTemporaryConnection(data connectionEstablishData, handler func(ws *websocket.Conn) error) (bool, error) {
+	// Prevent this connection from receiving work
+	data.manualReadinessAck = true
+
+	ws, reconnect, err := h.prepareConnection(context.Background(), data)
+	if err != nil {
+		return reconnect, fmt.Errorf("could not establish temporary connection: %w", err)
+	}
+	defer func() {
+		_ = ws.Close(websocket.StatusNormalClosure, connectproto.WorkerDisconnectReason_WORKER_SHUTDOWN.String())
+	}()
+
+	err = handler(ws)
+	if err != nil {
+		return false, err
+	}
+
+	return false, nil
+}
+
+func (h *connectHandler) processExecutorRequest(ws *websocket.Conn, msg *connectproto.ConnectMessage) {
+	defer h.inProgress.Done()
+
+	// Always make sure the invoke finishes properly
+	processCtx := context.Background()
+
+	err := h.handleInvokeMessage(processCtx, ws, msg)
+
+	// When we encounter an error, we cannot retry the connection from inside the goroutine.
+	// If we're dealing with connection loss, the next read loop will fail with the same error
+	// and handle the reconnection.
+	if err != nil {
+		cerr := websocket.CloseError{}
+		if errors.As(err, &cerr) {
+			h.h.Logger.Error("gateway connection closed with reason", "reason", cerr.Reason)
+			return
+		}
+
+		if errors.Is(err, io.EOF) {
+			h.h.Logger.Error("gateway connection closed unexpectedly", "err", err)
+			return
+		}
+
+		// TODO If error is not connection-related, should we retry? Send the buffered message?
+	}
 }
 
 func (h *connectHandler) handleInvokeMessage(ctx context.Context, ws *websocket.Conn, msg *connectproto.ConnectMessage) error {

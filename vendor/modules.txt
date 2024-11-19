@@ -1,5 +1,8 @@
 # github.com/99designs/gqlgen v0.17.27
 ## explicit; go 1.18
+# github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da
+## explicit
+github.com/aead/chacha20/chacha
 # github.com/agnivade/levenshtein v1.1.1
 ## explicit; go 1.13
 # github.com/antlr4-go/antlr/v4 v4.13.1
@@ -105,7 +108,7 @@ github.com/hashicorp/hcl/json/token
 # github.com/inngest/expr v0.0.0-20241106234328-863dff7deec0
 ## explicit; go 1.23.2
 github.com/inngest/expr
-# github.com/inngest/inngest v1.1.1-beta.1.0.20241119124820-de50b510dec9
+# github.com/inngest/inngest v1.1.1-beta.1.0.20241119190743-29bd75bd8025
 ## explicit; go 1.23.2
 github.com/inngest/inngest/pkg/connect/types
 github.com/inngest/inngest/pkg/connect/wsproto
@@ -523,3 +526,6 @@ gopkg.in/yaml.v2
 # gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3
+# lukechampine.com/frand v1.4.2
+## explicit; go 1.12
+lukechampine.com/frand
