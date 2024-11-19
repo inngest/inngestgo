@@ -404,10 +404,14 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 		}
 	})
 
+	h.h.Logger.Debug("waiting for read loop to end")
+
 	// If read loop ends, this can be for two reasons
 	// - Connection loss (io.EOF), read loop terminated intentionally (CloseError), other error (unexpected)
 	// - Worker shutdown, parent context got canceled
 	if err := eg.Wait(); err != nil {
+		h.h.Logger.Debug("read loop ended with error", "err", err)
+
 		// In case the gateway intentionally closed the connection, we'll receive a close error
 		cerr := websocket.CloseError{}
 		if errors.As(err, &cerr) {
@@ -433,6 +437,7 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 
 	// Signal gateway that we won't process additional messages!
 	{
+		h.h.Logger.Debug("sending worker pause message")
 		err := wsproto.Write(context.Background(), ws, &connectproto.ConnectMessage{
 			Kind: connectproto.GatewayMessageType_WORKER_PAUSE,
 		})
@@ -441,6 +446,8 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 			h.h.Logger.Error("failed to serialize worker pause msg", "err", err)
 		}
 	}
+
+	h.h.Logger.Debug("waiting for in-progress requests to finish")
 
 	// Wait until all in-progress requests are completed
 	h.inProgress.Wait()
