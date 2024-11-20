@@ -93,19 +93,17 @@ func (h *connectHandler) connectToGateway(ctx context.Context) (*websocket.Conn,
 
 func (h *handler) Connect(ctx context.Context) error {
 	h.useConnect = true
+	concurrency := h.HandlerOpts.GetWorkerConcurrency()
 
-	// Should we make this configurable?
 	// This determines how many messages can be processed by each worker at once.
-	numGoroutineWorkers := 1_000
-
 	ch := connectHandler{
 		h: h,
 
 		// Should this use the same buffer size as the worker pool?
-		workerPoolMsgs: make(chan workerPoolMsg, numGoroutineWorkers),
+		workerPoolMsgs: make(chan workerPoolMsg, concurrency),
 	}
 
-	for i := 0; i < numGoroutineWorkers; i++ {
+	for i := 0; i < concurrency; i++ {
 		go ch.workerPool(ctx)
 	}
 
