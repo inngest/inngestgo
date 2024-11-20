@@ -604,10 +604,16 @@ func (h *connectHandler) connectInvoke(ctx context.Context, ws *websocket.Conn, 
 	}
 
 	// Ack message
-	err = wsproto.Write(ctx, ws, &connectproto.ConnectMessage{
+	if err := wsproto.Write(ctx, ws, &connectproto.ConnectMessage{
 		Kind:    connectproto.GatewayMessageType_WORKER_REQUEST_ACK,
 		Payload: ackPayload,
-	})
+	}); err != nil {
+		h.h.Logger.Error("error sending request ack", "error", err)
+		return nil, publicerr.Error{
+			Message: "failed to ack worker request",
+			Status:  400,
+		}
+	}
 
 	// TODO Should we wait for a gateway response before starting to process? What if the gateway fails acking and we start too early?
 	// This should not happen but could lead to double processing of the same message
