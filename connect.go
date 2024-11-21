@@ -30,6 +30,10 @@ import (
 	"time"
 )
 
+const (
+	WorkerHeartbeatInterval = 10 * time.Second
+)
+
 type workerPoolMsg struct {
 	msg *connectproto.ConnectMessage
 	ws  *websocket.Conn
@@ -503,6 +507,25 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 			return true, fmt.Errorf("could not send buffered messages: %w", err)
 		}
 	}
+
+	go func() {
+		heartbeatTicker := time.NewTicker(WorkerHeartbeatInterval)
+		defer heartbeatTicker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-heartbeatTicker.C:
+				err := wsproto.Write(ctx, ws, &connectproto.ConnectMessage{
+					Kind: connectproto.GatewayMessageType_WORKER_HEARTBEAT,
+				})
+				if err != nil {
+					h.h.Logger.Error("failed to send worker heartbeat", "err", err)
+				}
+			}
+
+		}
+	}()
 
 	eg := errgroup.Group{}
 	eg.Go(func() error {
