@@ -172,7 +172,7 @@ func (h HandlerOpts) GetSigningKeyFallback() string {
 // GetAPIOrigin returns the host to use for sending API requests
 func (h HandlerOpts) GetAPIBaseURL() string {
 	if h.isDev() {
-		return devServerOrigin
+		return DevServerURL()
 	}
 
 	if h.APIBaseURL == nil {
@@ -190,7 +190,7 @@ func (h HandlerOpts) GetAPIBaseURL() string {
 // GetEventAPIOrigin returns the host to use for sending events
 func (h HandlerOpts) GetEventAPIBaseURL() string {
 	if h.isDev() {
-		return devServerOrigin
+		return DevServerURL()
 	}
 
 	if h.EventAPIBaseURL == nil {
@@ -261,7 +261,7 @@ func (h HandlerOpts) GetWorkerConcurrency() int {
 }
 
 func (h HandlerOpts) isDev() bool {
-	return h.Dev != nil && *h.Dev
+	return (h.Dev != nil && *h.Dev) || IsDev()
 }
 
 // Handler represents a handler which serves the Inngest API via HTTP.  This provides
@@ -706,14 +706,6 @@ func (h *handler) url(r *http.Request) *url.URL {
 	}
 	u, _ := url.Parse(fmt.Sprintf("%s://%s%s", scheme, r.Host, r.RequestURI))
 	return u
-}
-
-func (h *handler) isDev() bool {
-	if h.Dev != nil {
-		return *h.Dev
-	}
-
-	return IsDev()
 }
 
 func createFunctionConfigs(
