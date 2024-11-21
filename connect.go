@@ -18,6 +18,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"io"
+	"net"
 	"net/url"
 	"runtime"
 	"sync"
@@ -107,7 +108,20 @@ func (h *handler) Connect(ctx context.Context) error {
 		go ch.workerPool(ctx)
 	}
 
-	return ch.Connect(ctx)
+	defer func() {
+		// TODO Push remaining messages to another destination for processing?
+	}()
+
+	err := ch.Connect(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+
+		return fmt.Errorf("could not establish connection: %w", err)
+	}
+
+	return nil
 }
 
 func (h *connectHandler) instanceId() string {
@@ -329,7 +343,7 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 func (h *connectHandler) sendBufferedMessages(ws *websocket.Conn) error {
 	processed := 0
 	for _, msg := range h.messageBuffer {
-		// always send the message, even if the context is canceled
+		// always send the message, even if the context is cancelled
 		err := wsproto.Write(context.Background(), ws, msg)
 		if err != nil {
 			// Only send buffered messages once
@@ -406,8 +420,8 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 
 	// If read loop ends, this can be for two reasons
 	// - Connection loss (io.EOF), read loop terminated intentionally (CloseError), other error (unexpected)
-	// - Worker shutdown, parent context got canceled
-	if err := eg.Wait(); err != nil {
+	// - Worker shutdown, parent context got cancelled
+	if err := eg.Wait(); err != nil && ctx.Err() == nil {
 		h.h.Logger.Debug("read loop ended with error", "err", err)
 
 		// In case the gateway intentionally closed the connection, we'll receive a close error
@@ -420,18 +434,16 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 		}
 
 		// connection closed without reason
-		if errors.Is(err, io.EOF) {
+		if errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) {
 			h.h.Logger.Error("failed to read message from gateway, lost connection unexpectedly", "err", err)
 			return true, fmt.Errorf("connection closed unexpectedly: %w", cerr)
 		}
 
 		// If this is not a worker shutdown, we should reconnect
-		if ctx.Err() == nil {
-			return true, fmt.Errorf("connection closed unexpectedly: %w", ctx.Err())
-		}
+		return true, fmt.Errorf("connection closed unexpectedly: %w", ctx.Err())
 	}
 
-	// Perform graceful shutdown routine
+	// Perform graceful shutdown routine (context was cancelled)
 
 	// Signal gateway that we won't process additional messages!
 	{
@@ -479,6 +491,8 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 				continue
 			}
 		}
+
+		// TODO Push remaining messages to another destination for processing?
 	}
 
 	// Attempt to shut down connection if not already done
@@ -501,7 +515,7 @@ func (h *connectHandler) withTemporaryConnection(data connectionEstablishData, h
 
 	err = handler(ws)
 	if err != nil {
-		return false, err
+		return true, err
 	}
 
 	return false, nil
@@ -602,6 +616,7 @@ func (h *connectHandler) connectInvoke(ctx context.Context, ws *websocket.Conn, 
 	}
 
 	// Ack message
+	// If we're shutting down (context is canceled) we will not ack, which is desired!
 	if err := wsproto.Write(ctx, ws, &connectproto.ConnectMessage{
 		Kind:    connectproto.GatewayMessageType_WORKER_REQUEST_ACK,
 		Payload: ackPayload,
@@ -649,7 +664,8 @@ func (h *connectHandler) connectInvoke(ctx context.Context, ws *websocket.Conn, 
 		stepId = body.StepId
 	}
 
-	resp, ops, err := invoke(ctx, fn, &request, stepId)
+	// Invoke function, always complete regardless of
+	resp, ops, err := invoke(context.Background(), fn, &request, stepId)
 
 	// NOTE: When triggering step errors, we should have an OpcodeStepError
 	// within ops alongside an error.  We can safely ignore that error, as it's
