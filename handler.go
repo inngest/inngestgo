@@ -261,7 +261,11 @@ func (h HandlerOpts) GetWorkerConcurrency() int {
 }
 
 func (h HandlerOpts) isDev() bool {
-	return (h.Dev != nil && *h.Dev) || IsDev()
+	if h.Dev != nil {
+		return *h.Dev
+	}
+
+	return IsDev()
 }
 
 // Handler represents a handler which serves the Inngest API via HTTP.  This provides
