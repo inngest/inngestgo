@@ -262,7 +262,7 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 			return nil, false, fmt.Errorf("could not hash signing key: %w", err)
 		}
 
-		apiOrigin := h.h.GetAPIOrigin()
+		apiOrigin := h.h.GetAPIBaseURL()
 		if h.h.isDev() {
 			apiOrigin = DevServerURL()
 		}

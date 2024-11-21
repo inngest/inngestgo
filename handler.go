@@ -80,10 +80,10 @@ type HandlerOpts struct {
 	SigningKeyFallback *string
 
 	// APIOrigin is the specified host to be used to make API calls
-	APIOrigin *string
+	APIBaseURL *string
 
 	// EventAPIOrigin is the specified host to be used to send events to
-	EventAPIOrigin *string
+	EventAPIBaseURL *string
 
 	// ServeOrigin is the host to used for HTTP base function invoking.
 	// It's used to specify the host were the functions are hosted on sync.
@@ -170,38 +170,38 @@ func (h HandlerOpts) GetSigningKeyFallback() string {
 }
 
 // GetAPIOrigin returns the host to use for sending API requests
-func (h HandlerOpts) GetAPIOrigin() string {
+func (h HandlerOpts) GetAPIBaseURL() string {
 	if h.isDev() {
 		return devServerOrigin
 	}
 
-	if h.APIOrigin == nil {
-		origin := os.Getenv("INNGEST_API_ORIGIN")
-		if origin != "" {
-			return origin
+	if h.APIBaseURL == nil {
+		base := os.Getenv("INNGEST_API_BASE_URL")
+		if base != "" {
+			return base
 		}
 
 		return defaultAPIOrigin
 	}
 
-	return *h.APIOrigin
+	return *h.APIBaseURL
 }
 
 // GetEventAPIOrigin returns the host to use for sending events
-func (h HandlerOpts) GetEventAPIOrigin() string {
+func (h HandlerOpts) GetEventAPIBaseURL() string {
 	if h.isDev() {
 		return devServerOrigin
 	}
 
-	if h.EventAPIOrigin == nil {
-		origin := os.Getenv("INNGEST_EVENT_API_ORIGIN")
+	if h.EventAPIBaseURL == nil {
+		origin := os.Getenv("INNGEST_EVENT_API_BASE_URL")
 		if origin != "" {
 			return origin
 		}
 		return defaultEventAPIOrigin
 	}
 
-	return *h.EventAPIOrigin
+	return *h.EventAPIBaseURL
 }
 
 // GetServeOrigin returns the host used for HTTP based executions
