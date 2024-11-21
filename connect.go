@@ -55,6 +55,8 @@ type authContext struct {
 
 func (h *connectHandler) connectURLs() []string {
 	if h.h.isDev() {
+		host := fmt.Sprintf("%s/connect", strings.Replace(DevServerURL(), "http", "ws", 1))
+		fmt.Println("HOST:", host)
 		return []string{fmt.Sprintf("%s/connect", strings.Replace(DevServerURL(), "http", "ws", 1))}
 	}
 
@@ -262,7 +264,7 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 			return nil, false, fmt.Errorf("could not hash signing key: %w", err)
 		}
 
-		apiOrigin := defaultAPIOrigin
+		apiOrigin := h.h.GetAPIOrigin()
 		if h.h.isDev() {
 			apiOrigin = DevServerURL()
 		}
