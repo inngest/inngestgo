@@ -46,6 +46,64 @@ type connectHandler struct {
 	inProgress sync.WaitGroup
 
 	workerPoolMsgs chan workerPoolMsg
+
+	hostsManager *hostsManager
+}
+
+type hostsManager struct {
+	gatewayHosts            []string
+	availableGatewayHosts   map[string]struct{}
+	drainingGatewayHosts    map[string]struct{}
+	unreachableGatewayHosts map[string]struct{}
+	hostsLock               sync.RWMutex
+}
+
+func newHostsManager(gatewayHosts []string) *hostsManager {
+	hm := &hostsManager{
+		gatewayHosts:            gatewayHosts,
+		availableGatewayHosts:   make(map[string]struct{}),
+		drainingGatewayHosts:    make(map[string]struct{}),
+		unreachableGatewayHosts: make(map[string]struct{}),
+	}
+
+	hm.resetGateways()
+
+	return hm
+}
+
+func (h *hostsManager) pickAvailableGateway() string {
+	h.hostsLock.RLock()
+	defer h.hostsLock.RUnlock()
+
+	for host := range h.availableGatewayHosts {
+		return host
+	}
+	return ""
+}
+
+func (h *hostsManager) markDrainingGateway(host string) {
+	h.hostsLock.Lock()
+	defer h.hostsLock.Unlock()
+	delete(h.availableGatewayHosts, host)
+	h.drainingGatewayHosts[host] = struct{}{}
+}
+
+func (h *hostsManager) markUnreachableGateway(host string) {
+	h.hostsLock.Lock()
+	defer h.hostsLock.Unlock()
+	delete(h.availableGatewayHosts, host)
+	h.unreachableGatewayHosts[host] = struct{}{}
+}
+
+func (h *hostsManager) resetGateways() {
+	h.hostsLock.Lock()
+	defer h.hostsLock.Unlock()
+	h.availableGatewayHosts = make(map[string]struct{})
+	h.drainingGatewayHosts = make(map[string]struct{})
+	h.unreachableGatewayHosts = make(map[string]struct{})
+	for _, host := range h.gatewayHosts {
+		h.availableGatewayHosts[host] = struct{}{}
+	}
 }
 
 // authContext is wrapper for information related to authentication
@@ -64,32 +122,6 @@ func (h *connectHandler) connectURLs() []string {
 	}
 
 	return nil
-}
-
-func (h *connectHandler) connectToGateway(ctx context.Context) (*websocket.Conn, error) {
-	hosts := h.connectURLs()
-	if len(hosts) == 0 {
-		return nil, fmt.Errorf("no connect URLs provided")
-	}
-
-	for _, gatewayHost := range hosts {
-		h.h.Logger.Debug("attempting to connect", "host", gatewayHost)
-
-		// Establish WebSocket connection to one of the gateways
-		ws, _, err := websocket.Dial(ctx, gatewayHost, &websocket.DialOptions{
-			Subprotocols: []string{
-				types.GatewaySubProtocol,
-			},
-		})
-		if err != nil {
-			// try next connection
-			continue
-		}
-
-		return ws, nil
-	}
-
-	return nil, fmt.Errorf("could not establish outbound connection: no available gateway host")
 }
 
 func (h *handler) Connect(ctx context.Context) error {
@@ -179,54 +211,121 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 		return fmt.Errorf("failed to serialize connect config: %w", err)
 	}
 
+	hosts := h.connectURLs()
+	if len(hosts) == 0 {
+		return fmt.Errorf("no connect URLs provided")
+	}
+
+	h.hostsManager = newHostsManager(hosts)
+
+	eg := errgroup.Group{}
+
+	notifyConnectDoneChan := make(chan connectReport)
+	notifyConnectedChan := make(chan struct{})
+	initiateConnectionChan := make(chan struct{})
+
 	var attempts int
-	for {
-		attempts++
+	eg.Go(func() error {
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-notifyConnectedChan:
+				attempts = 0
+				continue
+			case msg := <-notifyConnectDoneChan:
+				h.h.Logger.Error("connect failed", "err", err, "reconnect", msg.reconnect)
 
-		if attempts == 5 {
-			return fmt.Errorf("could not establish connection after 5 attempts")
+				if !msg.reconnect {
+					return err
+				}
+
+				if msg.err != nil {
+					closeErr := websocket.CloseError{}
+					if errors.As(err, &closeErr) {
+						switch closeErr.Reason {
+						// If auth failed, retry with fallback key
+						case syscode.CodeConnectAuthFailed:
+							if auth.fallback {
+								return fmt.Errorf("failed to authenticate with fallback key, exiting")
+							}
+
+							signingKeyFallback := h.h.GetSigningKeyFallback()
+							if signingKeyFallback != "" {
+								auth = authContext{signingKey: signingKeyFallback, fallback: true}
+							}
+
+							initiateConnectionChan <- struct{}{}
+
+							continue
+
+						// Retry on the following error codes
+						case syscode.CodeConnectGatewayClosing, syscode.CodeConnectInternal, syscode.CodeConnectWorkerHelloTimeout:
+							initiateConnectionChan <- struct{}{}
+
+							continue
+
+						default:
+							// If we received a reason  that's non-retriable, stop here.
+							return fmt.Errorf("connect failed with error code %q", closeErr.Reason)
+						}
+					}
+				}
+
+				initiateConnectionChan <- struct{}{}
+			case <-initiateConnectionChan:
+			}
+
+			if attempts == 5 {
+				return fmt.Errorf("could not establish connection after 5 attempts")
+			}
+
+			attempts++
+
+			h.connect(ctx, false, connectionEstablishData{
+				signingKey:            auth.signingKey,
+				numCpuCores:           int32(numCpuCores),
+				totalMem:              int64(totalMem),
+				marshaledFns:          marshaledFns,
+				marshaledCapabilities: marshaledCapabilities,
+			}, notifyConnectedChan, notifyConnectDoneChan)
 		}
+	})
 
-		shouldReconnect, err := h.connect(ctx, connectionEstablishData{
+	initiateConnectionChan <- struct{}{}
+
+	if err := eg.Wait(); err != nil {
+		return fmt.Errorf("could not establish connection: %w", err)
+	}
+
+	// Send out buffered messages, using new connection if necessary!
+	h.messageBufferLock.Lock()
+	defer h.messageBufferLock.Unlock()
+	if len(h.messageBuffer) > 0 {
+		//  Send buffered messages via a working connection
+		err = h.withTemporaryConnection(connectionEstablishData{
 			signingKey:            auth.signingKey,
 			numCpuCores:           int32(numCpuCores),
 			totalMem:              int64(totalMem),
 			marshaledFns:          marshaledFns,
 			marshaledCapabilities: marshaledCapabilities,
-		})
-
-		h.h.Logger.Error("connect failed", "err", err, "reconnect", shouldReconnect)
-
-		if !shouldReconnect {
-			return err
-		}
-
-		closeErr := websocket.CloseError{}
-		if errors.As(err, &closeErr) {
-			switch closeErr.Reason {
-			// If auth failed, retry with fallback key
-			case syscode.CodeConnectAuthFailed:
-				if auth.fallback {
-					return fmt.Errorf("failed to authenticate with fallback key, exiting")
-				}
-
-				signingKeyFallback := h.h.GetSigningKeyFallback()
-				if signingKeyFallback != "" {
-					auth = authContext{signingKey: signingKeyFallback, fallback: true}
-				}
-
-				continue
-
-			// Retry on the following error codes
-			case syscode.CodeConnectGatewayClosing, syscode.CodeConnectInternal, syscode.CodeConnectWorkerHelloTimeout:
-				continue
-
-			default:
-				// If we received a reason  that's non-retriable, stop here.
-				return fmt.Errorf("connect failed with error code %q", closeErr.Reason)
+		}, func(ws *websocket.Conn) error {
+			// Send buffered messages
+			err := h.sendBufferedMessages(ws)
+			if err != nil {
+				return fmt.Errorf("could not send buffered messages: %w", err)
 			}
+
+			return nil
+		})
+		if err != nil {
+			h.h.Logger.Error("could not establish connection for sending buffered messages", "err", err)
 		}
+
+		// TODO Push remaining messages to another destination for processing?
 	}
+
+	return nil
 }
 
 type connectionEstablishData struct {
@@ -238,13 +337,31 @@ type connectionEstablishData struct {
 	manualReadinessAck    bool
 }
 
-func (h *connectHandler) prepareConnection(ctx context.Context, data connectionEstablishData) (*websocket.Conn, bool, error) {
+type preparedConnection struct {
+	ws          *websocket.Conn
+	gatewayHost string
+}
+
+func (h *connectHandler) prepareConnection(ctx context.Context, allowResettingGateways bool, data connectionEstablishData) (preparedConnection, bool, error) {
 	connectTimeout, cancelConnectTimeout := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelConnectTimeout()
 
-	ws, err := h.connectToGateway(connectTimeout)
+	gatewayHost := h.hostsManager.pickAvailableGateway()
+	if gatewayHost == "" {
+		h.hostsManager.resetGateways()
+
+		return preparedConnection{}, allowResettingGateways, fmt.Errorf("no available gateway hosts")
+	}
+
+	// Establish WebSocket connection to one of the gateways
+	ws, _, err := websocket.Dial(connectTimeout, gatewayHost, &websocket.DialOptions{
+		Subprotocols: []string{
+			types.GatewaySubProtocol,
+		},
+	})
 	if err != nil {
-		return nil, false, fmt.Errorf("could not connect: %w", err)
+		h.hostsManager.markUnreachableGateway(gatewayHost)
+		return preparedConnection{}, false, fmt.Errorf("could not connect to gateway: %w", err)
 	}
 
 	// Connection ID is unique per connection, reconnections should get a new ID
@@ -259,11 +376,13 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 		var helloMessage connectproto.ConnectMessage
 		err = wsproto.Read(initialMessageTimeout, ws, &helloMessage)
 		if err != nil {
-			return nil, true, fmt.Errorf("did not receive gateway hello message: %w", err)
+			h.hostsManager.markUnreachableGateway(gatewayHost)
+			return preparedConnection{}, true, fmt.Errorf("did not receive gateway hello message: %w", err)
 		}
 
 		if helloMessage.Kind != connectproto.GatewayMessageType_GATEWAY_HELLO {
-			return nil, true, fmt.Errorf("expected gateway hello message, got %s", helloMessage.Kind)
+			h.hostsManager.markUnreachableGateway(gatewayHost)
+			return preparedConnection{}, true, fmt.Errorf("expected gateway hello message, got %s", helloMessage.Kind)
 		}
 
 		h.h.Logger.Debug("received gateway hello message")
@@ -273,7 +392,7 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 	{
 		hashedKey, err := hashedSigningKey([]byte(data.signingKey))
 		if err != nil {
-			return nil, false, fmt.Errorf("could not hash signing key: %w", err)
+			return preparedConnection{}, false, fmt.Errorf("could not hash signing key: %w", err)
 		}
 
 		apiOrigin := h.h.GetAPIBaseURL()
@@ -308,7 +427,7 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 			WorkerManualReadinessAck: data.manualReadinessAck,
 		})
 		if err != nil {
-			return nil, false, fmt.Errorf("could not serialize sdk connect message: %w", err)
+			return preparedConnection{}, false, fmt.Errorf("could not serialize sdk connect message: %w", err)
 		}
 
 		err = wsproto.Write(ctx, ws, &connectproto.ConnectMessage{
@@ -316,7 +435,7 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 			Payload: data,
 		})
 		if err != nil {
-			return nil, true, fmt.Errorf("could not send initial message")
+			return preparedConnection{}, true, fmt.Errorf("could not send initial message")
 		}
 	}
 
@@ -327,17 +446,17 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 		var connectionReadyMsg connectproto.ConnectMessage
 		err = wsproto.Read(connectionReadyTimeout, ws, &connectionReadyMsg)
 		if err != nil {
-			return nil, true, fmt.Errorf("did not receive gateway connection ready message: %w", err)
+			return preparedConnection{}, true, fmt.Errorf("did not receive gateway connection ready message: %w", err)
 		}
 
 		if connectionReadyMsg.Kind != connectproto.GatewayMessageType_GATEWAY_CONNECTION_READY {
-			return nil, true, fmt.Errorf("expected gateway connection ready message, got %s", connectionReadyMsg.Kind)
+			return preparedConnection{}, true, fmt.Errorf("expected gateway connection ready message, got %s", connectionReadyMsg.Kind)
 		}
 
 		h.h.Logger.Debug("received gateway connection ready message")
 	}
 
-	return ws, false, nil
+	return preparedConnection{ws, gatewayHost}, false, nil
 }
 
 func (h *connectHandler) sendBufferedMessages(ws *websocket.Conn) error {
@@ -360,18 +479,20 @@ func (h *connectHandler) sendBufferedMessages(ws *websocket.Conn) error {
 	return nil
 }
 
-func (h *connectHandler) connect(ctx context.Context, data connectionEstablishData) (reconnect bool, err error) {
+var errGatewayDraining = errors.New("gateway is draining")
+
+func (h *connectHandler) handleConnection(ctx context.Context, data connectionEstablishData, ws *websocket.Conn, gatewayHost string, notifyConnectedChan chan struct{}, notifyConnectDoneChan chan connectReport) (reconnect bool, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-
-	ws, reconnect, err := h.prepareConnection(ctx, data)
-	if err != nil {
-		return reconnect, fmt.Errorf("could not establish connection: %w", err)
-	}
 
 	defer func() {
 		// TODO Do we need to include a reason here? If we only use this for unexpected disconnects, probably not
 		_ = ws.CloseNow()
+	}()
+
+	go func() {
+		<-ctx.Done()
+		_ = ws.Close(websocket.StatusNormalClosure, connectproto.WorkerDisconnectReason_WORKER_SHUTDOWN.String())
 	}()
 
 	// Send buffered but unsent messages if connection was re-established
@@ -386,12 +507,8 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 	eg := errgroup.Group{}
 	eg.Go(func() error {
 		for {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-
 			var msg connectproto.ConnectMessage
-			err = wsproto.Read(ctx, ws, &msg)
+			err = wsproto.Read(context.Background(), ws, &msg)
 			if err != nil {
 				h.h.Logger.Error("failed to read message", "err", err)
 
@@ -402,6 +519,10 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 			h.h.Logger.Debug("received gateway request", "msg", &msg)
 
 			switch msg.Kind {
+			case connectproto.GatewayMessageType_GATEWAY_CLOSING:
+				// Stop the read loop: We will not receive any further messages and should establish a new connection
+				// We can still use the old connection to send replies to the gateway
+				return errGatewayDraining
 			case connectproto.GatewayMessageType_GATEWAY_EXECUTOR_REQUEST:
 				// Handle invoke in a non-blocking way to allow for other messages to be processed
 				h.inProgress.Add(1)
@@ -422,6 +543,32 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 	// - Connection loss (io.EOF), read loop terminated intentionally (CloseError), other error (unexpected)
 	// - Worker shutdown, parent context got cancelled
 	if err := eg.Wait(); err != nil && ctx.Err() == nil {
+		if errors.Is(err, errGatewayDraining) {
+			h.hostsManager.markDrainingGateway(gatewayHost)
+
+			// Gateway is draining and will not accept new connections.
+			// We must reconnect to a different gateway, only then can we close the old connection.
+			waitUntilConnected, doneWaiting := context.WithCancel(context.Background())
+			defer doneWaiting()
+
+			// Intercept connected signal and pass it to the main goroutine
+			notifyConnectedInterceptChan := make(chan struct{})
+			go func() {
+				<-notifyConnectedChan
+				notifyConnectedInterceptChan <- struct{}{}
+				doneWaiting()
+			}()
+
+			// Establish new connection and pass close reports back to the main goroutine
+			h.connect(ctx, true, data, notifyConnectedInterceptChan, notifyConnectDoneChan)
+
+			// Wait until the new connection is established before closing the old one
+			<-waitUntilConnected.Done()
+
+			// By returning, we will close the old connection
+			return false, errGatewayDraining
+		}
+
 		h.h.Logger.Debug("read loop ended with error", "err", err)
 
 		// In case the gateway intentionally closed the connection, we'll receive a close error
@@ -462,63 +609,82 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 	// Wait until all in-progress requests are completed
 	h.inProgress.Wait()
 
-	// Send out buffered messages, using new connection if necessary!
-	h.messageBufferLock.Lock()
-	defer h.messageBufferLock.Unlock()
-	if len(h.messageBuffer) > 0 {
-		attempts := 0
-		for {
-			attempts++
-			if attempts == 3 {
-				h.h.Logger.Error("could not establish connection after 3 attempts")
-				break
-			}
-
-			reconnect, err = h.withTemporaryConnection(data, func(ws *websocket.Conn) error {
-				// Send buffered messages
-				err := h.sendBufferedMessages(ws)
-				if err != nil {
-					return fmt.Errorf("could not send buffered messages: %w", err)
-				}
-
-				return nil
-			})
-			if err != nil {
-				if !reconnect {
-					h.h.Logger.Error("could not establish connection for sending buffered messages", "err", err)
-					break
-				}
-				continue
-			}
-		}
-
-		// TODO Push remaining messages to another destination for processing?
-	}
-
 	// Attempt to shut down connection if not already done
 	_ = ws.Close(websocket.StatusNormalClosure, connectproto.WorkerDisconnectReason_WORKER_SHUTDOWN.String())
 
 	return false, nil
 }
 
-func (h *connectHandler) withTemporaryConnection(data connectionEstablishData, handler func(ws *websocket.Conn) error) (bool, error) {
+type connectReport struct {
+	reconnect bool
+	err       error
+}
+
+func (h *connectHandler) connect(ctx context.Context, allowResettingGateways bool, data connectionEstablishData, notifyConnectedChan chan struct{}, notifyConnectDoneChan chan connectReport) {
+	preparedConn, reconnect, err := h.prepareConnection(ctx, allowResettingGateways, data)
+	if err != nil {
+		notifyConnectDoneChan <- connectReport{
+			reconnect: reconnect,
+			err:       fmt.Errorf("could not establish connection: %w", err),
+		}
+		return
+	}
+
+	notifyConnectedChan <- struct{}{}
+
+	reconnect, err = h.handleConnection(ctx, data, preparedConn.ws, preparedConn.gatewayHost, notifyConnectedChan, notifyConnectDoneChan)
+	if err != nil {
+		if errors.Is(err, errGatewayDraining) {
+			// if the gateway is draining, the original connection was closed, and we already reconnected inside handleConnection
+			return
+		}
+
+		notifyConnectDoneChan <- connectReport{
+			reconnect: reconnect,
+			err:       fmt.Errorf("could not handle connection: %w", err),
+		}
+		return
+	}
+
+	notifyConnectDoneChan <- connectReport{
+		reconnect: reconnect,
+		err:       nil,
+	}
+}
+
+func (h *connectHandler) withTemporaryConnection(data connectionEstablishData, handler func(ws *websocket.Conn) error) error {
 	// Prevent this connection from receiving work
 	data.manualReadinessAck = true
 
-	ws, reconnect, err := h.prepareConnection(context.Background(), data)
-	if err != nil {
-		return reconnect, fmt.Errorf("could not establish temporary connection: %w", err)
+	maxAttempts := 4
+
+	var conn *websocket.Conn
+	var attempts int
+	for {
+		if attempts == maxAttempts {
+			return fmt.Errorf("could not establish connection after %d attempts", maxAttempts)
+		}
+
+		ws, _, err := h.prepareConnection(context.Background(), true, data)
+		if err != nil {
+			attempts++
+			continue
+		}
+
+		conn = ws.ws
+		break
 	}
+
 	defer func() {
-		_ = ws.Close(websocket.StatusNormalClosure, connectproto.WorkerDisconnectReason_WORKER_SHUTDOWN.String())
+		_ = conn.Close(websocket.StatusNormalClosure, connectproto.WorkerDisconnectReason_WORKER_SHUTDOWN.String())
 	}()
 
-	err = handler(ws)
+	err := handler(conn)
 	if err != nil {
-		return true, err
+		return err
 	}
 
-	return false, nil
+	return nil
 }
 
 func (h *connectHandler) processExecutorRequest(ws *websocket.Conn, msg *connectproto.ConnectMessage) {
