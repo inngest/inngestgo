@@ -206,7 +206,7 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 
 			attempts++
 
-			h.connect(ctx, false, connectionEstablishData{
+			go h.connect(ctx, false, connectionEstablishData{
 				hashedSigningKey:      auth.hashedSigningKey,
 				numCpuCores:           int32(numCpuCores),
 				totalMem:              int64(totalMem),

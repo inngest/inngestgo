@@ -205,7 +205,7 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 			}()
 
 			// Establish new connection and pass close reports back to the main goroutine
-			h.connect(ctx, true, data, notifyConnectedInterceptChan, notifyConnectDoneChan)
+			go h.connect(ctx, true, data, notifyConnectedInterceptChan, notifyConnectDoneChan)
 
 			// Wait until the new connection is established before closing the old one
 			<-waitUntilConnected.Done()
