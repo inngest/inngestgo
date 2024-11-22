@@ -33,8 +33,10 @@ func Connect(ctx context.Context, opts Opts, invoker FunctionInvoker, logger *sl
 		invoker: invoker,
 		opts:    opts,
 	}
+
 	wp := NewWorkerPool(opts.WorkerConcurrency, ch.processExecutorRequest)
 	ch.workerPool = wp
+	wp.Start(ctx)
 
 	defer func() {
 		// TODO Push remaining messages to another destination for processing?
