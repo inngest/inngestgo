@@ -24,7 +24,7 @@ import (
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/internal/types"
 	"github.com/inngest/inngestgo/step"
-	"golang.org/x/exp/slog"
+	"log/slog"
 )
 
 var (

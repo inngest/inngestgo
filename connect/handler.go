@@ -13,9 +13,9 @@ import (
 	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/pbnjay/memory"
-	"golang.org/x/exp/slog"
 	"golang.org/x/sync/errgroup"
 	"io"
+	"log/slog"
 	"os"
 	"runtime"
 	"strings"
@@ -180,14 +180,11 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 
 							auth = authContext{hashedSigningKey: signingKeyFallback, fallback: true}
 
-							initiateConnectionChan <- struct{}{}
-							continue
+							// continue to reconnect logic
 
 						// Retry on the following error codes
 						case syscode.CodeConnectGatewayClosing, syscode.CodeConnectInternal, syscode.CodeConnectWorkerHelloTimeout:
-							initiateConnectionChan <- struct{}{}
-							continue
-
+							// continue to reconnect logic
 						default:
 							// If we received a reason  that's non-retriable, stop here.
 							return fmt.Errorf("connect failed with error code %q", closeErr.Reason)
@@ -195,8 +192,9 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 					}
 				}
 
-				initiateConnectionChan <- struct{}{}
-				continue
+				// continue to reconnect logic
+				h.logger.Debug("reconnecting", "attempts", attempts)
+
 			case <-initiateConnectionChan:
 			}
 
@@ -206,7 +204,7 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 
 			attempts++
 
-			go h.connect(ctx, false, connectionEstablishData{
+			go h.connect(ctx, connectionEstablishData{
 				hashedSigningKey:      auth.hashedSigningKey,
 				numCpuCores:           int32(numCpuCores),
 				totalMem:              int64(totalMem),
@@ -304,12 +302,12 @@ func (h *connectHandler) processExecutorRequest(msg workerPoolMsg) {
 }
 
 func (h *connectHandler) connectURLs() []string {
-	if h.opts.IsDev {
-		return []string{fmt.Sprintf("%s/connect", strings.Replace(h.opts.DevServerUrl, "http", "ws", 1))}
-	}
-
 	if len(h.opts.ConnectUrls) > 0 {
 		return h.opts.ConnectUrls
+	}
+
+	if h.opts.IsDev {
+		return []string{fmt.Sprintf("%s/connect", strings.Replace(h.opts.DevServerUrl, "http", "ws", 1))}
 	}
 
 	return nil

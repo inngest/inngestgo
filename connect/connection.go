@@ -21,10 +21,12 @@ type connectReport struct {
 	err       error
 }
 
-func (h *connectHandler) connect(ctx context.Context, allowResettingGateways bool, data connectionEstablishData, notifyConnectedChan chan struct{}, notifyConnectDoneChan chan connectReport) {
+func (h *connectHandler) connect(ctx context.Context, data connectionEstablishData, notifyConnectedChan chan struct{}, notifyConnectDoneChan chan connectReport) {
 	// Set up connection (including connect handshake protocol)
-	preparedConn, reconnect, err := h.prepareConnection(ctx, allowResettingGateways, data)
+	preparedConn, reconnect, err := h.prepareConnection(ctx, data)
 	if err != nil {
+		h.logger.Error("could not establish connection", "err", err)
+
 		notifyConnectDoneChan <- connectReport{
 			reconnect: reconnect,
 			err:       fmt.Errorf("could not establish connection: %w", err),
@@ -38,6 +40,8 @@ func (h *connectHandler) connect(ctx context.Context, allowResettingGateways boo
 	// Set up connection lifecycle logic (receiving messages, handling requests, etc.)
 	reconnect, err = h.handleConnection(ctx, data, preparedConn.ws, preparedConn.gatewayHost, notifyConnectedChan, notifyConnectDoneChan)
 	if err != nil {
+		h.logger.Error("could not handle connection", "err", err)
+
 		if errors.Is(err, errGatewayDraining) {
 			// if the gateway is draining, the original connection was closed, and we already reconnected inside handleConnection
 			return
@@ -71,7 +75,7 @@ type preparedConnection struct {
 	connectionId string
 }
 
-func (h *connectHandler) prepareConnection(ctx context.Context, allowResettingGateways bool, data connectionEstablishData) (preparedConnection, bool, error) {
+func (h *connectHandler) prepareConnection(ctx context.Context, data connectionEstablishData) (preparedConnection, bool, error) {
 	connectTimeout, cancelConnectTimeout := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelConnectTimeout()
 
@@ -80,8 +84,7 @@ func (h *connectHandler) prepareConnection(ctx context.Context, allowResettingGa
 		// All gateways have been tried, reset the internal state to retry
 		h.hostsManager.resetGateways()
 
-		// Only reconnect if allowResettingGateways is true
-		return preparedConnection{}, allowResettingGateways, fmt.Errorf("no available gateway hosts")
+		return preparedConnection{}, true, fmt.Errorf("no available gateway hosts")
 	}
 
 	// Establish WebSocket connection to one of the gateways
@@ -92,13 +95,13 @@ func (h *connectHandler) prepareConnection(ctx context.Context, allowResettingGa
 	})
 	if err != nil {
 		h.hostsManager.markUnreachableGateway(gatewayHost)
-		return preparedConnection{}, false, fmt.Errorf("could not connect to gateway: %w", err)
+		return preparedConnection{}, true, fmt.Errorf("could not connect to gateway: %w", err)
 	}
 
 	// Connection ID is unique per connection, reconnections should get a new ID
 	connectionId := ulid.MustNew(ulid.Now(), rand.Reader)
 
-	h.logger.Debug("websocket connection established")
+	h.logger.Debug("websocket connection established", "gateway_host", gatewayHost)
 
 	reconnect, err := h.performConnectHandshake(ctx, connectionId.String(), ws, gatewayHost, data)
 	if err != nil {
@@ -207,10 +210,16 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 			}()
 
 			// Establish new connection and pass close reports back to the main goroutine
-			go h.connect(ctx, true, data, notifyConnectedInterceptChan, notifyConnectDoneChan)
+			go h.connect(context.Background(), data, notifyConnectedInterceptChan, notifyConnectDoneChan)
+
+			cancel()
 
 			// Wait until the new connection is established before closing the old one
-			<-waitUntilConnected.Done()
+			select {
+			case <-waitUntilConnected.Done():
+			case <-time.After(10 * time.Second):
+				h.logger.Error("timed out waiting for new connection to be established")
+			}
 
 			// By returning, we will close the old connection
 			return false, errGatewayDraining
@@ -275,7 +284,7 @@ func (h *connectHandler) withTemporaryConnection(data connectionEstablishData, h
 			return fmt.Errorf("could not establish connection after %d attempts", maxAttempts)
 		}
 
-		ws, _, err := h.prepareConnection(context.Background(), false, data)
+		ws, _, err := h.prepareConnection(context.Background(), data)
 		if err != nil {
 			attempts++
 			continue
