@@ -11,10 +11,8 @@ import (
 	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
 	"github.com/oklog/ulid/v2"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/proto"
 	"io"
 	"net"
-	"runtime"
 	"time"
 )
 
@@ -24,6 +22,7 @@ type connectReport struct {
 }
 
 func (h *connectHandler) connect(ctx context.Context, allowResettingGateways bool, data connectionEstablishData, notifyConnectedChan chan struct{}, notifyConnectDoneChan chan connectReport) {
+	// Set up connection (including connect handshake protocol)
 	preparedConn, reconnect, err := h.prepareConnection(ctx, allowResettingGateways, data)
 	if err != nil {
 		notifyConnectDoneChan <- connectReport{
@@ -33,8 +32,10 @@ func (h *connectHandler) connect(ctx context.Context, allowResettingGateways boo
 		return
 	}
 
+	// Notify that the connection was established
 	notifyConnectedChan <- struct{}{}
 
+	// Set up connection lifecycle logic (receiving messages, handling requests, etc.)
 	reconnect, err = h.handleConnection(ctx, data, preparedConn.ws, preparedConn.gatewayHost, notifyConnectedChan, notifyConnectDoneChan)
 	if err != nil {
 		if errors.Is(err, errGatewayDraining) {
@@ -65,8 +66,9 @@ type connectionEstablishData struct {
 }
 
 type preparedConnection struct {
-	ws          *websocket.Conn
-	gatewayHost string
+	ws           *websocket.Conn
+	gatewayHost  string
+	connectionId string
 }
 
 func (h *connectHandler) prepareConnection(ctx context.Context, allowResettingGateways bool, data connectionEstablishData) (preparedConnection, bool, error) {
@@ -92,94 +94,16 @@ func (h *connectHandler) prepareConnection(ctx context.Context, allowResettingGa
 	}
 
 	// Connection ID is unique per connection, reconnections should get a new ID
-	h.connectionId = ulid.MustNew(ulid.Now(), rand.Reader)
+	connectionId := ulid.MustNew(ulid.Now(), rand.Reader)
 
 	h.logger.Debug("websocket connection established")
 
-	// Wait for gateway hello message
-	{
-		initialMessageTimeout, cancelInitialTimeout := context.WithTimeout(ctx, 5*time.Second)
-		defer cancelInitialTimeout()
-		var helloMessage connectproto.ConnectMessage
-		err = wsproto.Read(initialMessageTimeout, ws, &helloMessage)
-		if err != nil {
-			h.hostsManager.markUnreachableGateway(gatewayHost)
-			return preparedConnection{}, true, fmt.Errorf("did not receive gateway hello message: %w", err)
-		}
-
-		if helloMessage.Kind != connectproto.GatewayMessageType_GATEWAY_HELLO {
-			h.hostsManager.markUnreachableGateway(gatewayHost)
-			return preparedConnection{}, true, fmt.Errorf("expected gateway hello message, got %s", helloMessage.Kind)
-		}
-
-		h.logger.Debug("received gateway hello message")
+	reconnect, err := h.performConnectHandshake(ctx, connectionId.String(), ws, gatewayHost, data)
+	if err != nil {
+		return preparedConnection{}, reconnect, fmt.Errorf("could not perform connect handshake: %w", err)
 	}
 
-	// Send connect message
-	{
-
-		apiOrigin := h.opts.APIBaseUrl
-		if h.opts.IsDev {
-			apiOrigin = h.opts.DevServerUrl
-		}
-
-		data, err := proto.Marshal(&connectproto.WorkerConnectRequestData{
-			SessionId: &connectproto.SessionIdentifier{
-				BuildId:      h.opts.BuildId,
-				InstanceId:   h.instanceId(),
-				ConnectionId: h.connectionId.String(),
-			},
-			AuthData: &connectproto.AuthData{
-				HashedSigningKey: data.hashedSigningKey,
-			},
-			AppName: h.opts.AppName,
-			Config: &connectproto.ConfigDetails{
-				Capabilities: data.marshaledCapabilities,
-				Functions:    data.marshaledFns,
-				ApiOrigin:    apiOrigin,
-			},
-			SystemAttributes: &connectproto.SystemAttributes{
-				CpuCores: data.numCpuCores,
-				MemBytes: data.totalMem,
-				Os:       runtime.GOOS,
-			},
-			Environment:              h.opts.Env,
-			Platform:                 h.opts.Platform,
-			SdkVersion:               h.opts.SDKVersion,
-			SdkLanguage:              h.opts.SDKLanguage,
-			WorkerManualReadinessAck: data.manualReadinessAck,
-		})
-		if err != nil {
-			return preparedConnection{}, false, fmt.Errorf("could not serialize sdk connect message: %w", err)
-		}
-
-		err = wsproto.Write(ctx, ws, &connectproto.ConnectMessage{
-			Kind:    connectproto.GatewayMessageType_WORKER_CONNECT,
-			Payload: data,
-		})
-		if err != nil {
-			return preparedConnection{}, true, fmt.Errorf("could not send initial message")
-		}
-	}
-
-	// Wait for gateway ready message
-	{
-		connectionReadyTimeout, cancelConnectionReadyTimeout := context.WithTimeout(ctx, 20*time.Second)
-		defer cancelConnectionReadyTimeout()
-		var connectionReadyMsg connectproto.ConnectMessage
-		err = wsproto.Read(connectionReadyTimeout, ws, &connectionReadyMsg)
-		if err != nil {
-			return preparedConnection{}, true, fmt.Errorf("did not receive gateway connection ready message: %w", err)
-		}
-
-		if connectionReadyMsg.Kind != connectproto.GatewayMessageType_GATEWAY_CONNECTION_READY {
-			return preparedConnection{}, true, fmt.Errorf("expected gateway connection ready message, got %s", connectionReadyMsg.Kind)
-		}
-
-		h.logger.Debug("received gateway connection ready message")
-	}
-
-	return preparedConnection{ws, gatewayHost}, false, nil
+	return preparedConnection{ws, gatewayHost, connectionId.String()}, false, nil
 }
 
 func (h *connectHandler) handleConnection(ctx context.Context, data connectionEstablishData, ws *websocket.Conn, gatewayHost string, notifyConnectedChan chan struct{}, notifyConnectDoneChan chan connectReport) (reconnect bool, err error) {
@@ -187,10 +111,12 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 	defer cancel()
 
 	defer func() {
-		// TODO Do we need to include a reason here? If we only use this for unexpected disconnects, probably not
+		// This is a fallback safeguard to always close the WebSocket connection at the end of the function
+		// Usually, we provide a specific reason, so this is only necessary for unhandled errors
 		_ = ws.CloseNow()
 	}()
 
+	// When shutting down the worker, close the connection with a reason
 	go func() {
 		<-ctx.Done()
 		_ = ws.Close(websocket.StatusNormalClosure, connectproto.WorkerDisconnectReason_WORKER_SHUTDOWN.String())

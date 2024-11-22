@@ -12,7 +12,6 @@ import (
 	"github.com/inngest/inngest/pkg/syscode"
 	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
-	"github.com/oklog/ulid/v2"
 	"github.com/pbnjay/memory"
 	"golang.org/x/exp/slog"
 	"golang.org/x/sync/errgroup"
@@ -32,6 +31,7 @@ func Connect(ctx context.Context, opts Opts, invoker FunctionInvoker, logger *sl
 	ch := &connectHandler{
 		logger:  logger,
 		invoker: invoker,
+		opts:    opts,
 	}
 	wp := NewWorkerPool(opts.WorkerConcurrency, ch.processExecutorRequest)
 	ch.workerPool = wp
@@ -84,8 +84,6 @@ type connectHandler struct {
 
 	logger *slog.Logger
 
-	connectionId ulid.ULID
-
 	messageBuffer     []*connectproto.ConnectMessage
 	messageBufferLock sync.Mutex
 
@@ -128,14 +126,22 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 
 	h.hostsManager = newHostsManager(hosts)
 
+	// Notify when connect finishes (either with an error or because the context got canceled)
 	notifyConnectDoneChan := make(chan connectReport)
+
+	// Notify when connection is established
 	notifyConnectedChan := make(chan struct{})
+
+	// Channel to imperatively initiate a connection
 	initiateConnectionChan := make(chan struct{})
 
 	var attempts int
 
+	// We construct a connection loop, which will attempt to reconnect on failure
+	// Instead of doing a simple, synchronous loop, we use channels to communicate connection status changes,
+	// allowing to instantiate a new connection while the previous one is still running.
+	// This is crucial for handling gateway draining scenarios.
 	eg := errgroup.Group{}
-
 	eg.Go(func() error {
 		for {
 			select {
@@ -175,13 +181,11 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 							auth = authContext{hashedSigningKey: signingKeyFallback, fallback: true}
 
 							initiateConnectionChan <- struct{}{}
-
 							continue
 
 						// Retry on the following error codes
 						case syscode.CodeConnectGatewayClosing, syscode.CodeConnectInternal, syscode.CodeConnectWorkerHelloTimeout:
 							initiateConnectionChan <- struct{}{}
-
 							continue
 
 						default:
@@ -192,6 +196,7 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 				}
 
 				initiateConnectionChan <- struct{}{}
+				continue
 			case <-initiateConnectionChan:
 			}
 
@@ -211,8 +216,10 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 		}
 	})
 
+	// Initiate the first connection
 	initiateConnectionChan <- struct{}{}
 
+	// Wait until connection loop finishes
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("could not establish connection: %w", err)
 	}
