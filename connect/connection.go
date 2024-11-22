@@ -77,8 +77,10 @@ func (h *connectHandler) prepareConnection(ctx context.Context, allowResettingGa
 
 	gatewayHost := h.hostsManager.pickAvailableGateway()
 	if gatewayHost == "" {
+		// All gateways have been tried, reset the internal state to retry
 		h.hostsManager.resetGateways()
 
+		// Only reconnect if allowResettingGateways is true
 		return preparedConnection{}, allowResettingGateways, fmt.Errorf("no available gateway hosts")
 	}
 
@@ -273,7 +275,7 @@ func (h *connectHandler) withTemporaryConnection(data connectionEstablishData, h
 			return fmt.Errorf("could not establish connection after %d attempts", maxAttempts)
 		}
 
-		ws, _, err := h.prepareConnection(context.Background(), true, data)
+		ws, _, err := h.prepareConnection(context.Background(), false, data)
 		if err != nil {
 			attempts++
 			continue
