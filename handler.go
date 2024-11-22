@@ -624,7 +624,6 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 			Platform: platform(),
 		},
 		Capabilities: capabilities,
-		UseConnect:   h.useConnect,
 	}
 
 	fns, err := createFunctionConfigs(h.appName, h.funcs, *h.url(r), false)
