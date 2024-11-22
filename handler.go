@@ -313,8 +313,6 @@ type handler struct {
 	funcs   []ServableFunction
 	// lock prevents reading the function maps while serving
 	l sync.RWMutex
-
-	useConnect bool
 }
 
 func (h *handler) SetOptions(opts HandlerOpts) Handler {
