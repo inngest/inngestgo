@@ -1,6 +1,10 @@
+# github.com/99designs/gqlgen v0.17.27
+## explicit; go 1.18
 # github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da
 ## explicit
 github.com/aead/chacha20/chacha
+# github.com/agnivade/levenshtein v1.1.1
+## explicit; go 1.13
 # github.com/antlr4-go/antlr/v4 v4.13.1
 ## explicit; go 1.22
 github.com/antlr4-go/antlr/v4
@@ -21,9 +25,13 @@ github.com/coder/websocket/internal/errd
 github.com/coder/websocket/internal/util
 github.com/coder/websocket/internal/wsjs
 github.com/coder/websocket/internal/xsync
+# github.com/cpuguy83/go-md2man/v2 v2.0.4
+## explicit; go 1.11
 # github.com/davecgh/go-spew v1.1.1
 ## explicit
 github.com/davecgh/go-spew/spew
+# github.com/dmarkham/enumer v1.5.8
+## explicit; go 1.17
 # github.com/dustinkirkland/golang-petname v0.0.0-20191129215211-8e5a1ed0cff0
 ## explicit
 github.com/dustinkirkland/golang-petname
@@ -100,7 +108,7 @@ github.com/hashicorp/hcl/json/token
 # github.com/inngest/expr v0.0.0-20241106234328-863dff7deec0
 ## explicit; go 1.23.2
 github.com/inngest/expr
-# github.com/inngest/inngest v1.2.1-0.20241122012250-e058fb258793
+# github.com/inngest/inngest v1.3.1-0.20241122155305-f9a9e9ca9b15
 ## explicit; go 1.23.2
 github.com/inngest/inngest/pkg/connect/types
 github.com/inngest/inngest/pkg/connect/wsproto
@@ -162,6 +170,8 @@ github.com/ohler55/ojg/jp
 # github.com/oklog/ulid/v2 v2.1.0
 ## explicit; go 1.15
 github.com/oklog/ulid/v2
+# github.com/pascaldekloe/name v1.0.1
+## explicit; go 1.10
 # github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 ## explicit; go 1.16
 github.com/pbnjay/memory
@@ -199,6 +209,8 @@ github.com/robfig/cron/v3
 github.com/rs/zerolog
 github.com/rs/zerolog/internal/cbor
 github.com/rs/zerolog/internal/json
+# github.com/russross/blackfriday/v2 v2.1.0
+## explicit
 # github.com/sashabaranov/go-openai v1.35.6
 ## explicit; go 1.18
 github.com/sashabaranov/go-openai
@@ -243,9 +255,15 @@ github.com/subosito/gotenv
 # github.com/tidwall/btree v1.7.0
 ## explicit; go 1.19
 github.com/tidwall/btree
+# github.com/urfave/cli/v2 v2.25.1
+## explicit; go 1.18
+# github.com/vektah/gqlparser/v2 v2.5.15
+## explicit; go 1.19
 # github.com/xhit/go-str2duration/v2 v2.1.0
 ## explicit; go 1.13
 github.com/xhit/go-str2duration/v2
+# github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673
+## explicit
 # go.opentelemetry.io/otel v1.28.0
 ## explicit; go 1.21
 go.opentelemetry.io/otel
@@ -354,9 +372,8 @@ golang.org/x/crypto/salsa20/salsa
 ## explicit; go 1.22.0
 golang.org/x/exp/constraints
 golang.org/x/exp/slices
-golang.org/x/exp/slog
-golang.org/x/exp/slog/internal
-golang.org/x/exp/slog/internal/buffer
+# golang.org/x/mod v0.21.0
+## explicit; go 1.22.0
 # golang.org/x/net v0.30.0
 ## explicit; go 1.18
 golang.org/x/net/http/httpguts
@@ -390,6 +407,8 @@ golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
+# golang.org/x/tools v0.26.0
+## explicit; go 1.22.0
 # google.golang.org/genproto/googleapis/api v0.0.0-20241021214115-324edc3d5d38
 ## explicit; go 1.21
 google.golang.org/genproto/googleapis/api/expr/v1alpha1
