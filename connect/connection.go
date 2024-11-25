@@ -21,13 +21,13 @@ type connectReport struct {
 	err       error
 }
 
-func (h *connectHandler) connect(ctx context.Context, data connectionEstablishData, notifyConnectedChan chan struct{}, notifyConnectDoneChan chan connectReport) {
+func (h *connectHandler) connect(ctx context.Context, data connectionEstablishData) {
 	// Set up connection (including connect handshake protocol)
 	preparedConn, reconnect, err := h.prepareConnection(ctx, data)
 	if err != nil {
 		h.logger.Error("could not establish connection", "err", err)
 
-		notifyConnectDoneChan <- connectReport{
+		h.notifyConnectDoneChan <- connectReport{
 			reconnect: reconnect,
 			err:       fmt.Errorf("could not establish connection: %w", err),
 		}
@@ -35,10 +35,10 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 	}
 
 	// Notify that the connection was established
-	notifyConnectedChan <- struct{}{}
+	h.notifyConnectedChan <- struct{}{}
 
 	// Set up connection lifecycle logic (receiving messages, handling requests, etc.)
-	reconnect, err = h.handleConnection(ctx, data, preparedConn.ws, preparedConn.gatewayHost, notifyConnectedChan, notifyConnectDoneChan)
+	reconnect, err = h.handleConnection(ctx, data, preparedConn.ws, preparedConn.gatewayHost)
 	if err != nil {
 		h.logger.Error("could not handle connection", "err", err)
 
@@ -47,14 +47,14 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 			return
 		}
 
-		notifyConnectDoneChan <- connectReport{
+		h.notifyConnectDoneChan <- connectReport{
 			reconnect: reconnect,
 			err:       fmt.Errorf("could not handle connection: %w", err),
 		}
 		return
 	}
 
-	notifyConnectDoneChan <- connectReport{
+	h.notifyConnectDoneChan <- connectReport{
 		reconnect: reconnect,
 		err:       nil,
 	}
@@ -111,7 +111,7 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 	return preparedConnection{ws, gatewayHost, connectionId.String()}, false, nil
 }
 
-func (h *connectHandler) handleConnection(ctx context.Context, data connectionEstablishData, ws *websocket.Conn, gatewayHost string, notifyConnectedChan chan struct{}, notifyConnectDoneChan chan connectReport) (reconnect bool, err error) {
+func (h *connectHandler) handleConnection(ctx context.Context, data connectionEstablishData, ws *websocket.Conn, gatewayHost string) (reconnect bool, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -204,13 +204,13 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 			// Intercept connected signal and pass it to the main goroutine
 			notifyConnectedInterceptChan := make(chan struct{})
 			go func() {
-				<-notifyConnectedChan
+				<-h.notifyConnectedChan
 				notifyConnectedInterceptChan <- struct{}{}
 				doneWaiting()
 			}()
 
 			// Establish new connection and pass close reports back to the main goroutine
-			go h.connect(context.Background(), data, notifyConnectedInterceptChan, notifyConnectDoneChan)
+			go h.connect(context.Background(), data)
 
 			cancel()
 
