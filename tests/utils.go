@@ -18,10 +18,7 @@ const (
 )
 
 type Run struct {
-	Output struct {
-		Data  any `json:"data"`
-		Error any `json:"error"`
-	}
+	Output any
 	Status string `json:"status"`
 }
 

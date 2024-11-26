@@ -173,7 +173,11 @@ func TestParallel(t *testing.T) {
 
 		run, err := waitForRun(&runID, StatusFailed)
 		r.NoError(err)
-		r.Nil(run.Output.Data)
-		r.Contains(run.Output.Error, "function panicked: oops")
+
+		output, ok := run.Output.(map[string]any)
+		r.True(ok)
+
+		r.Nil(output["data"])
+		r.Contains(output["error"], "function panicked: oops")
 	})
 }
