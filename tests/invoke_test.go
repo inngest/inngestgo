@@ -98,6 +98,95 @@ func TestInvoke(t *testing.T) {
 		r.Equal("hello", run.Output)
 	})
 
+	t.Run("child returns error", func(t *testing.T) {
+		ctx := context.Background()
+		r := require.New(t)
+
+		appName := randomSuffix("my-app")
+		h := inngestgo.NewHandler(appName, inngestgo.HandlerOpts{})
+
+		type ChildEventData struct {
+			Message string `json:"message"`
+		}
+
+		childFnName := "my-child-fn"
+		childFn := inngestgo.CreateFunction(
+			inngestgo.FunctionOpts{
+				ID:      childFnName,
+				Name:    childFnName,
+				Retries: inngestgo.IntPtr(0),
+			},
+			inngestgo.EventTrigger("never", nil),
+			func(
+				ctx context.Context,
+				input inngestgo.Input[any],
+			) (any, error) {
+				return nil, fmt.Errorf("oh no")
+			},
+		)
+
+		var runID string
+		var invokeResult any
+		var invokeErr error
+		eventName := randomSuffix("my-event")
+		parentFn := inngestgo.CreateFunction(
+			inngestgo.FunctionOpts{
+				ID:      "my-parent-fn",
+				Name:    "my-parent-fn",
+				Retries: inngestgo.IntPtr(0),
+			},
+			inngestgo.EventTrigger(eventName, nil),
+			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+				runID = input.InputCtx.RunID
+				invokeResult, invokeErr = step.Invoke[any](ctx,
+					"invoke",
+					step.InvokeOpts{
+						FunctionId: fmt.Sprintf("%s-%s", appName, childFnName),
+					},
+				)
+				return invokeResult, invokeErr
+			},
+		)
+
+		h.Register(childFn, parentFn)
+
+		server, sync := serve(t, h)
+		defer server.Close()
+		r.NoError(sync())
+
+		_, err := inngestgo.Send(ctx, inngestgo.Event{
+			Name: eventName,
+			Data: map[string]any{"foo": "bar"}},
+		)
+		r.NoError(err)
+
+		var run *Run
+		r.EventuallyWithT(func(ct *assert.CollectT) {
+			a := assert.New(ct)
+
+			run, err = getRun(runID)
+			if !a.NoError(err) {
+				return
+			}
+
+			a.Equal(enums.RunStatusFailed.String(), run.Status)
+		}, 5*time.Second, time.Second)
+
+		r.Nil(invokeResult)
+
+		// TODO: Fix this. We should see the child function's error message.
+		r.Equal("invalid status code: 500", invokeErr.Error())
+
+		r.Equal(
+			map[string]any{
+				"data":   nil,
+				"error":  "error calling function: invalid status code: 500",
+				"status": float64(500),
+			},
+			run.Output,
+		)
+	})
+
 	t.Run("non-existent function", func(t *testing.T) {
 		ctx := context.Background()
 		r := require.New(t)
