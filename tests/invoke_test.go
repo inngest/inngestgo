@@ -105,10 +105,6 @@ func TestInvoke(t *testing.T) {
 		appName := randomSuffix("my-app")
 		h := inngestgo.NewHandler(appName, inngestgo.HandlerOpts{})
 
-		type ChildEventData struct {
-			Message string `json:"message"`
-		}
-
 		childFnName := "my-child-fn"
 		childFn := inngestgo.CreateFunction(
 			inngestgo.FunctionOpts{

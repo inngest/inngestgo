@@ -69,7 +69,7 @@ func Invoke[T any](ctx context.Context, id string, opts InvokeOpts) (T, error) {
 				panic(ControlHijack{})
 			}
 
-			return output, fmt.Errorf(errObj.Message)
+			return output, fmt.Errorf("%s", errObj.Message)
 		}
 
 		mgr.SetErr(fmt.Errorf("error parsing invoke value for '%s'; unknown shape", opts.FunctionId))
