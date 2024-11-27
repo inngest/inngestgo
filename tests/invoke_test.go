@@ -173,15 +173,10 @@ func TestInvoke(t *testing.T) {
 		}, 5*time.Second, time.Second)
 
 		r.Nil(invokeResult)
-
-		// TODO: Fix this. We should see the child function's error message.
-		r.Equal("invalid status code: 500", invokeErr.Error())
-
+		r.Equal("oh no", invokeErr.Error())
 		r.Equal(
 			map[string]any{
-				"data":   nil,
-				"error":  "error calling function: invalid status code: 500",
-				"status": float64(500),
+				"message": "oh no",
 			},
 			run.Output,
 		)

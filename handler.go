@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"log/slog"
+
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/execution/state"
 	"github.com/inngest/inngest/pkg/inngest"
@@ -24,7 +26,6 @@ import (
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/internal/types"
 	"github.com/inngest/inngestgo/step"
-	"log/slog"
 )
 
 var (
@@ -392,7 +393,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := h.invoke(w, r); err != nil {
-			_ = publicerr.WriteHTTP(w, err)
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Header().Set("content-type", "application/json")
+			_ = json.NewEncoder(w).Encode(sdkrequest.ErrorResponse{
+				Message: err.Error(),
+			})
 		}
 		return
 	case http.MethodPut:
@@ -975,10 +980,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 
 	if err != nil {
 		l.Error("error calling function", "error", err)
-		return publicerr.Error{
-			Message: fmt.Sprintf("error calling function: %s", err.Error()),
-			Status:  500,
-		}
+		return err
 	}
 
 	if len(ops) > 0 {
