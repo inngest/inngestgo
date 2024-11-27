@@ -232,9 +232,7 @@ func TestInvoke(t *testing.T) {
 
 		r.Equal(
 			map[string]any{
-				"data":   nil,
-				"error":  "error calling function: could not find function with ID: some-non-existent-fn",
-				"status": float64(500),
+				"message": "could not find function with ID: some-non-existent-fn",
 			},
 			run.Output,
 		)
