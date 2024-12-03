@@ -39,7 +39,10 @@ func setup() (func() error, error) {
 		},
 	)
 
-	// return func() error { return nil }, nil
+	if os.Getenv("DEV_SERVER_ENABLED") == "0" {
+		// Don't start the Dev Server.
+		return func() error { return nil }, nil
+	}
 
 	stopDevServer, err := startDevServer()
 	if err != nil {
