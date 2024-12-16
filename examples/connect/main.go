@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/inngest/inngest/pkg/logger"
 	"os"
+	"strings"
 
 	"github.com/inngest/inngestgo"
 )
@@ -15,6 +17,13 @@ func main() {
 	h := inngestgo.NewHandler("connect-test", inngestgo.HandlerOpts{
 		SigningKey: &key,
 		Dev:        inngestgo.BoolPtr(true),
+		Logger:     logger.StdlibLogger(ctx),
+		ConnectURLs: []string{
+			"ws://unavailable-1",
+			fmt.Sprintf("%s/connect", strings.Replace(inngestgo.DevServerURL(), "http", "ws", 1)),
+			"ws://unavailable-2",
+			"ws://unavailable-3",
+		},
 	})
 
 	f := inngestgo.CreateFunction(

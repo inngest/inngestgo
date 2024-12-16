@@ -40,6 +40,7 @@ const (
 	OtelSysFunctionStatusCode = "sys.function.status.code"
 	OtelSysFunctionOutput     = "sys.function.output"
 	OtelSysFunctionLink       = "sys.function.link"
+	OtelSysFunctionHasAI      = "sys.function.hasAI"
 
 	OtelSysStepID              = "sys.step.id"
 	OtelSysStepDisplayName     = "sys.step.display.name"
@@ -60,6 +61,7 @@ const (
 	OtelSysStepAIRequest       = "sys.step.ai.req" // ai request metadata
 	OtelSysStepAIResponse      = "sys.step.ai.res" // ai response metadata
 	OtelSysStepRunType         = "sys.step.run.type"
+	OtelSysStepPlan            = "sys.step.plan" // indicate this is a planning step
 
 	OtelSysStepSleepEndAt = "sys.step.sleep.end"
 

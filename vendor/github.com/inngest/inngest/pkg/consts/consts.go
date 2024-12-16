@@ -1,8 +1,9 @@
 package consts
 
 import (
-	"github.com/google/uuid"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -28,8 +29,19 @@ const (
 	// our system.
 	MaxFunctionTimeout = 2 * time.Hour
 
-	// MaxBodySize is the maximum payload size read on any HTTP response.
-	MaxBodySize = 1024 * 1024 * 4 // 4MB
+	// MaxStepOutputSize is the maximum size of the output of a step.
+	MaxStepOutputSize = 1024 * 1024 * 4 // 4MB
+
+	// MaxStepInputSize is the maximum size of the input of a step.
+	MaxStepInputSize = 1024 * 1024 * 4 // 4MB
+
+	// MaxSDKResponseBodySize is the maximum payload size in the response from
+	// the SDK.
+	MaxSDKResponseBodySize = MaxStepOutputSize + MaxStepInputSize
+
+	// MaxSDKRequestBodySize is the maximum payload size in the request to the
+	// SDK.
+	MaxSDKRequestBodySize = 1024 * 1024 * 4 // 4MB
 
 	// DefaultMaxStateSizeLimit is the maximum number of bytes of output state per function run allowed.
 	DefaultMaxStateSizeLimit = 1024 * 1024 * 32 // 32MB
@@ -123,6 +135,9 @@ const (
 	PauseExpiredDeletionGracePeriod = time.Second * 10
 
 	DefaultQueueShardName = "default"
+
+	// Minimum number of pauses before using the aggregate pause handler.
+	AggregatePauseThreshold = 50
 )
 
 var (

@@ -5,11 +5,17 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/inngest/inngest/pkg/consts"
 	"github.com/inngest/inngest/pkg/dateutil"
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/event"
 	"github.com/inngest/inngest/pkg/util/aigateway"
 	"github.com/xhit/go-str2duration/v2"
+)
+
+var (
+	ErrStepInputTooLarge  = fmt.Errorf("step input size is greater than the limit")
+	ErrStepOutputTooLarge = fmt.Errorf("step output size is greater than the limit")
 )
 
 type GeneratorOpcode struct {
@@ -36,6 +42,18 @@ type GeneratorOpcode struct {
 	DisplayName *string `json:"displayName"`
 }
 
+func (g GeneratorOpcode) Validate() error {
+	if input, _ := g.Input(); input != "" && len(input) > consts.MaxStepInputSize {
+		return ErrStepOutputTooLarge
+	}
+
+	if output, _ := g.Output(); output != "" && len(output) > consts.MaxStepOutputSize {
+		return ErrStepOutputTooLarge
+	}
+
+	return nil
+}
+
 // Get the name of the step as defined in code by the user.
 func (g GeneratorOpcode) UserDefinedName() string {
 	if g.DisplayName != nil {
@@ -46,6 +64,19 @@ func (g GeneratorOpcode) UserDefinedName() string {
 	// name, so we we'll use the deprecated name field as a
 	// fallback.
 	return g.Name
+}
+
+// HasAI checks if this op is related to AI.
+func (g GeneratorOpcode) HasAI() bool {
+	if g.Op == enums.OpcodeAIGateway {
+		return true
+	}
+
+	if g.RunType() == "step.ai.wrap" {
+		return true
+	}
+
+	return false
 }
 
 // Get the stringified input of the step, if `step.Run` was passed inputs
