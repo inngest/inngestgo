@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/inngest/inngest/pkg/logger"
-	"os"
-	"strings"
-
 	"github.com/inngest/inngestgo"
+	"os"
 )
 
 func main() {
@@ -15,15 +13,11 @@ func main() {
 
 	key := "signkey-test-12345678"
 	h := inngestgo.NewHandler("connect-test", inngestgo.HandlerOpts{
-		SigningKey: &key,
-		Dev:        inngestgo.BoolPtr(true),
 		Logger:     logger.StdlibLogger(ctx),
-		ConnectURLs: []string{
-			"ws://unavailable-1",
-			fmt.Sprintf("%s/connect", strings.Replace(inngestgo.DevServerURL(), "http", "ws", 1)),
-			"ws://unavailable-2",
-			"ws://unavailable-3",
-		},
+		SigningKey: &key,
+		InstanceId: nil,
+		BuildId:    nil,
+		Dev:        inngestgo.BoolPtr(true),
 	})
 
 	f := inngestgo.CreateFunction(
