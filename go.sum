@@ -63,6 +63,8 @@ github.com/inngest/inngest v1.3.4-0.20241218201514-632b6fe3c996 h1:vO3bLgmQd/stl
 github.com/inngest/inngest v1.3.4-0.20241218201514-632b6fe3c996/go.mod h1:UfL9PYy1SECtj/vG01UZXPIoEJsamNqRPtz+Uyhli5k=
 github.com/inngest/inngest v1.3.4-0.20241218202510-b750c9bf0ba6 h1:znR2kHI/mZhD5RInIanQCVFllzNFhRc8wdL1nOu2umI=
 github.com/inngest/inngest v1.3.4-0.20241218202510-b750c9bf0ba6/go.mod h1:UfL9PYy1SECtj/vG01UZXPIoEJsamNqRPtz+Uyhli5k=
+github.com/inngest/inngest v1.3.4-0.20241218224011-c98e011728d6 h1:Jyu3YZfUCUBZzub+exw8qtObbZAB3l4ouhfYwvccbbQ=
+github.com/inngest/inngest v1.3.4-0.20241218224011-c98e011728d6/go.mod h1:fhroKPLWcj78OST/5TAqTKuks34K7fWGma3L47ZQl7Y=
 github.com/karlseguin/ccache/v2 v2.0.8 h1:lT38cE//uyf6KcFok0rlgXtGFBWxkI6h/qg4tbFyDnA=
 github.com/karlseguin/ccache/v2 v2.0.8/go.mod h1:2BDThcfQMf/c0jnZowt16eW405XIqZPavt+HoYEtcxQ=
 github.com/karlseguin/expect v1.0.2-0.20190806010014-778a5f0c6003 h1:vJ0Snvo+SLMY72r5J4sEfkuE7AFbixEP2qRbEcum/wA=
