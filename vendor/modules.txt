@@ -108,7 +108,7 @@ github.com/hashicorp/hcl/json/token
 # github.com/inngest/expr v0.0.0-20241106234328-863dff7deec0
 ## explicit; go 1.23.2
 github.com/inngest/expr
-# github.com/inngest/inngest v1.3.1-0.20241122155305-f9a9e9ca9b15
+# github.com/inngest/inngest v1.3.4-0.20241218224011-c98e011728d6
 ## explicit; go 1.23.2
 github.com/inngest/inngest/pkg/connect/types
 github.com/inngest/inngest/pkg/connect/wsproto
@@ -138,6 +138,9 @@ github.com/karlseguin/ccache/v2
 # github.com/klauspost/compress v1.17.2
 ## explicit; go 1.18
 github.com/klauspost/compress/flate
+# github.com/liushuangls/go-anthropic/v2 v2.12.2
+## explicit; go 1.21
+github.com/liushuangls/go-anthropic/v2
 # github.com/magiconair/properties v1.8.5
 ## explicit; go 1.13
 github.com/magiconair/properties

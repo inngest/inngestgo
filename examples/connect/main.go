@@ -3,9 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
-
+	"github.com/inngest/inngest/pkg/logger"
 	"github.com/inngest/inngestgo"
+	"os"
 )
 
 func main() {
@@ -13,7 +13,10 @@ func main() {
 
 	key := "signkey-test-12345678"
 	h := inngestgo.NewHandler("connect-test", inngestgo.HandlerOpts{
+		Logger:     logger.StdlibLogger(ctx),
 		SigningKey: &key,
+		InstanceId: nil,
+		BuildId:    nil,
 		Dev:        inngestgo.BoolPtr(true),
 	})
 
