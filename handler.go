@@ -16,8 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"log/slog"
-
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/execution/state"
 	"github.com/inngest/inngest/pkg/inngest"
