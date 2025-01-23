@@ -6,11 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/coder/websocket"
-	"github.com/inngest/inngest/pkg/connect/wsproto"
 	"github.com/inngest/inngest/pkg/execution/state"
 	"github.com/inngest/inngest/pkg/sdk"
 	"github.com/inngest/inngest/pkg/syscode"
-	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/pbnjay/memory"
 	"golang.org/x/sync/errgroup"
@@ -18,7 +16,6 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
-	"sync"
 	"time"
 )
 
@@ -35,6 +32,8 @@ func Connect(ctx context.Context, opts Opts, invoker FunctionInvoker, logger *sl
 		notifyConnectedChan:    make(chan struct{}),
 		initiateConnectionChan: make(chan struct{}),
 		apiClient:              newWorkerApiClient(opts.APIBaseUrl, opts.Env),
+
+		messageBuffer: newMessageBuffer(logger),
 	}
 
 	wp := NewWorkerPool(ctx, opts.WorkerConcurrency, ch.processExecutorRequest)
@@ -87,8 +86,7 @@ type connectHandler struct {
 
 	logger *slog.Logger
 
-	messageBuffer     []*connectproto.ConnectMessage
-	messageBufferLock sync.Mutex
+	messageBuffer *messageBuffer
 
 	workerPool *workerPool
 
@@ -219,9 +217,7 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 	}
 
 	// Send out buffered messages, using new connection if necessary!
-	h.messageBufferLock.Lock()
-	defer h.messageBufferLock.Unlock()
-	if len(h.messageBuffer) > 0 {
+	if h.messageBuffer.hasMessages() {
 		//  Send buffered messages via a working connection
 		err = h.withTemporaryConnection(connectionEstablishData{
 			hashedSigningKey:      auth.hashedSigningKey,
@@ -231,7 +227,7 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 			marshaledCapabilities: marshaledCapabilities,
 		}, func(ws *websocket.Conn) error {
 			// Send buffered messages
-			err := h.sendBufferedMessages(ws)
+			err := h.messageBuffer.flush(ws)
 			if err != nil {
 				return fmt.Errorf("could not send buffered messages: %w", err)
 			}
@@ -245,26 +241,6 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 		// TODO Push remaining messages to another destination for processing?
 	}
 
-	return nil
-}
-
-func (h *connectHandler) sendBufferedMessages(ws *websocket.Conn) error {
-	processed := 0
-	for _, msg := range h.messageBuffer {
-		// always send the message, even if the context is cancelled
-		err := wsproto.Write(context.Background(), ws, msg)
-		if err != nil {
-			// Only send buffered messages once
-			h.messageBuffer = h.messageBuffer[processed:]
-
-			h.logger.Error("failed to send buffered message", "err", err)
-			return fmt.Errorf("could not send buffered message: %w", err)
-		}
-
-		h.logger.Debug("sent buffered message", "msg", msg)
-		processed++
-	}
-	h.messageBuffer = nil
 	return nil
 }
 

@@ -11,6 +11,7 @@ import (
 	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
 	"github.com/oklog/ulid/v2"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 	"io"
 	"net"
 	"time"
@@ -156,9 +157,9 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 	}()
 
 	// Send buffered but unsent messages if connection was re-established
-	if len(h.messageBuffer) > 0 {
-		h.logger.Debug("sending buffered messages", "count", len(h.messageBuffer))
-		err := h.sendBufferedMessages(ws)
+
+	if h.messageBuffer.hasMessages() {
+		err := h.messageBuffer.flush(ws)
 		if err != nil {
 			return reconnectError{fmt.Errorf("could not send buffered messages: %w", err)}
 		}
@@ -239,6 +240,11 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 				})
 			case connectproto.GatewayMessageType_GATEWAY_HEARTBEAT:
 				lastGatewayHeartbeatReceived = time.Now()
+			case connectproto.GatewayMessageType_WORKER_REPLY_ACK:
+				if err := h.handleMessageReplyAck(&msg); err != nil {
+					h.logger.Error("could not handle message reply ack", "err", err)
+					continue
+				}
 			default:
 				h.logger.Error("got unknown gateway request", "err", err)
 				continue
@@ -325,6 +331,17 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 
 	// Attempt to shut down connection if not already done
 	_ = ws.Close(websocket.StatusNormalClosure, connectproto.WorkerDisconnectReason_WORKER_SHUTDOWN.String())
+
+	return nil
+}
+
+func (h *connectHandler) handleMessageReplyAck(msg *connectproto.ConnectMessage) error {
+	var payload connectproto.WorkerReplyAckData
+	if err := proto.Unmarshal(msg.Payload, msg); err != nil {
+		return fmt.Errorf("could not unmarshal reply ack data: %w", err)
+	}
+
+	h.messageBuffer.acknowledge(payload.RequestId)
 
 	return nil
 }

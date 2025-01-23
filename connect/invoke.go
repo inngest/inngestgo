@@ -15,6 +15,10 @@ import (
 	"time"
 )
 
+const (
+	ResponseAcknowlegeDeadline = time.Second * 5
+)
+
 func (h *connectHandler) handleInvokeMessage(ctx context.Context, ws *websocket.Conn, msg *connectproto.ConnectMessage) error {
 	resp, err := h.connectInvoke(ctx, ws, msg)
 	if err != nil {
@@ -35,14 +39,15 @@ func (h *connectHandler) handleInvokeMessage(ctx context.Context, ws *websocket.
 		Payload: data,
 	}
 
+	// Add message to outgoing map to ensure it is acknowledged by the gateway
+	h.messageBuffer.addPending(ctx, resp.RequestId, responseMessage, ResponseAcknowlegeDeadline)
+
 	err = wsproto.Write(ctx, ws, responseMessage)
 	if err != nil {
 		h.logger.Error("failed to send sdk response", "err", err)
 
 		// Buffer message to retry
-		h.messageBufferLock.Lock()
-		h.messageBuffer = append(h.messageBuffer, responseMessage)
-		h.messageBufferLock.Unlock()
+		h.messageBuffer.append(resp.RequestId, responseMessage)
 
 		return fmt.Errorf("could not send sdk response: %w", err)
 	}
