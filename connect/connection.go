@@ -157,9 +157,8 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 	}()
 
 	// Send buffered but unsent messages if connection was re-established
-
 	if h.messageBuffer.hasMessages() {
-		err := h.messageBuffer.flush(ws)
+		err := h.messageBuffer.flush(data.hashedSigningKey)
 		if err != nil {
 			return reconnectError{fmt.Errorf("could not send buffered messages: %w", err)}
 		}
@@ -331,6 +330,14 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 
 	// Attempt to shut down connection if not already done
 	_ = ws.Close(websocket.StatusNormalClosure, connectproto.WorkerDisconnectReason_WORKER_SHUTDOWN.String())
+
+	// Attempt to flush leftover messages before closing
+	if h.messageBuffer.hasMessages() {
+		err := h.messageBuffer.flush(data.hashedSigningKey)
+		if err != nil {
+			h.logger.Error("could not send buffered messages", "err", err)
+		}
+	}
 
 	return nil
 }

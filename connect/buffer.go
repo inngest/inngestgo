@@ -3,8 +3,6 @@ package connect
 import (
 	"context"
 	"fmt"
-	"github.com/coder/websocket"
-	"github.com/inngest/inngest/pkg/connect/wsproto"
 	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
 	"log/slog"
 	"sync"
@@ -12,28 +10,26 @@ import (
 )
 
 type messageBuffer struct {
-	buffered   []*connectproto.ConnectMessage
-	pendingAck map[string]*connectproto.ConnectMessage
+	buffered   map[string]*connectproto.SDKResponse
+	pendingAck map[string]*connectproto.SDKResponse
 	lock       sync.Mutex
 	logger     *slog.Logger
+	apiClient  *workerApiClient
 }
 
-func newMessageBuffer(logger *slog.Logger) *messageBuffer {
+func newMessageBuffer(apiClient *workerApiClient, logger *slog.Logger) *messageBuffer {
 	return &messageBuffer{
 		logger:     logger,
-		buffered:   make([]*connectproto.ConnectMessage, 0),
-		pendingAck: make(map[string]*connectproto.ConnectMessage),
+		buffered:   make(map[string]*connectproto.SDKResponse),
+		pendingAck: make(map[string]*connectproto.SDKResponse),
 		lock:       sync.Mutex{},
+		apiClient:  apiClient,
 	}
 }
 
-func (m *messageBuffer) flush(ws *websocket.Conn) error {
+func (m *messageBuffer) flush(currentHashedSigningKey []byte) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-
-	if ws == nil {
-		return fmt.Errorf("requires WebSocket connection")
-	}
 
 	attempt := 0
 	for {
@@ -41,21 +37,18 @@ func (m *messageBuffer) flush(ws *websocket.Conn) error {
 			return fmt.Errorf("could not send %d buffered messages", len(m.buffered))
 		}
 
-		next := make([]*connectproto.ConnectMessage, 0)
-		for _, msg := range m.buffered {
-			// always send the message, even if the context is cancelled
-			err := wsproto.Write(context.Background(), ws, msg)
+		for id, msg := range m.buffered {
+			err := m.apiClient.sendBufferedMessage(context.Background(), currentHashedSigningKey, msg)
 			if err != nil {
-				m.buffered = append(m.buffered, msg)
-
+				m.logger.Error("could not send buffered message via API", "err", err, "req_id", msg.RequestId)
 				break
 			}
 
-			m.logger.Debug("sent buffered message", "msg", msg)
+			m.logger.Debug("sent buffered message via API", "msg", msg)
+			delete(m.buffered, id)
 		}
-		m.buffered = next
 
-		if len(next) == 0 {
+		if len(m.buffered) == 0 {
 			break
 		}
 
@@ -72,21 +65,21 @@ func (m *messageBuffer) hasMessages() bool {
 	return len(m.buffered) > 0
 }
 
-func (m *messageBuffer) append(id string, msg *connectproto.ConnectMessage) {
+func (m *messageBuffer) append(msg *connectproto.SDKResponse) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	m.buffered = append(m.buffered, msg)
+	m.buffered[msg.RequestId] = msg
 
 	// In case message was still marked as pending, remove it
-	delete(m.pendingAck, id)
+	delete(m.pendingAck, msg.RequestId)
 }
 
-func (m *messageBuffer) addPending(ctx context.Context, id string, msg *connectproto.ConnectMessage, timeout time.Duration) {
+func (m *messageBuffer) addPending(ctx context.Context, resp *connectproto.SDKResponse, timeout time.Duration) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	m.pendingAck[id] = msg
+	m.pendingAck[resp.RequestId] = resp
 
 	go func() {
 		for {
@@ -99,9 +92,9 @@ func (m *messageBuffer) addPending(ctx context.Context, id string, msg *connectp
 
 			m.lock.Lock()
 			// If message is still in outgoing messages, it wasn't acknowledged. Add to buffer.
-			if _, ok := m.pendingAck[id]; ok {
-				m.buffered = append(m.buffered, msg)
-				delete(m.pendingAck, id)
+			if _, ok := m.pendingAck[resp.RequestId]; ok {
+				m.buffered[resp.RequestId] = resp
+				delete(m.pendingAck, resp.RequestId)
 			}
 			m.lock.Unlock()
 		}

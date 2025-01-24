@@ -24,6 +24,7 @@ const (
 )
 
 func Connect(ctx context.Context, opts Opts, invoker FunctionInvoker, logger *slog.Logger) error {
+	apiClient := newWorkerApiClient(opts.APIBaseUrl, opts.Env)
 	ch := &connectHandler{
 		logger:                 logger,
 		invoker:                invoker,
@@ -31,9 +32,8 @@ func Connect(ctx context.Context, opts Opts, invoker FunctionInvoker, logger *sl
 		notifyConnectDoneChan:  make(chan connectReport),
 		notifyConnectedChan:    make(chan struct{}),
 		initiateConnectionChan: make(chan struct{}),
-		apiClient:              newWorkerApiClient(opts.APIBaseUrl, opts.Env),
-
-		messageBuffer: newMessageBuffer(logger),
+		apiClient:              apiClient,
+		messageBuffer:          newMessageBuffer(apiClient, logger),
 	}
 
 	wp := NewWorkerPool(ctx, opts.WorkerConcurrency, ch.processExecutorRequest)
@@ -180,9 +180,17 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 						case syscode.CodeConnectGatewayClosing, syscode.CodeConnectInternal, syscode.CodeConnectWorkerHelloTimeout:
 							// continue to reconnect logic
 						default:
-							// If we received a reason  that's non-retriable, stop here.
+							// If we received a reason that's non-retriable, stop here.
 							return fmt.Errorf("connect failed with error code %q", closeErr.Reason)
 						}
+					}
+				}
+
+				// Attempt to flush messages before reconnecting
+				if h.messageBuffer.hasMessages() {
+					err := h.messageBuffer.flush(auth.hashedSigningKey)
+					if err != nil {
+						h.logger.Error("could not send buffered messages", "err", err)
 					}
 				}
 
@@ -216,26 +224,12 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 		return fmt.Errorf("could not establish connection: %w", err)
 	}
 
-	// Send out buffered messages, using new connection if necessary!
+	// Send out buffered messages using API
 	if h.messageBuffer.hasMessages() {
-		//  Send buffered messages via a working connection
-		err = h.withTemporaryConnection(connectionEstablishData{
-			hashedSigningKey:      auth.hashedSigningKey,
-			numCpuCores:           int32(numCpuCores),
-			totalMem:              int64(totalMem),
-			marshaledFns:          marshaledFns,
-			marshaledCapabilities: marshaledCapabilities,
-		}, func(ws *websocket.Conn) error {
-			// Send buffered messages
-			err := h.messageBuffer.flush(ws)
-			if err != nil {
-				return fmt.Errorf("could not send buffered messages: %w", err)
-			}
-
-			return nil
-		})
+		// Send buffered messages
+		err := h.messageBuffer.flush(auth.hashedSigningKey)
 		if err != nil {
-			h.logger.Error("could not establish connection for sending buffered messages", "err", err)
+			h.logger.Error("could not send buffered messages", "err", err)
 		}
 
 		// TODO Push remaining messages to another destination for processing?

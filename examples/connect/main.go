@@ -15,7 +15,7 @@ func main() {
 	h := inngestgo.NewHandler("connect-test", inngestgo.HandlerOpts{
 		Logger:     logger.StdlibLogger(ctx),
 		SigningKey: &key,
-		InstanceId: nil,
+		InstanceId: inngestgo.Ptr("example-worker"),
 		BuildId:    nil,
 		Dev:        inngestgo.BoolPtr(true),
 	})
