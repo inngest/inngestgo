@@ -21,6 +21,7 @@ import (
 	"github.com/inngest/inngest/pkg/inngest"
 	"github.com/inngest/inngest/pkg/publicerr"
 	"github.com/inngest/inngest/pkg/sdk"
+	"github.com/inngest/inngest/pkg/syscode"
 	sdkerrors "github.com/inngest/inngestgo/errors"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/internal/types"
@@ -345,7 +346,7 @@ func (h *handler) Register(funcs ...ServableFunction) {
 	for _, f := range funcs {
 		slugs[f.Slug(h.appName)] = f
 	}
-	
+
 	newFuncs := make([]ServableFunction, len(slugs))
 	i := 0
 	for _, f := range slugs {
@@ -412,14 +413,20 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := h.register(w, r); err != nil {
 			h.Logger.Error("error registering functions", "error", err.Error())
 
+			code := syscode.CodeUnknown
 			status := http.StatusInternalServerError
 			if err, ok := err.(publicerr.Error); ok {
 				status = err.Status
+
+				if err, ok := err.Err.(syscode.Error); ok {
+					code = err.Code
+				}
 			}
 			w.WriteHeader(status)
 
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]string{
+				"code":    code,
 				"message": err.Error(),
 			})
 		}
@@ -486,7 +493,10 @@ func (h *handler) inBandSync(
 	if !h.isDev() {
 		if sig = r.Header.Get(HeaderKeySignature); sig == "" {
 			return publicerr.Error{
-				Err:    fmt.Errorf("missing %s header", HeaderKeySignature),
+				Err: syscode.Error{
+					Code:    syscode.CodeHTTPMissingHeader,
+					Message: fmt.Sprintf("missing %s header", HeaderKeySignature),
+				},
 				Status: 401,
 			}
 		}
@@ -514,13 +524,19 @@ func (h *handler) inBandSync(
 	)
 	if err != nil {
 		return publicerr.Error{
-			Err:    fmt.Errorf("error validating signature"),
+			Err: syscode.Error{
+				Code:    syscode.CodeSigVerificationFailed,
+				Message: "error validating signature",
+			},
 			Status: 401,
 		}
 	}
 	if !valid {
 		return publicerr.Error{
-			Err:    fmt.Errorf("invalid signature"),
+			Err: syscode.Error{
+				Code:    syscode.CodeSigVerificationFailed,
+				Message: "invalid signature",
+			},
 			Status: 401,
 		}
 	}
