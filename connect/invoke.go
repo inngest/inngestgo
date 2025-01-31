@@ -9,7 +9,6 @@ import (
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/publicerr"
 	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
-	"github.com/inngest/inngestgo"
 	sdkerrors "github.com/inngest/inngestgo/errors"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"google.golang.org/protobuf/proto"
