@@ -795,7 +795,7 @@ func TestInBandSync(t *testing.T) {
 							ID:   "step",
 							Name: "my-fn",
 							Runtime: map[string]any{
-								"url": "http://test.local?fnId=my-fn&step=step",
+								"url": fmt.Sprintf("http://test.local?fnId=%s-my-fn&step=step", appID),
 							},
 						},
 					},
