@@ -9,6 +9,7 @@ import (
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/publicerr"
 	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
+	"github.com/inngest/inngestgo"
 	sdkerrors "github.com/inngest/inngestgo/errors"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"google.golang.org/protobuf/proto"
@@ -157,13 +158,15 @@ func (h *connectHandler) connectInvoke(ctx context.Context, ws *websocket.Conn, 
 	if err != nil {
 		h.logger.Error("error calling function", "error", err)
 		return &connectproto.SDKResponse{
-			RequestId:  body.RequestId,
-			EnvId:      body.EnvId,
-			AppId:      body.AppId,
-			Status:     connectproto.SDKResponseStatus_ERROR,
-			Body:       []byte(fmt.Sprintf("error calling function: %s", err.Error())),
-			NoRetry:    noRetry,
-			RetryAfter: retryAfterVal,
+			RequestId:      body.RequestId,
+			EnvId:          body.EnvId,
+			AppId:          body.AppId,
+			Status:         connectproto.SDKResponseStatus_ERROR,
+			Body:           []byte(fmt.Sprintf("error calling function: %s", err.Error())),
+			NoRetry:        noRetry,
+			RetryAfter:     retryAfterVal,
+			SdkVersion:     fmt.Sprintf("%s:v%s", h.opts.SDKLanguage, h.opts.SDKVersion),
+			RequestVersion: 0, // Go SDK currently only supports v0
 		}, nil
 	}
 
