@@ -334,7 +334,10 @@ func TestServe(t *testing.T) {
 
 	t.Run("It calls the correct function with the correct data", func(t *testing.T) {
 		queryParams := url.Values{}
-		queryParams.Add("fnId", a.Slug())
+		appName := "Go app"
+		DefaultHandler.SetAppName(appName)
+
+		queryParams.Add("fnId", a.Slug(appName))
 
 		url := fmt.Sprintf("%s?%s", server.URL, queryParams.Encode())
 		resp := handlerPost(t, url, createRequest(t, event))
@@ -402,8 +405,11 @@ func TestSteps(t *testing.T) {
 
 	Register(a)
 	server := httptest.NewServer(DefaultHandler)
+	appName := "Go app"
+	DefaultHandler.SetAppName(appName)
+
 	queryParams := url.Values{}
-	queryParams.Add("fnId", a.Slug())
+	queryParams.Add("fnId", a.Slug(appName))
 	url := fmt.Sprintf("%s?%s", server.URL, queryParams.Encode())
 
 	t.Run("It invokes the first step and returns an opcode", func(t *testing.T) {
