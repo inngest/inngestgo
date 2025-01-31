@@ -19,6 +19,7 @@ import (
 	"github.com/inngest/inngest/pkg/execution/state"
 	"github.com/inngest/inngest/pkg/inngest"
 	"github.com/inngest/inngest/pkg/sdk"
+	"github.com/inngest/inngest/pkg/syscode"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/step"
 	"github.com/stretchr/testify/require"
@@ -863,6 +864,7 @@ func TestInBandSync(t *testing.T) {
 		r.NoError(err)
 
 		r.Equal(map[string]any{
+			"code":    syscode.CodeSigVerificationFailed,
 			"message": "error validating signature",
 		}, respBody)
 	})
@@ -890,6 +892,7 @@ func TestInBandSync(t *testing.T) {
 		r.NoError(err)
 
 		r.Equal(map[string]any{
+			"code":    syscode.CodeHTTPMissingHeader,
 			"message": "missing X-Inngest-Signature header",
 		}, respBody)
 	})
