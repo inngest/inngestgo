@@ -112,7 +112,7 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 		ExcludeGateways: excludeGateways,
 	})
 	if err != nil {
-		return connection{}, reconnectError{fmt.Errorf("could not start connection: %w", err)}
+		return connection{}, newReconnectErr(fmt.Errorf("could not start connection: %w", err))
 	}
 
 	h.logger.Debug("handshake successful", "gateway_endpoint", startRes.GetGatewayEndpoint(), "gateway_group", startRes.GetGatewayGroup())
@@ -126,7 +126,7 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 		},
 	})
 	if err != nil {
-		return connection{}, reconnectError{fmt.Errorf("could not connect to gateway: %w", err)}
+		return connection{}, newReconnectErr(fmt.Errorf("could not connect to gateway: %w", err))
 	}
 
 	// Connection ID is unique per connection, reconnections should get a new ID
@@ -136,7 +136,7 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 
 	err = h.performConnectHandshake(ctx, connectionId.String(), ws, startRes, data, startTime)
 	if err != nil {
-		return connection{}, reconnectError{fmt.Errorf("could not perform connect handshake: %w", err)}
+		return connection{}, newReconnectErr(fmt.Errorf("could not perform connect handshake: %w", err))
 	}
 
 	return connection{
@@ -160,7 +160,7 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 	if h.messageBuffer.hasMessages() {
 		err := h.messageBuffer.flush(data.hashedSigningKey)
 		if err != nil {
-			return reconnectError{fmt.Errorf("could not send buffered messages: %w", err)}
+			return newReconnectErr(fmt.Errorf("could not send buffered messages: %w", err))
 		}
 	}
 
@@ -178,6 +178,7 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 				if err != nil {
 					h.logger.Error("failed to send worker heartbeat", "err", err)
 				}
+				h.logger.Debug("sent worker heartbeat")
 			}
 
 		}
@@ -224,7 +225,7 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 				return err
 			}
 
-			h.logger.Debug("received gateway request", "msg", &msg)
+			h.logger.Debug("received gateway request", "kind", msg.Kind.String())
 
 			switch msg.Kind {
 			case connectproto.GatewayMessageType_GATEWAY_CLOSING:
@@ -291,22 +292,22 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 			h.logger.Error("connection closed with reason", "reason", cerr.Reason)
 
 			// Reconnect!
-			return reconnectError{fmt.Errorf("connection closed with reason %q: %w", cerr.Reason, cerr)}
+			return newReconnectErr(fmt.Errorf("connection closed with reason %q: %w", cerr.Reason, cerr))
 		}
 
 		// connection closed without reason
 		if errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) {
 			h.logger.Error("failed to read message from gateway, lost connection unexpectedly", "err", err)
-			return reconnectError{fmt.Errorf("connection closed unexpectedly: %w", cerr)}
+			return newReconnectErr(fmt.Errorf("connection closed unexpectedly: %w", cerr))
 		}
 
 		// gateway heartbeat missed, we should reconnect
 		if readerLifetimeContext.Err() != nil {
-			return reconnectError{fmt.Errorf("connection closed unexpectedly due to missed heartbeat")}
+			return newReconnectErr(fmt.Errorf("connection closed unexpectedly due to missed heartbeat"))
 		}
 
 		// If this is not a worker shutdown, we should reconnect
-		return reconnectError{fmt.Errorf("connection closed unexpectedly: %w", ctx.Err())}
+		return newReconnectErr(fmt.Errorf("connection closed unexpectedly: %w", ctx.Err()))
 	}
 
 	// Perform graceful shutdown routine (parent context was cancelled)

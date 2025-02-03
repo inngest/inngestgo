@@ -209,7 +209,17 @@ func (h *connectHandler) Connect(ctx context.Context) error {
 				}
 
 				// continue to reconnect logic
-				h.logger.Debug("reconnecting", "attempts", attempts)
+				delay := expBackoff(attempts)
+
+				h.logger.Debug("reconnecting", "delay", delay.String(), "attempts", attempts)
+
+				select {
+				case <-time.After(delay):
+					break
+				case <-ctx.Done():
+					h.logger.Info("canceled context while waiting to reconnect")
+					return nil
+				}
 
 			case <-h.initiateConnectionChan:
 			}
@@ -295,4 +305,16 @@ func (h *connectHandler) instanceId() string {
 
 	// TODO Is there any stable identifier that can be used as a fallback?
 	return "<missing-instance-id>"
+}
+
+func expBackoff(attempt int) time.Duration {
+	backoffTimes := []time.Duration{
+		time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second,
+		20 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute,
+	}
+
+	if attempt >= len(backoffTimes) {
+		return backoffTimes[len(backoffTimes)-1]
+	}
+	return backoffTimes[attempt]
 }
