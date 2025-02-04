@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,10 +24,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func init() {
-	os.Setenv("INNGEST_EVENT_KEY", "abc123")
-	os.Setenv("INNGEST_SIGNING_KEY", string(testKey))
-	os.Setenv("INNGEST_SIGNING_KEY_FALLBACK", string(testKeyFallback))
+func setEnvVars(t *testing.T) {
+	t.Setenv("INNGEST_EVENT_KEY", "abc123")
+	t.Setenv("INNGEST_SIGNING_KEY", string(testKey))
+	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", string(testKeyFallback))
 }
 
 type EventA struct {
@@ -43,6 +42,8 @@ type EventB struct{}
 type EventC struct{}
 
 func TestRegister(t *testing.T) {
+	setEnvVars(t)
+
 	a := CreateFunction(
 		FunctionOpts{
 			Name: "my func name",
@@ -299,6 +300,8 @@ func TestInvoke(t *testing.T) {
 }
 
 func TestServe(t *testing.T) {
+	setEnvVars(t)
+
 	event := EventA{
 		Name: "test/event.a",
 		Data: struct {
@@ -368,6 +371,8 @@ func TestServe(t *testing.T) {
 }
 
 func TestSteps(t *testing.T) {
+	setEnvVars(t)
+
 	event := EventA{
 		Name: "test/event.a",
 		Data: struct {
@@ -488,6 +493,8 @@ func TestSteps(t *testing.T) {
 }
 
 func TestInspection(t *testing.T) {
+	setEnvVars(t)
+
 	t.Run("dev mode", func(t *testing.T) {
 		fn := CreateFunction(
 			FunctionOpts{Name: "My servable function!"},
@@ -738,6 +745,7 @@ func TestInspection(t *testing.T) {
 }
 
 func TestInBandSync(t *testing.T) {
+	setEnvVars(t)
 	appID := "test-in-band-sync"
 
 	fn := CreateFunction(
