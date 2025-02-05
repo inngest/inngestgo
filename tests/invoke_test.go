@@ -67,7 +67,7 @@ func TestInvoke(t *testing.T) {
 					"invoke",
 					step.InvokeOpts{
 						Data:       map[string]any{"message": "hello"},
-						FunctionId: fmt.Sprintf("%s-%s", appName, childFnName),
+						FunctionId: childFn.FullyQualifiedID(),
 					},
 				)
 				return invokeResult, invokeErr
@@ -147,7 +147,7 @@ func TestInvoke(t *testing.T) {
 				invokeResult, invokeErr = step.Invoke[any](ctx,
 					"invoke",
 					step.InvokeOpts{
-						FunctionId: fmt.Sprintf("%s-%s", appName, childFnName),
+						FunctionId: childFn.FullyQualifiedID(),
 					},
 				)
 				return invokeResult, invokeErr
