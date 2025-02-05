@@ -24,7 +24,9 @@ func TestTrustProbe(t *testing.T) {
 			ctx := context.Background()
 
 			appName := randomSuffix("TestTrustProbe")
-			server := createApp(t, appName, isDev)
+			c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
+			r.NoError(err)
+			server := createApp(t, c, isDev)
 			defer server.Close()
 
 			appURL := fmt.Sprintf("%s?probe=trust", server.URL)
@@ -44,7 +46,9 @@ func TestTrustProbe(t *testing.T) {
 			r := require.New(t)
 
 			appName := randomSuffix("TestTrustProbe")
-			server := createApp(t, appName, isDev)
+			c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
+			r.NoError(err)
+			server := createApp(t, c, isDev)
 			defer server.Close()
 
 			appURL := fmt.Sprintf("%s?probe=trust", server.URL)
@@ -61,7 +65,9 @@ func TestTrustProbe(t *testing.T) {
 			ctx := context.Background()
 
 			appName := randomSuffix("TestTrustProbe")
-			server := createApp(t, appName, isDev)
+			c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
+			r.NoError(err)
+			server := createApp(t, c, isDev)
 			defer server.Close()
 
 			appURL := fmt.Sprintf("%s?probe=trust", server.URL)
@@ -87,7 +93,9 @@ func TestTrustProbe(t *testing.T) {
 			ctx := context.Background()
 
 			appName := randomSuffix("TestTrustProbe")
-			server := createApp(t, appName, isDev)
+			c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
+			r.NoError(err)
+			server := createApp(t, c, isDev)
 			defer server.Close()
 
 			appURL := fmt.Sprintf("%s?probe=trust", server.URL)
@@ -124,7 +132,9 @@ func TestTrustProbe(t *testing.T) {
 			r := require.New(t)
 
 			appName := randomSuffix("TestTrustProbe")
-			server := createApp(t, appName, isDev)
+			c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
+			r.NoError(err)
+			server := createApp(t, c, isDev)
 			defer server.Close()
 
 			appURL := fmt.Sprintf("%s?probe=trust", server.URL)
@@ -141,7 +151,9 @@ func TestTrustProbe(t *testing.T) {
 			ctx := context.Background()
 
 			appName := randomSuffix("TestTrustProbe")
-			server := createApp(t, appName, isDev)
+			c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
+			r.NoError(err)
+			server := createApp(t, c, isDev)
 			defer server.Close()
 
 			appURL := fmt.Sprintf("%s?probe=trust", server.URL)
@@ -160,15 +172,17 @@ func TestTrustProbe(t *testing.T) {
 	})
 }
 
-func createApp(t *testing.T, appName string, isDev bool) *httptest.Server {
+func createApp(t *testing.T, c inngestgo.Client, isDev bool) *httptest.Server {
+	r := require.New(t)
 	h := inngestgo.NewHandler(
-		appName,
+		c,
 		inngestgo.HandlerOpts{
 			Dev:        inngestgo.BoolPtr(isDev),
 			SigningKey: inngestgo.StrPtr(sKey),
 		},
 	)
-	h.Register(inngestgo.CreateFunction(
+	fn, err := inngestgo.CreateFunction(
+		c,
 		inngestgo.FunctionOpts{
 			ID:   "my-fn",
 			Name: "my-fn",
@@ -177,8 +191,9 @@ func createApp(t *testing.T, appName string, isDev bool) *httptest.Server {
 		func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
 			return nil, nil
 		},
-	))
-
+	)
+	r.NoError(err)
+	h.Register(fn)
 	server, _ := serve(t, h)
 	return server
 }

@@ -35,7 +35,7 @@ var (
 	// It's recommended to call SetOptions() to set configuration before serving
 	// this in production environments;  this is set up for development and will
 	// attempt to connect to the dev server.
-	DefaultHandler Handler = NewHandler("Go app", HandlerOpts{})
+	// DefaultHandler Handler = NewHandler("Go app", HandlerOpts{})
 
 	ErrTypeMismatch = fmt.Errorf("cannot invoke function with mismatched types")
 
@@ -54,22 +54,24 @@ var (
 	}
 
 	defaultWorkerConcurrency = 1_000
+
+	clientCtxKey = struct{}{}
 )
 
 // Register adds the given functions to the default handler for serving.  You must register all
 // functions with a handler prior to serving the handler for them to be enabled.
-func Register(funcs ...ServableFunction) {
-	DefaultHandler.Register(funcs...)
-}
+// func Register(funcs ...ServableFunction) {
+// 	DefaultHandler.Register(funcs...)
+// }
 
 // Serve serves all registered functions within the default handler.
-func Serve(w http.ResponseWriter, r *http.Request) {
-	DefaultHandler.ServeHTTP(w, r)
-}
+// func Serve(w http.ResponseWriter, r *http.Request) {
+// 	DefaultHandler.ServeHTTP(w, r)
+// }
 
-func Connect(ctx context.Context) error {
-	return DefaultHandler.Connect(ctx)
-}
+// func Connect(ctx context.Context) error {
+// 	return DefaultHandler.Connect(ctx)
+// }
 
 type HandlerOpts struct {
 	// Logger is the structured logger to use from Go's builtin structured
@@ -289,7 +291,7 @@ type Handler interface {
 }
 
 // NewHandler returns a new Handler for serving Inngest functions.
-func NewHandler(appName string, opts HandlerOpts) Handler {
+func NewHandler(c Client, opts HandlerOpts) Handler {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
@@ -300,7 +302,8 @@ func NewHandler(appName string, opts HandlerOpts) Handler {
 
 	return &handler{
 		HandlerOpts: opts,
-		appName:     appName,
+		appName:     c.AppID(),
+		client:      c,
 		funcs:       []ServableFunction{},
 	}
 }
@@ -309,6 +312,7 @@ type handler struct {
 	HandlerOpts
 
 	appName string
+	client  Client
 	funcs   []ServableFunction
 	// lock prevents reading the function maps while serving
 	l sync.RWMutex
@@ -340,11 +344,11 @@ func (h *handler) Register(funcs ...ServableFunction) {
 	// that already exists, clear it.
 	slugs := map[string]ServableFunction{}
 	for _, f := range h.funcs {
-		slugs[f.Slug(h.appName)] = f
+		slugs[f.FullyQualifiedID()] = f
 	}
 
 	for _, f := range funcs {
-		slugs[f.Slug(h.appName)] = f
+		slugs[f.FullyQualifiedID()] = f
 	}
 
 	newFuncs := make([]ServableFunction, len(slugs))
@@ -764,13 +768,13 @@ func createFunctionConfigs(
 
 		// Modify URL to contain fn ID, step params
 		values := appURL.Query()
-		values.Set("fnId", fn.Slug(appName)) // This should match the Slug below
+		values.Set("fnId", fn.FullyQualifiedID()) // This should match the Slug below
 		values.Set("step", "step")
 		appURL.RawQuery = values.Encode()
 
 		f := sdk.SDKFunction{
 			Name:        fn.Name(),
-			Slug:        fn.Slug(appName),
+			Slug:        fn.FullyQualifiedID(),
 			Idempotency: c.Idempotency,
 			Priority:    fn.Config().Priority,
 			Triggers:    inngest.MultipleTriggers{},
@@ -891,8 +895,8 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	h.l.RLock()
 	var fn ServableFunction
 	for _, f := range h.funcs {
-		isOldFormat := f.Slug("") == fnID // Only include function slug
-		if f.Slug(h.appName) == fnID || isOldFormat {
+		isOldFormat := f.ID() == fnID // Only include function slug
+		if f.FullyQualifiedID() == fnID || isOldFormat {
 			fn = f
 			break
 		}
@@ -925,8 +929,10 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 		stepID = &rawStepID
 	}
 
+	ctx := context.WithValue(r.Context(), clientCtxKey, h.client)
+
 	// Invoke the function, then immediately stop the streaming buffer.
-	resp, ops, err := invoke(r.Context(), fn, request, stepID)
+	resp, ops, err := invoke(ctx, fn, request, stepID)
 	streamCancel()
 
 	// NOTE: When triggering step errors, we should have an OpcodeStepError

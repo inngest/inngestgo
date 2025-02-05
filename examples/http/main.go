@@ -14,11 +14,16 @@ import (
 )
 
 func main() {
+	c := inngestgo.NewClient(inngestgo.ClientOpts{
+		AppID: "billing",
+	})
+
 	h := inngestgo.NewHandler("billing", inngestgo.HandlerOpts{})
 
 	// CreateFunction is a factory method which creates new Inngest functions (step functions,
 	// or workflows) with a specific configuration.
-	f := inngestgo.CreateFunction(
+	f, err := inngestgo.CreateFunction(
+		c,
 		inngestgo.FunctionOpts{
 			ID:      "account-created",
 			Name:    "Account creation flow",

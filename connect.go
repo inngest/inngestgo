@@ -3,11 +3,12 @@ package inngestgo
 import (
 	"context"
 	"fmt"
+	"net/url"
+
 	"github.com/inngest/inngest/pkg/execution/state"
 	"github.com/inngest/inngest/pkg/publicerr"
 	"github.com/inngest/inngestgo/connect"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
-	"net/url"
 )
 
 func (h *handler) Connect(ctx context.Context) error {
@@ -70,7 +71,7 @@ func (h *handler) getServableFunctionBySlug(slug string) ServableFunction {
 	h.l.RLock()
 	var fn ServableFunction
 	for _, f := range h.funcs {
-		if f.Slug(h.appName) == slug {
+		if f.FullyQualifiedID() == slug {
 			fn = f
 			break
 		}

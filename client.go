@@ -4,27 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
-)
-
-var (
-	// DefaultClient represents the default, mutable, global client used
-	// within the `Send` function provided by this package.
-	//
-	// You should initialize this within an init() function using `NewClient`
-	// if you plan to use the `Send` function:
-	//
-	// 	func init() {
-	// 		inngestgo.DefaultClient = inngestgo.NewClient(
-	// 			"key",
-	// 			inngestgo.WithHTTPClient(&http.Client{Timeout: 10 * time.Second}),
-	// 		)
-	// 	}
-	//
-	// If this client is not set, Send will return an error.
-	DefaultClient Client
 )
 
 const (
@@ -33,22 +16,26 @@ const (
 
 // Send uses the DefaultClient to send the given event.
 func Send(ctx context.Context, e any) (string, error) {
-	if DefaultClient == nil {
-		return "", fmt.Errorf("no default client initialized for inngest")
+	client, ok := ctx.Value(clientCtxKey).(Client)
+	if !ok || client == nil {
+		return "", fmt.Errorf("client not found in context")
 	}
-	return DefaultClient.Send(ctx, e)
+	return client.Send(ctx, e)
 }
 
 // SendMany uses the DefaultClient to send the given event batch.
 func SendMany(ctx context.Context, e []any) ([]string, error) {
-	if DefaultClient == nil {
-		return nil, fmt.Errorf("no default client initialized for inngest")
+	client, ok := ctx.Value(clientCtxKey).(Client)
+	if !ok || client == nil {
+		return nil, fmt.Errorf("client not found in context")
 	}
-	return DefaultClient.SendMany(ctx, e)
+	return client.SendMany(ctx, e)
 }
 
 // Client represents a client used to send events to Inngest.
 type Client interface {
+	AppID() string
+
 	// Send sends the specific event to the ingest API.
 	Send(ctx context.Context, evt any) (string, error)
 	// Send sends a batch of events to the ingest API.
@@ -56,6 +43,8 @@ type Client interface {
 }
 
 type ClientOpts struct {
+	AppID string
+
 	// HTTPClient is the HTTP client used to send events.
 	HTTPClient *http.Client
 	// EventKey is your Inngest event key for sending events.  This defaults to the
@@ -70,9 +59,21 @@ type ClientOpts struct {
 	Env *string
 }
 
+func (c ClientOpts) validate() error {
+	if c.AppID == "" {
+		return errors.New("app id is required")
+	}
+	return nil
+}
+
 // NewClient returns a concrete client initialized with the given ingest key,
 // which can immediately send events to the ingest API.
-func NewClient(opts ClientOpts) Client {
+func NewClient(opts ClientOpts) (Client, error) {
+	err := opts.validate()
+	if err != nil {
+		return nil, err
+	}
+
 	c := &apiClient{
 		ClientOpts: opts,
 	}
@@ -81,13 +82,17 @@ func NewClient(opts ClientOpts) Client {
 		c.ClientOpts.HTTPClient = http.DefaultClient
 	}
 
-	return c
+	return c, nil
 }
 
 // apiClient is a concrete implementation of Client that uses the given HTTP client
 // to send events to the ingest API
 type apiClient struct {
 	ClientOpts
+}
+
+func (a apiClient) AppID() string {
+	return a.ClientOpts.AppID
 }
 
 func (a apiClient) GetEnv() string {

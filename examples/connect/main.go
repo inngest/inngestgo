@@ -3,16 +3,21 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+
 	"github.com/inngest/inngest/pkg/logger"
 	"github.com/inngest/inngestgo"
-	"os"
 )
 
 func main() {
 	ctx := context.Background()
 
 	key := "signkey-test-12345678"
-	h := inngestgo.NewHandler("connect-test", inngestgo.HandlerOpts{
+	c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: "connect-test"})
+	if err != nil {
+		panic(err)
+	}
+	h := inngestgo.NewHandler(c, inngestgo.HandlerOpts{
 		Logger:     logger.StdlibLogger(ctx),
 		SigningKey: &key,
 		InstanceId: inngestgo.Ptr("example-worker"),
@@ -20,15 +25,19 @@ func main() {
 		Dev:        inngestgo.BoolPtr(true),
 	})
 
-	f := inngestgo.CreateFunction(
+	f, err := inngestgo.CreateFunction(
+		c,
 		inngestgo.FunctionOpts{ID: "conntest", Name: "connect test"},
 		inngestgo.EventTrigger("test/connect.run", nil),
 		testRun,
 	)
+	if err != nil {
+		panic(err)
+	}
 
 	h.Register(f)
 
-	err := h.Connect(ctx)
+	err = h.Connect(ctx)
 	if err != nil {
 		fmt.Printf("ERROR: %#v\n", err)
 		os.Exit(1)
