@@ -166,6 +166,7 @@ func TestParallel(t *testing.T) {
 				return nil, nil
 			},
 		)
+		r.NoError(err)
 
 		h.Register(fn)
 

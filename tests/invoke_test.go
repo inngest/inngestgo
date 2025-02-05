@@ -218,6 +218,7 @@ func TestInvoke(t *testing.T) {
 				return invokeResult, invokeErr
 			},
 		)
+		r.NoError(err)
 
 		h.Register(fn)
 

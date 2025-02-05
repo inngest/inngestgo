@@ -541,18 +541,6 @@ func TestSteps(t *testing.T) {
 
 }
 
-func foo(v any, err error) any {
-	return v
-}
-
-func bar() (int, error) {
-	return 1, nil
-}
-
-func baz() {
-	foo(bar())
-}
-
 func TestInspection(t *testing.T) {
 	setEnvVars(t)
 	r := require.New(t)

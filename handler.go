@@ -28,6 +28,8 @@ import (
 	"github.com/inngest/inngestgo/step"
 )
 
+type clientCtxKeyType struct{}
+
 var (
 	// DefaultHandler provides a default handler for registering and serving functions
 	// globally.
@@ -55,7 +57,7 @@ var (
 
 	defaultWorkerConcurrency = 1_000
 
-	clientCtxKey = struct{}{}
+	clientCtxKey = clientCtxKeyType{}
 )
 
 // Register adds the given functions to the default handler for serving.  You must register all
