@@ -31,14 +31,6 @@ import (
 type clientCtxKeyType struct{}
 
 var (
-	// DefaultHandler provides a default handler for registering and serving functions
-	// globally.
-	//
-	// It's recommended to call SetOptions() to set configuration before serving
-	// this in production environments;  this is set up for development and will
-	// attempt to connect to the dev server.
-	// DefaultHandler Handler = NewHandler("Go app", HandlerOpts{})
-
 	ErrTypeMismatch = fmt.Errorf("cannot invoke function with mismatched types")
 
 	errBadRequest      = fmt.Errorf("bad request")
