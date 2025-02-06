@@ -110,7 +110,7 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 
 	startRes, err := h.apiClient.start(ctx, data.hashedSigningKey, &connectproto.StartRequest{
 		ExcludeGateways: excludeGateways,
-	})
+	}, h.logger)
 	if err != nil {
 		return connection{}, newReconnectErr(fmt.Errorf("could not start connection: %w", err))
 	}

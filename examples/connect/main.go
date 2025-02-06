@@ -6,10 +6,13 @@ import (
 	"github.com/inngest/inngest/pkg/logger"
 	"github.com/inngest/inngestgo"
 	"os"
+	"os/signal"
+	"syscall"
 )
 
 func main() {
-	ctx := context.Background()
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
 
 	key := "signkey-test-12345678"
 	h := inngestgo.NewHandler("connect-test", inngestgo.HandlerOpts{
