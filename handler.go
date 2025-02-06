@@ -52,8 +52,6 @@ var (
 		TrustProbe: sdk.TrustProbeV1,
 		Connect:    sdk.ConnectV1,
 	}
-
-	defaultWorkerConcurrency = 1_000
 )
 
 // Register adds the given functions to the default handler for serving.  You must register all
@@ -67,8 +65,8 @@ func Serve(w http.ResponseWriter, r *http.Request) {
 	DefaultHandler.ServeHTTP(w, r)
 }
 
-func Connect(ctx context.Context) error {
-	return DefaultHandler.Connect(ctx)
+func Connect(ctx context.Context, opts ConnectOpts) error {
+	return DefaultHandler.Connect(ctx, opts)
 }
 
 type HandlerOpts struct {
@@ -111,12 +109,6 @@ type HandlerOpts struct {
 	// This only needs to be set when self hosting.
 	RegisterURL *string
 
-	// InstanceId represents a stable identifier to be used for identifying connected SDKs.
-	// This can be a hostname or other identifier that remains stable across restarts.
-	//
-	// If nil, this defaults to the current machine's hostname.
-	InstanceId *string
-
 	// BuildId supplies an application version identifier. This should change
 	// whenever code within one of your Inngest function or any dependency thereof changes.
 	BuildId *string
@@ -135,10 +127,6 @@ type HandlerOpts struct {
 	// AllowInBandSync allows in-band syncs to occur. If nil, in-band syncs are
 	// disallowed.
 	AllowInBandSync *bool
-
-	// WorkerConcurrency defines the number of goroutines available to handle
-	// connnect workloads. Defaults to 1000
-	WorkerConcurrency int
 
 	Dev *bool
 }
@@ -252,13 +240,6 @@ func (h HandlerOpts) IsInBandSyncAllowed() bool {
 	return false
 }
 
-func (h HandlerOpts) GetWorkerConcurrency() int {
-	if h.WorkerConcurrency == 0 {
-		return defaultWorkerConcurrency
-	}
-	return h.WorkerConcurrency
-}
-
 func (h HandlerOpts) isDev() bool {
 	if h.Dev != nil {
 		return *h.Dev
@@ -285,7 +266,7 @@ type Handler interface {
 	Register(...ServableFunction)
 
 	// Connect establishes an outbound connection to Inngest
-	Connect(ctx context.Context) error
+	Connect(ctx context.Context, opts ConnectOpts) error
 }
 
 // NewHandler returns a new Handler for serving Inngest functions.

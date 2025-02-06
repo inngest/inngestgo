@@ -52,6 +52,10 @@ func (a *workerApiClient) start(ctx context.Context, hashedSigningKey []byte, re
 	defer httpRes.Body.Close()
 
 	if httpRes.StatusCode != http.StatusOK {
+		if httpRes.StatusCode == http.StatusUnauthorized {
+			return nil, newReconnectErr(ErrUnauthenticated)
+		}
+
 		byt, err := io.ReadAll(httpRes.Body)
 		if err != nil {
 			return nil, fmt.Errorf("could not read start error: %w", err)

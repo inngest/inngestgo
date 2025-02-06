@@ -18,7 +18,6 @@ func main() {
 	h := inngestgo.NewHandler("connect-test", inngestgo.HandlerOpts{
 		Logger:     logger.StdlibLogger(ctx),
 		SigningKey: &key,
-		InstanceId: inngestgo.Ptr("example-worker"),
 		BuildId:    nil,
 		Dev:        inngestgo.BoolPtr(true),
 	})
@@ -31,7 +30,9 @@ func main() {
 
 	h.Register(f)
 
-	err := h.Connect(ctx)
+	err := h.Connect(ctx, inngestgo.ConnectOpts{
+		InstanceId: inngestgo.Ptr("example-worker"),
+	})
 	if err != nil {
 		fmt.Printf("ERROR: %#v\n", err)
 		os.Exit(1)

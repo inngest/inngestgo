@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"io"
 	"net"
+	"net/url"
 	"time"
 )
 
@@ -117,10 +118,21 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 
 	h.logger.Debug("handshake successful", "gateway_endpoint", startRes.GetGatewayEndpoint(), "gateway_group", startRes.GetGatewayGroup())
 
-	gatewayHost := startRes.GetGatewayEndpoint()
+	gatewayHost, err := url.Parse(startRes.GetGatewayEndpoint())
+	if err != nil {
+		return connection{}, newReconnectErr(fmt.Errorf("received invalid start gateway host: %w", err))
+	}
+
+	if h.opts.RewriteGatewayEndpoint != nil {
+		newGatewayHost, err := h.opts.RewriteGatewayEndpoint(*gatewayHost)
+		if err != nil {
+			return connection{}, newReconnectErr(fmt.Errorf("rewriting gateway host failed: %w", err))
+		}
+		gatewayHost = &newGatewayHost
+	}
 
 	// Establish WebSocket connection to one of the gateways
-	ws, _, err := websocket.Dial(connectTimeout, gatewayHost, &websocket.DialOptions{
+	ws, _, err := websocket.Dial(connectTimeout, gatewayHost.String(), &websocket.DialOptions{
 		Subprotocols: []string{
 			types.GatewaySubProtocol,
 		},

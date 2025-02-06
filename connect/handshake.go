@@ -35,6 +35,8 @@ func shouldReconnect(err error) bool {
 	return ok
 }
 
+var ErrUnauthenticated = fmt.Errorf("authentication failed")
+
 func (h *connectHandler) performConnectHandshake(ctx context.Context, connectionId string, ws *websocket.Conn, startResponse *connectproto.StartResponse, data connectionEstablishData, startTime time.Time) error {
 	// Wait for gateway hello message
 	{
