@@ -52,21 +52,6 @@ var (
 	clientCtxKey = clientCtxKeyType{}
 )
 
-// Register adds the given functions to the default handler for serving.  You must register all
-// functions with a handler prior to serving the handler for them to be enabled.
-// func Register(funcs ...ServableFunction) {
-// 	DefaultHandler.Register(funcs...)
-// }
-
-// Serve serves all registered functions within the default handler.
-// func Serve(w http.ResponseWriter, r *http.Request) {
-// 	DefaultHandler.ServeHTTP(w, r)
-// }
-
-// func Connect(ctx context.Context) error {
-// 	return DefaultHandler.Connect(ctx)
-// }
-
 type HandlerOpts struct {
 	// Logger is the structured logger to use from Go's builtin structured
 	// logging package.
