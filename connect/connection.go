@@ -352,6 +352,8 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 		}
 	}
 
+	h.logger.Debug("connection done")
+
 	return nil
 }
 

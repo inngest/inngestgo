@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/inngest/inngestgo/connect"
 	"io"
 	"log/slog"
 	"net/http"
@@ -65,7 +66,7 @@ func Serve(w http.ResponseWriter, r *http.Request) {
 	DefaultHandler.ServeHTTP(w, r)
 }
 
-func Connect(ctx context.Context, opts ConnectOpts) error {
+func Connect(ctx context.Context, opts ConnectOpts) (connect.WorkerConnection, error) {
 	return DefaultHandler.Connect(ctx, opts)
 }
 
@@ -266,7 +267,7 @@ type Handler interface {
 	Register(...ServableFunction)
 
 	// Connect establishes an outbound connection to Inngest
-	Connect(ctx context.Context, opts ConnectOpts) error
+	Connect(ctx context.Context, opts ConnectOpts) (connect.WorkerConnection, error)
 }
 
 // NewHandler returns a new Handler for serving Inngest functions.

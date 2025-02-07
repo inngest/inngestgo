@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"github.com/inngest/inngest/pkg/logger"
 	"github.com/inngest/inngestgo"
+	"github.com/inngest/inngestgo/connect"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -30,12 +32,30 @@ func main() {
 
 	h.Register(f)
 
-	err := h.Connect(ctx, inngestgo.ConnectOpts{
+	conn, err := h.Connect(ctx, inngestgo.ConnectOpts{
 		InstanceID: inngestgo.Ptr("example-worker"),
 	})
+	defer func(conn connect.WorkerConnection) {
+		err := conn.Close()
+		if err != nil {
+			fmt.Printf("Could not close: %s\n", err.Error())
+		}
+	}(conn)
 	if err != nil {
 		fmt.Printf("ERROR: %#v\n", err)
 		os.Exit(1)
+	}
+
+	fmt.Println("Connected!")
+
+	tick := time.Tick(time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick:
+			fmt.Printf("Connection state: %s\n", conn.State())
+		}
 	}
 }
 
