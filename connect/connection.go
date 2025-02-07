@@ -69,7 +69,7 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 	}
 
 	// Set up connection lifecycle logic (receiving messages, handling requests, etc.)
-	err = h.handleConnection(ctx, data, preparedConn.ws, preparedConn.gatewayGroupName)
+	err = h.handleConnection(h.workerCtx, data, preparedConn.ws, preparedConn.gatewayGroupName)
 	if err != nil {
 		h.logger.Error("could not handle connection", "err", err)
 

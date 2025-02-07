@@ -46,7 +46,12 @@ type WorkerConnection interface {
 func Connect(ctx context.Context, opts Opts, invoker FunctionInvoker, logger *slog.Logger) (WorkerConnection, error) {
 	apiClient := newWorkerApiClient(opts.APIBaseUrl, opts.Env)
 
-	ctx, cancel := context.WithCancel(ctx)
+	// While the worker is starting, it can be canceled using the passed context
+	startCtx, cancelStart := context.WithTimeout(ctx, time.Second*30)
+	defer cancelStart()
+
+	// Once the worker is running, it can only be stopped by calling Close()
+	doneCtx, cancelDone := context.WithCancel(context.Background())
 
 	ch := &connectHandler{
 		logger:                 logger,
@@ -58,7 +63,9 @@ func Connect(ctx context.Context, opts Opts, invoker FunctionInvoker, logger *sl
 		apiClient:              apiClient,
 		messageBuffer:          newMessageBuffer(apiClient, logger),
 		state:                  ConnectionStateConnecting,
-		cancelWorkerCtx:        cancel,
+
+		workerCtx:       doneCtx,
+		cancelWorkerCtx: cancelDone,
 	}
 
 	wp := NewWorkerPool(ctx, opts.MaxConcurrency, ch.processExecutorRequest)
@@ -68,7 +75,7 @@ func Connect(ctx context.Context, opts Opts, invoker FunctionInvoker, logger *sl
 		// TODO Push remaining messages to another destination for processing?
 	}()
 
-	conn, err := ch.Connect(ctx)
+	conn, err := ch.Connect(startCtx)
 	if err != nil {
 		return nil, fmt.Errorf("could not establish connection: %w", err)
 	}
@@ -131,6 +138,7 @@ type connectHandler struct {
 	// Global connection state
 
 	state           ConnectionState
+	workerCtx       context.Context
 	cancelWorkerCtx context.CancelFunc
 	eg              errgroup.Group
 	auth            authContext
@@ -191,7 +199,7 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 		for {
 			select {
 			// If the context is canceled, we should not attempt to reconnect
-			case <-ctx.Done():
+			case <-h.workerCtx.Done():
 				return nil
 
 			// Reset attempts when connection succeeded
@@ -291,7 +299,7 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 				select {
 				case <-time.After(delay):
 					break
-				case <-ctx.Done():
+				case <-h.workerCtx.Done():
 					if isInitialConnection {
 						isInitialConnection = false
 						initialConnectionDone <- nil
@@ -364,6 +372,8 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 	// Wait until connected (or context is closed)
 	select {
 	case <-ctx.Done():
+		_ = h.Close()
+
 		return nil, fmt.Errorf("context canceled while establishing connection")
 	case err := <-initialConnectionDone:
 		if err != nil {
