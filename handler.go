@@ -621,6 +621,11 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 
 	pathAndParams := r.URL.String()
 
+	appVersion := ""
+	if h.AppVersion != nil {
+		appVersion = *h.AppVersion
+	}
+
 	config := sdk.RegisterRequest{
 		URL:        fmt.Sprintf("%s://%s%s", scheme, host, pathAndParams),
 		V:          "1",
@@ -632,6 +637,7 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 			Platform: platform(),
 		},
 		Capabilities: capabilities,
+		AppVersion:   appVersion,
 	}
 
 	fns, err := createFunctionConfigs(h.appName, h.funcs, *h.url(r), false)
