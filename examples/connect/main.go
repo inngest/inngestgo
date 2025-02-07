@@ -6,17 +6,19 @@ import (
 	"github.com/inngest/inngest/pkg/logger"
 	"github.com/inngest/inngestgo"
 	"os"
+	"os/signal"
+	"syscall"
 )
 
 func main() {
-	ctx := context.Background()
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
 
 	key := "signkey-test-12345678"
 	h := inngestgo.NewHandler("connect-test", inngestgo.HandlerOpts{
 		Logger:     logger.StdlibLogger(ctx),
 		SigningKey: &key,
-		InstanceId: inngestgo.Ptr("example-worker"),
-		BuildId:    nil,
+		BuildID:    nil,
 		Dev:        inngestgo.BoolPtr(true),
 	})
 
@@ -28,7 +30,9 @@ func main() {
 
 	h.Register(f)
 
-	err := h.Connect(ctx)
+	err := h.Connect(ctx, inngestgo.ConnectOpts{
+		InstanceID: inngestgo.Ptr("example-worker"),
+	})
 	if err != nil {
 		fmt.Printf("ERROR: %#v\n", err)
 		os.Exit(1)
