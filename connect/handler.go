@@ -234,6 +234,15 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 
 				// Some errors should be handled differently (e.g. auth failed)
 				if msg.err != nil {
+					if errors.Is(msg.err, ErrTooManyConnections) {
+						// If limits are exceed in initial connection, return immediately
+						if isInitialConnection {
+							isInitialConnection = false
+							initialConnectionDone <- fmt.Errorf("too many connections, please disconnect other workers or upgrade your billing plan for more concurrent connections")
+							return err
+						}
+					}
+
 					if errors.Is(msg.err, ErrUnauthenticated) {
 						if h.auth.fallback {
 							err := fmt.Errorf("failed to authenticate with fallback key, exiting")
