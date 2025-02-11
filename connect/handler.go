@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"sync/atomic"
 	"time"
 )
 
@@ -142,6 +143,7 @@ type connectHandler struct {
 	cancelWorkerCtx context.CancelFunc
 	eg              errgroup.Group
 	auth            authContext
+	closed          atomic.Bool
 }
 
 // authContext is wrapper for information related to authentication
@@ -194,8 +196,8 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 	// Instead of doing a simple, synchronous loop, we use channels to communicate connection status changes,
 	// allowing to instantiate a new connection while the previous one is still running.
 	// This is crucial for handling gateway draining scenarios.
-	h.eg = errgroup.Group{}
-	h.eg.Go(func() error {
+	runLoop := errgroup.Group{}
+	runLoop.Go(func() error {
 		for {
 			select {
 			// If the context is canceled, we should not attempt to reconnect
@@ -232,6 +234,15 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 
 				// Some errors should be handled differently (e.g. auth failed)
 				if msg.err != nil {
+					if errors.Is(msg.err, ErrTooManyConnections) {
+						// If limits are exceed in initial connection, return immediately
+						if isInitialConnection {
+							isInitialConnection = false
+							initialConnectionDone <- fmt.Errorf("too many connections, please disconnect other workers or upgrade your billing plan for more concurrent connections")
+							return err
+						}
+					}
+
 					if errors.Is(msg.err, ErrUnauthenticated) {
 						if h.auth.fallback {
 							err := fmt.Errorf("failed to authenticate with fallback key, exiting")
@@ -336,8 +347,9 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 	})
 
 	// Handle run loop closure gracefully, this is also triggered on Close()
-	go func() {
-		runLoopErr := h.eg.Wait()
+	h.eg = errgroup.Group{}
+	h.eg.Go(func() error {
+		runLoopErr := runLoop.Wait()
 		if runLoopErr != nil {
 			h.logger.Error("could not connect", "err", runLoopErr)
 		}
@@ -364,7 +376,8 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 		}
 
 		h.logger.Debug("connect handler done")
-	}()
+		return nil
+	})
 
 	// Initiate the first connection
 	h.initiateConnectionChan <- struct{}{}
@@ -385,6 +398,11 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 }
 
 func (h *connectHandler) Close() error {
+	// If connection was already closed, this is a no-op.
+	if h.closed.Swap(true) {
+		return nil
+	}
+
 	if h.cancelWorkerCtx == nil {
 		return fmt.Errorf("connection was not fully set up")
 	}
@@ -396,6 +414,8 @@ func (h *connectHandler) Close() error {
 	if err != nil {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
+
+	h.state = ConnectionStateClosed
 
 	return nil
 }
