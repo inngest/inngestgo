@@ -288,7 +288,7 @@ func TestInvoke(t *testing.T) {
 					},
 				)
 
-				step.Run(ctx, "a", func(ctx context.Context) (any, error) {
+				_, _ = step.Run(ctx, "a", func(ctx context.Context) (any, error) {
 					return nil, nil
 				})
 
