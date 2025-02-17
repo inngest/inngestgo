@@ -100,7 +100,7 @@ github.com/hashicorp/hcl/json/token
 # github.com/inngest/expr v0.0.0-20241106234328-863dff7deec0
 ## explicit; go 1.23.2
 github.com/inngest/expr
-# github.com/inngest/inngest v1.4.7-0.20250217093202-5fb29971dbcd
+# github.com/inngest/inngest v1.4.7-0.20250217110629-3b37e82e5a00
 ## explicit; go 1.23.2
 github.com/inngest/inngest/pkg/connect/types
 github.com/inngest/inngest/pkg/connect/wsproto
