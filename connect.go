@@ -11,31 +11,53 @@ import (
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 )
 
-func (h *handler) Connect(ctx context.Context) error {
-	concurrency := h.HandlerOpts.GetWorkerConcurrency()
+const (
+	defaultMaxWorkerConcurrency = 1_000
+)
+
+type ConnectOpts struct {
+	// InstanceID represents a stable identifier to be used for identifying connected SDKs.
+	// This can be a hostname or other identifier that remains stable across restarts.
+	//
+	// If nil, this defaults to the current machine's hostname.
+	InstanceID *string
+
+	RewriteGatewayEndpoint func(endpoint url.URL) (url.URL, error)
+
+	// MaxConcurrency defines the maximum number of requests the worker can process at once.
+	// This affects goroutines available to handle connnect workloads, as well as flow control.
+	// Defaults to 1000.
+	MaxConcurrency int
+}
+
+func (h *handler) Connect(ctx context.Context, opts ConnectOpts) (connect.WorkerConnection, error) {
+	concurrency := opts.MaxConcurrency
+	if concurrency < 1 {
+		concurrency = defaultMaxWorkerConcurrency
+	}
 
 	connectPlaceholder := url.URL{
 		Scheme: "ws",
 		Host:   "connect",
 	}
 
-	if h.InstanceId == nil {
-		return fmt.Errorf("missing required Instance ID")
+	if opts.InstanceID == nil {
+		return nil, fmt.Errorf("missing required Instance ID")
 	}
 
 	fns, err := createFunctionConfigs(h.appName, h.funcs, connectPlaceholder, true)
 	if err != nil {
-		return fmt.Errorf("error creating function configs: %w", err)
+		return nil, fmt.Errorf("error creating function configs: %w", err)
 	}
 
 	signingKey := h.GetSigningKey()
 	if signingKey == "" {
-		return fmt.Errorf("signing key is required")
+		return nil, fmt.Errorf("signing key is required")
 	}
 
 	hashedKey, err := hashedSigningKey([]byte(signingKey))
 	if err != nil {
-		return fmt.Errorf("failed to hash signing key: %w", err)
+		return nil, fmt.Errorf("failed to hash signing key: %w", err)
 	}
 
 	var hashedFallbackKey []byte
@@ -43,7 +65,7 @@ func (h *handler) Connect(ctx context.Context) error {
 		if fallbackKey := h.GetSigningKeyFallback(); fallbackKey != "" {
 			hashedFallbackKey, err = hashedSigningKey([]byte(fallbackKey))
 			if err != nil {
-				return fmt.Errorf("failed to hash fallback signing key: %w", err)
+				return nil, fmt.Errorf("failed to hash fallback signing key: %w", err)
 			}
 		}
 	}
@@ -55,15 +77,16 @@ func (h *handler) Connect(ctx context.Context) error {
 		Capabilities:             capabilities,
 		HashedSigningKey:         hashedKey,
 		HashedSigningKeyFallback: hashedFallbackKey,
-		WorkerConcurrency:        concurrency,
+		MaxConcurrency:           concurrency,
 		APIBaseUrl:               h.GetAPIBaseURL(),
 		IsDev:                    h.isDev(),
 		DevServerUrl:             DevServerURL(),
-		InstanceId:               h.InstanceId,
-		BuildId:                  h.BuildId,
+		InstanceID:               opts.InstanceID,
+		AppVersion:               h.AppVersion,
 		Platform:                 Ptr(platform()),
 		SDKVersion:               SDKVersion,
 		SDKLanguage:              SDKLanguage,
+		RewriteGatewayEndpoint:   opts.RewriteGatewayEndpoint,
 	}, h, h.Logger)
 }
 

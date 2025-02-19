@@ -35,6 +35,9 @@ func shouldReconnect(err error) bool {
 	return ok
 }
 
+var ErrUnauthenticated = fmt.Errorf("authentication failed")
+var ErrTooManyConnections = fmt.Errorf("too many connections")
+
 func (h *connectHandler) performConnectHandshake(ctx context.Context, connectionId string, ws *websocket.Conn, startResponse *connectproto.StartResponse, data connectionEstablishData, startTime time.Time) error {
 	// Wait for gateway hello message
 	{
@@ -57,7 +60,7 @@ func (h *connectHandler) performConnectHandshake(ctx context.Context, connection
 	{
 		data, err := proto.Marshal(&connectproto.WorkerConnectRequestData{
 			SessionId: &connectproto.SessionIdentifier{
-				BuildId:      h.opts.BuildId,
+				AppVersion:   h.opts.AppVersion,
 				InstanceId:   h.instanceId(),
 				ConnectionId: connectionId,
 			},

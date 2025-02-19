@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/inngest/inngestgo/connect"
+
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/execution/state"
 	"github.com/inngest/inngest/pkg/inngest"
@@ -92,15 +94,9 @@ type HandlerOpts struct {
 	// This only needs to be set when self hosting.
 	RegisterURL *string
 
-	// InstanceId represents a stable identifier to be used for identifying connected SDKs.
-	// This can be a hostname or other identifier that remains stable across restarts.
-	//
-	// If nil, this defaults to the current machine's hostname.
-	InstanceId *string
-
-	// BuildId supplies an application version identifier. This should change
+	// AppVersion supplies an application version identifier. This should change
 	// whenever code within one of your Inngest function or any dependency thereof changes.
-	BuildId *string
+	AppVersion *string
 
 	// MaxBodySize is the max body size to read for incoming invoke requests
 	MaxBodySize int
@@ -116,10 +112,6 @@ type HandlerOpts struct {
 	// AllowInBandSync allows in-band syncs to occur. If nil, in-band syncs are
 	// disallowed.
 	AllowInBandSync *bool
-
-	// WorkerConcurrency defines the number of goroutines available to handle
-	// connnect workloads. Defaults to 1000
-	WorkerConcurrency int
 
 	Dev *bool
 }
@@ -233,13 +225,6 @@ func (h HandlerOpts) IsInBandSyncAllowed() bool {
 	return false
 }
 
-func (h HandlerOpts) GetWorkerConcurrency() int {
-	if h.WorkerConcurrency == 0 {
-		return defaultWorkerConcurrency
-	}
-	return h.WorkerConcurrency
-}
-
 func (h HandlerOpts) isDev() bool {
 	if h.Dev != nil {
 		return *h.Dev
@@ -266,7 +251,7 @@ type Handler interface {
 	Register(...ServableFunction)
 
 	// Connect establishes an outbound connection to Inngest
-	Connect(ctx context.Context) error
+	Connect(ctx context.Context, opts ConnectOpts) (connect.WorkerConnection, error)
 }
 
 // NewHandler returns a new Handler for serving Inngest functions.
@@ -623,6 +608,11 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 
 	pathAndParams := r.URL.String()
 
+	appVersion := ""
+	if h.AppVersion != nil {
+		appVersion = *h.AppVersion
+	}
+
 	config := sdk.RegisterRequest{
 		URL:        fmt.Sprintf("%s://%s%s", scheme, host, pathAndParams),
 		V:          "1",
@@ -634,6 +624,7 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 			Platform: platform(),
 		},
 		Capabilities: capabilities,
+		AppVersion:   appVersion,
 	}
 
 	fns, err := createFunctionConfigs(h.appName, h.funcs, *h.url(r), false)

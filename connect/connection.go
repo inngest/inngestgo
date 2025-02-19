@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"io"
 	"net"
+	"net/url"
 	"time"
 )
 
@@ -68,7 +69,7 @@ func (h *connectHandler) connect(ctx context.Context, data connectionEstablishDa
 	}
 
 	// Set up connection lifecycle logic (receiving messages, handling requests, etc.)
-	err = h.handleConnection(ctx, data, preparedConn.ws, preparedConn.gatewayGroupName)
+	err = h.handleConnection(h.workerCtx, data, preparedConn.ws, preparedConn.gatewayGroupName)
 	if err != nil {
 		h.logger.Error("could not handle connection", "err", err)
 
@@ -110,17 +111,28 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 
 	startRes, err := h.apiClient.start(ctx, data.hashedSigningKey, &connectproto.StartRequest{
 		ExcludeGateways: excludeGateways,
-	})
+	}, h.logger)
 	if err != nil {
 		return connection{}, newReconnectErr(fmt.Errorf("could not start connection: %w", err))
 	}
 
 	h.logger.Debug("handshake successful", "gateway_endpoint", startRes.GetGatewayEndpoint(), "gateway_group", startRes.GetGatewayGroup())
 
-	gatewayHost := startRes.GetGatewayEndpoint()
+	gatewayHost, err := url.Parse(startRes.GetGatewayEndpoint())
+	if err != nil {
+		return connection{}, newReconnectErr(fmt.Errorf("received invalid start gateway host: %w", err))
+	}
+
+	if h.opts.RewriteGatewayEndpoint != nil {
+		newGatewayHost, err := h.opts.RewriteGatewayEndpoint(*gatewayHost)
+		if err != nil {
+			return connection{}, newReconnectErr(fmt.Errorf("rewriting gateway host failed: %w", err))
+		}
+		gatewayHost = &newGatewayHost
+	}
 
 	// Establish WebSocket connection to one of the gateways
-	ws, _, err := websocket.Dial(connectTimeout, gatewayHost, &websocket.DialOptions{
+	ws, _, err := websocket.Dial(connectTimeout, gatewayHost.String(), &websocket.DialOptions{
 		Subprotocols: []string{
 			types.GatewaySubProtocol,
 		},
@@ -339,6 +351,8 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 			h.logger.Error("could not send buffered messages", "err", err)
 		}
 	}
+
+	h.logger.Debug("connection done")
 
 	return nil
 }
