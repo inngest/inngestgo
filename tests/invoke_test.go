@@ -312,7 +312,7 @@ func TestInvoke(t *testing.T) {
 		defer server.Close()
 		r.NoError(sync())
 
-		_, err = inngestgo.Send(ctx, inngestgo.Event{
+		_, err = c.Send(ctx, inngestgo.Event{
 			Name: eventName,
 			Data: map[string]any{"foo": "bar"}},
 		)
@@ -392,7 +392,7 @@ func TestInvoke(t *testing.T) {
 		defer server.Close()
 		r.NoError(sync())
 
-		_, err = inngestgo.Send(ctx, inngestgo.Event{
+		_, err = c.Send(ctx, inngestgo.Event{
 			Name: eventName,
 			Data: map[string]any{"foo": "bar"}},
 		)

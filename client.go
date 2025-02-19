@@ -18,24 +18,6 @@ const (
 	defaultEndpoint = "https://inn.gs"
 )
 
-// Send uses the DefaultClient to send the given event.
-func Send(ctx context.Context, e any) (string, error) {
-	client, ok := ctx.Value(clientCtxKey).(Client)
-	if !ok || client == nil {
-		return "", fmt.Errorf("client not found in context")
-	}
-	return client.Send(ctx, e)
-}
-
-// SendMany uses the DefaultClient to send the given event batch.
-func SendMany(ctx context.Context, e []any) ([]string, error) {
-	client, ok := ctx.Value(clientCtxKey).(Client)
-	if !ok || client == nil {
-		return nil, fmt.Errorf("client not found in context")
-	}
-	return client.SendMany(ctx, e)
-}
-
 // Client represents a client used to send events to Inngest.
 type Client interface {
 	AppID() string
