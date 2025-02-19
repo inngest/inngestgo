@@ -217,6 +217,12 @@ func CreateFunction[T any](
 		return nil, errors.New("You cannot use an interface type as the input within an Inngest function.")
 	}
 
+	// TODO: This feels wrong but is necessary since there isn't a
+	// function-adding method on the client interface.
+	if v, ok := c.(*apiClient); ok {
+		v.h.Register(sf)
+	}
+
 	return sf, nil
 }
 

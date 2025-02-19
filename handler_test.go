@@ -46,9 +46,8 @@ func TestRegister(t *testing.T) {
 	setEnvVars(t)
 	c, err := NewClient(ClientOpts{AppID: "inspection"})
 	r.NoError(err)
-	h := NewHandler(c, HandlerOpts{})
 
-	fn1, err := CreateFunction(
+	_, err = CreateFunction(
 		c,
 		FunctionOpts{
 			ID: "my-func-name",
@@ -60,7 +59,7 @@ func TestRegister(t *testing.T) {
 	)
 	r.NoError(err)
 
-	fn2, err := CreateFunction(
+	_, err = CreateFunction(
 		c,
 		FunctionOpts{ID: "another-func"},
 		EventTrigger("test/event.b", nil),
@@ -70,7 +69,7 @@ func TestRegister(t *testing.T) {
 	)
 	r.NoError(err)
 
-	fn3, err := CreateFunction(
+	_, err = CreateFunction(
 		c,
 		FunctionOpts{ID: "batch-func", BatchEvents: &inngest.EventBatchConfig{MaxSize: 20, Timeout: "10s"}},
 		EventTrigger("test/batch.a", nil),
@@ -79,21 +78,16 @@ func TestRegister(t *testing.T) {
 		},
 	)
 	r.NoError(err)
-
-	h.Register(fn1, fn2, fn3)
 }
 
 // TestInvoke asserts that invoking a function with both the correct and incorrect type
 // works as expected.
 func TestInvoke(t *testing.T) {
-	r := require.New(t)
-	c, err := NewClient(ClientOpts{AppID: "my-app"})
-	r.NoError(err)
-
 	t.Run("With a struct value event type", func(t *testing.T) {
 		ctx := context.Background()
 		r := require.New(t)
-		h := NewHandler(c, HandlerOpts{})
+		c, err := NewClient(ClientOpts{AppID: "inspection"})
+		r.NoError(err)
 
 		input := EventA{
 			Name: "test/event.a",
@@ -118,7 +112,6 @@ func TestInvoke(t *testing.T) {
 			},
 		)
 		r.NoError(err)
-		h.Register(a)
 
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
 			actual, op, err := invoke(ctx, a, createRequest(t, input), nil)
@@ -131,7 +124,8 @@ func TestInvoke(t *testing.T) {
 	t.Run("With a struct value event type batch", func(t *testing.T) {
 		ctx := context.Background()
 		r := require.New(t)
-		h := NewHandler(c, HandlerOpts{})
+		c, err := NewClient(ClientOpts{AppID: "inspection"})
+		r.NoError(err)
 		input := EventA{
 			Name: "test/event.a",
 			Data: struct {
@@ -156,7 +150,6 @@ func TestInvoke(t *testing.T) {
 			},
 		)
 		r.NoError(err)
-		h.Register(a)
 
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
 			actual, op, err := invoke(ctx, a, createBatchRequest(t, input, 5), nil)
@@ -168,7 +161,8 @@ func TestInvoke(t *testing.T) {
 
 	t.Run("With a struct ptr event type", func(t *testing.T) {
 		r := require.New(t)
-		h := NewHandler(c, HandlerOpts{})
+		c, err := NewClient(ClientOpts{AppID: "inspection"})
+		r.NoError(err)
 		input := EventA{
 			Name: "test/event.a",
 			Data: struct {
@@ -193,7 +187,6 @@ func TestInvoke(t *testing.T) {
 			},
 		)
 		r.NoError(err)
-		h.Register(a)
 
 		ctx := context.Background()
 
@@ -207,7 +200,8 @@ func TestInvoke(t *testing.T) {
 
 	t.Run("With Input[any] as a function type", func(t *testing.T) {
 		r := require.New(t)
-		h := NewHandler(c, HandlerOpts{})
+		c, err := NewClient(ClientOpts{AppID: "inspection"})
+		r.NoError(err)
 		resp := map[string]any{"test": true}
 		input := EventA{
 			Name: "test/event.a",
@@ -236,7 +230,6 @@ func TestInvoke(t *testing.T) {
 			},
 		)
 		r.NoError(err)
-		h.Register(a)
 
 		ctx := context.Background()
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
@@ -249,7 +242,8 @@ func TestInvoke(t *testing.T) {
 
 	t.Run("With Input[map[string]any] as a function type", func(t *testing.T) {
 		r := require.New(t)
-		h := NewHandler(c, HandlerOpts{})
+		c, err := NewClient(ClientOpts{AppID: "inspection"})
+		r.NoError(err)
 		resp := map[string]any{"test": true}
 		input := EventA{
 			Name: "test/event.a",
@@ -277,7 +271,6 @@ func TestInvoke(t *testing.T) {
 			},
 		)
 		r.NoError(err)
-		h.Register(a)
 
 		ctx := context.Background()
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
@@ -296,7 +289,9 @@ func TestInvoke(t *testing.T) {
 		// before deploying to Inngest.
 
 		r := require.New(t)
-		_, err := CreateFunction(
+		c, err := NewClient(ClientOpts{AppID: "inspection"})
+		r.NoError(err)
+		_, err = CreateFunction(
 			c,
 			FunctionOpts{ID: "my-func-name"},
 			EventTrigger("test/event.a", nil),
@@ -310,7 +305,8 @@ func TestInvoke(t *testing.T) {
 	t.Run("captures panic stack", func(t *testing.T) {
 		ctx := context.Background()
 		r := require.New(t)
-		h := NewHandler(c, HandlerOpts{})
+		c, err := NewClient(ClientOpts{AppID: "inspection"})
+		r.NoError(err)
 
 		a, err := CreateFunction(
 			c,
@@ -321,7 +317,6 @@ func TestInvoke(t *testing.T) {
 			},
 		)
 		r.NoError(err)
-		h.Register(a)
 
 		actual, op, err := invoke(
 			ctx, a,
@@ -345,7 +340,6 @@ func TestServe(t *testing.T) {
 	r := require.New(t)
 	c, err := NewClient(ClientOpts{AppID: "my-app"})
 	r.NoError(err)
-	h := NewHandler(c, HandlerOpts{})
 
 	event := EventA{
 		Name: "test/event.a",
@@ -372,8 +366,7 @@ func TestServe(t *testing.T) {
 		},
 	)
 	r.NoError(err)
-	h.Register(a)
-	server := httptest.NewServer(h)
+	server := httptest.NewServer(c.Serve())
 	byt, err := json.Marshal(map[string]any{
 		"event": event,
 		"ctx": map[string]any{
@@ -420,7 +413,6 @@ func TestSteps(t *testing.T) {
 	r := require.New(t)
 	c, err := NewClient(ClientOpts{AppID: "my-app"})
 	r.NoError(err)
-	h := NewHandler(c, HandlerOpts{})
 
 	event := EventA{
 		Name: "test/event.a",
@@ -460,8 +452,7 @@ func TestSteps(t *testing.T) {
 	)
 	r.NoError(err)
 
-	h.Register(a)
-	server := httptest.NewServer(h)
+	server := httptest.NewServer(c.Serve())
 
 	queryParams := url.Values{}
 	queryParams.Add("fnId", a.FullyQualifiedID())
@@ -543,13 +534,15 @@ func TestSteps(t *testing.T) {
 
 func TestInspection(t *testing.T) {
 	setEnvVars(t)
-	r := require.New(t)
-	c, err := NewClient(ClientOpts{AppID: "inspection"})
-	r.NoError(err)
 
 	t.Run("dev mode", func(t *testing.T) {
 		r := require.New(t)
-		fn, err := CreateFunction(
+		c, err := NewClient(ClientOpts{
+			AppID: "inspection",
+			Dev:   BoolPtr(false),
+		})
+		r.NoError(err)
+		_, err = CreateFunction(
 			c,
 			FunctionOpts{ID: "my-servable-function"},
 			EventTrigger("test/event.a", nil),
@@ -559,9 +552,7 @@ func TestInspection(t *testing.T) {
 		)
 		r.NoError(err)
 
-		h := NewHandler(c, HandlerOpts{Dev: BoolPtr(false)})
-		h.Register(fn)
-		server := httptest.NewServer(h)
+		server := httptest.NewServer(c.Serve())
 		defer server.Close()
 
 		t.Run("no signature", func(t *testing.T) {
@@ -677,7 +668,11 @@ func TestInspection(t *testing.T) {
 
 	t.Run("cloud mode", func(t *testing.T) {
 		r := require.New(t)
-		fn, err := CreateFunction(
+		c, err := NewClient(ClientOpts{
+			AppID: "inspection",
+			Dev:   BoolPtr(false),
+		})
+		_, err = CreateFunction(
 			c,
 			FunctionOpts{ID: "my-servable-function"},
 			EventTrigger("test/event.a", nil),
@@ -686,9 +681,7 @@ func TestInspection(t *testing.T) {
 			},
 		)
 		r.NoError(err)
-		h := NewHandler(c, HandlerOpts{Dev: BoolPtr(false)})
-		h.Register(fn)
-		server := httptest.NewServer(h)
+		server := httptest.NewServer(c.Serve())
 		defer server.Close()
 
 		t.Run("no signature", func(t *testing.T) {
@@ -818,7 +811,7 @@ func TestInBandSync(t *testing.T) {
 		},
 	)
 	r.NoError(err)
-	h := NewHandler(c, HandlerOpts{
+	h := newHandler(c, handlerOpts{
 		AllowInBandSync: toPtr(true),
 		Env:             toPtr("my-env"),
 	})
@@ -990,7 +983,7 @@ func TestInBandSync(t *testing.T) {
 			},
 		)
 		r.NoError(err)
-		h := NewHandler(c, HandlerOpts{
+		h := newHandler(c, handlerOpts{
 			Env:         toPtr("my-env"),
 			RegisterURL: &mockCloud.URL,
 		})

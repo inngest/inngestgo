@@ -32,7 +32,6 @@ func TestParallel(t *testing.T) {
 		appName := randomSuffix("TestParallel")
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
 		r.NoError(err)
-		h := inngestgo.NewHandler(c, inngestgo.HandlerOpts{})
 
 		fn1, err := inngestgo.CreateFunction(
 			c,
@@ -49,7 +48,7 @@ func TestParallel(t *testing.T) {
 		r.NoError(err)
 
 		eventName := randomSuffix("my-event")
-		fn2, err := inngestgo.CreateFunction(
+		_, err = inngestgo.CreateFunction(
 			c,
 			inngestgo.FunctionOpts{
 				ID:   "my-fn-2",
@@ -100,9 +99,8 @@ func TestParallel(t *testing.T) {
 			},
 		)
 		r.NoError(err)
-		h.Register(fn1, fn2)
 
-		server, sync := serve(t, h)
+		server, sync := serve(t, c)
 		defer server.Close()
 		r.NoError(sync())
 
@@ -134,11 +132,10 @@ func TestParallel(t *testing.T) {
 		appName := randomSuffix("TestParallel")
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
 		r.NoError(err)
-		h := inngestgo.NewHandler(c, inngestgo.HandlerOpts{})
 
 		var runID string
 		eventName := randomSuffix("my-event")
-		fn, err := inngestgo.CreateFunction(
+		_, err = inngestgo.CreateFunction(
 			c,
 			inngestgo.FunctionOpts{
 				ID:      "my-fn",
@@ -168,9 +165,7 @@ func TestParallel(t *testing.T) {
 		)
 		r.NoError(err)
 
-		h.Register(fn)
-
-		server, sync := serve(t, h)
+		server, sync := serve(t, c)
 		defer server.Close()
 		r.NoError(sync())
 

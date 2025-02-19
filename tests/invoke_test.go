@@ -26,7 +26,7 @@ func TestInvoke(t *testing.T) {
 		appName := randomSuffix("my-app")
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
 		r.NoError(err)
-		h := inngestgo.NewHandler(c, inngestgo.HandlerOpts{})
+		// h := inngestgo.newHandler(c, inngestgo.handlerOpts{})
 
 		type ChildEventData struct {
 			Message string `json:"message"`
@@ -54,7 +54,7 @@ func TestInvoke(t *testing.T) {
 		var invokeResult any
 		var invokeErr error
 		eventName := randomSuffix("my-event")
-		parentFn, err := inngestgo.CreateFunction(
+		_, err = inngestgo.CreateFunction(
 			c,
 			inngestgo.FunctionOpts{
 				ID:      "my-parent-fn",
@@ -76,9 +76,7 @@ func TestInvoke(t *testing.T) {
 		)
 		r.NoError(err)
 
-		h.Register(childFn, parentFn)
-
-		server, sync := serve(t, h)
+		server, sync := serve(t, c)
 		defer server.Close()
 		r.NoError(sync())
 
@@ -112,7 +110,6 @@ func TestInvoke(t *testing.T) {
 		appName := randomSuffix("my-app")
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
 		r.NoError(err)
-		h := inngestgo.NewHandler(c, inngestgo.HandlerOpts{})
 
 		childFnName := "my-child-fn"
 		childFn, err := inngestgo.CreateFunction(
@@ -135,7 +132,7 @@ func TestInvoke(t *testing.T) {
 		var invokeResult any
 		var invokeErr error
 		eventName := randomSuffix("my-event")
-		parentFn, err := inngestgo.CreateFunction(
+		_, err = inngestgo.CreateFunction(
 			c,
 			inngestgo.FunctionOpts{
 				ID:      "my-parent-fn",
@@ -155,9 +152,8 @@ func TestInvoke(t *testing.T) {
 			},
 		)
 		r.NoError(err)
-		h.Register(childFn, parentFn)
 
-		server, sync := serve(t, h)
+		server, sync := serve(t, c)
 		defer server.Close()
 		r.NoError(sync())
 
@@ -196,13 +192,12 @@ func TestInvoke(t *testing.T) {
 		appName := randomSuffix("my-app")
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
 		r.NoError(err)
-		h := inngestgo.NewHandler(c, inngestgo.HandlerOpts{})
 
 		var runID string
 		var invokeResult any
 		var invokeErr error
 		eventName := randomSuffix("my-event")
-		fn, err := inngestgo.CreateFunction(
+		_, err = inngestgo.CreateFunction(
 			c,
 			inngestgo.FunctionOpts{
 				ID:      "my-fn",
@@ -221,9 +216,7 @@ func TestInvoke(t *testing.T) {
 		)
 		r.NoError(err)
 
-		h.Register(fn)
-
-		server, sync := serve(t, h)
+		server, sync := serve(t, c)
 		defer server.Close()
 		r.NoError(sync())
 
@@ -265,11 +258,10 @@ func TestInvoke(t *testing.T) {
 		appName := randomSuffix("my-app")
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
 		r.NoError(err)
-		h := inngestgo.NewHandler(c, inngestgo.HandlerOpts{})
 
 		var childCounter int32
 		childFnName := "my-child-fn"
-		childFn, err := inngestgo.CreateFunction(
+		_, err = inngestgo.CreateFunction(
 			c,
 			inngestgo.FunctionOpts{
 				ID:      childFnName,
@@ -290,7 +282,7 @@ func TestInvoke(t *testing.T) {
 		var runID string
 		var invokeErr error
 		eventName := randomSuffix("my-event")
-		parentFn, err := inngestgo.CreateFunction(
+		_, err = inngestgo.CreateFunction(
 			c,
 			inngestgo.FunctionOpts{
 				ID:      "my-parent-fn",
@@ -315,9 +307,8 @@ func TestInvoke(t *testing.T) {
 			},
 		)
 		r.NoError(err)
-		h.Register(childFn, parentFn)
 
-		server, sync := serve(t, h)
+		server, sync := serve(t, c)
 		defer server.Close()
 		r.NoError(sync())
 
@@ -350,11 +341,10 @@ func TestInvoke(t *testing.T) {
 		appName := randomSuffix("my-app")
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
 		r.NoError(err)
-		h := inngestgo.NewHandler(c, inngestgo.HandlerOpts{})
 
 		var childCounter int32
 		childFnName := "my-child-fn"
-		childFn, err := inngestgo.CreateFunction(
+		_, err = inngestgo.CreateFunction(
 			c,
 			inngestgo.FunctionOpts{
 				ID:      childFnName,
@@ -374,7 +364,7 @@ func TestInvoke(t *testing.T) {
 		var runID string
 		var attempt int
 		eventName := randomSuffix("my-event")
-		parentFn, err := inngestgo.CreateFunction(
+		_, err = inngestgo.CreateFunction(
 			c,
 			inngestgo.FunctionOpts{
 				ID:   "my-parent-fn",
@@ -398,9 +388,7 @@ func TestInvoke(t *testing.T) {
 		)
 		r.NoError(err)
 
-		h.Register(childFn, parentFn)
-
-		server, sync := serve(t, h)
+		server, sync := serve(t, c)
 		defer server.Close()
 		r.NoError(sync())
 

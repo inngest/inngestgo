@@ -21,11 +21,9 @@ func main() {
 		panic(err)
 	}
 
-	h := inngestgo.NewHandler(c, inngestgo.HandlerOpts{})
-
 	// CreateFunction is a factory method which creates new Inngest functions (step functions,
 	// or workflows) with a specific configuration.
-	f, err := inngestgo.CreateFunction(
+	_, err = inngestgo.CreateFunction(
 		c,
 		inngestgo.FunctionOpts{
 			ID:      "account-created",
@@ -37,12 +35,12 @@ func main() {
 		// The function to run.
 		AccountCreated,
 	)
-
-	// Register the functions with your app/service.
-	h.Register(f)
+	if err != nil {
+		panic(err)
+	}
 
 	// And serve the functions from an HTTP handler.
-	_ = http.ListenAndServe(":8080", h)
+	_ = http.ListenAndServe(":8080", c.Serve())
 }
 
 // AccountCreated is a durable function which runs any time the "api/account.created"

@@ -16,8 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/inngest/inngestgo/connect"
-
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/execution/state"
 	"github.com/inngest/inngest/pkg/inngest"
@@ -54,7 +52,7 @@ var (
 	clientCtxKey = clientCtxKeyType{}
 )
 
-type HandlerOpts struct {
+type handlerOpts struct {
 	// Logger is the structured logger to use from Go's builtin structured
 	// logging package.
 	Logger *slog.Logger
@@ -116,12 +114,12 @@ type HandlerOpts struct {
 	Dev *bool
 }
 
-// GetSigningKey returns the signing key defined within HandlerOpts, or the default
+// GetSigningKey returns the signing key defined within handlerOpts, or the default
 // defined within INNGEST_SIGNING_KEY.
 //
 // This is the private key used to register functions and communicate with the private
 // API.
-func (h HandlerOpts) GetSigningKey() string {
+func (h handlerOpts) GetSigningKey() string {
 	if h.SigningKey == nil {
 		return os.Getenv("INNGEST_SIGNING_KEY")
 	}
@@ -129,12 +127,12 @@ func (h HandlerOpts) GetSigningKey() string {
 }
 
 // GetSigningKeyFallback returns the signing key fallback defined within
-// HandlerOpts, or the default defined within INNGEST_SIGNING_KEY_FALLBACK.
+// handlerOpts, or the default defined within INNGEST_SIGNING_KEY_FALLBACK.
 //
 // This is the fallback private key used to register functions and communicate
 // with the private API. If a request fails auth with the signing key then we'll
 // try again with the fallback
-func (h HandlerOpts) GetSigningKeyFallback() string {
+func (h handlerOpts) GetSigningKeyFallback() string {
 	if h.SigningKeyFallback == nil {
 		return os.Getenv("INNGEST_SIGNING_KEY_FALLBACK")
 	}
@@ -142,7 +140,7 @@ func (h HandlerOpts) GetSigningKeyFallback() string {
 }
 
 // GetAPIOrigin returns the host to use for sending API requests
-func (h HandlerOpts) GetAPIBaseURL() string {
+func (h handlerOpts) GetAPIBaseURL() string {
 	if h.isDev() {
 		return DevServerURL()
 	}
@@ -160,7 +158,7 @@ func (h HandlerOpts) GetAPIBaseURL() string {
 }
 
 // GetEventAPIOrigin returns the host to use for sending events
-func (h HandlerOpts) GetEventAPIBaseURL() string {
+func (h handlerOpts) GetEventAPIBaseURL() string {
 	if h.isDev() {
 		return DevServerURL()
 	}
@@ -177,7 +175,7 @@ func (h HandlerOpts) GetEventAPIBaseURL() string {
 }
 
 // GetServeOrigin returns the host used for HTTP based executions
-func (h HandlerOpts) GetServeOrigin() string {
+func (h handlerOpts) GetServeOrigin() string {
 	if h.ServeOrigin != nil {
 		return *h.ServeOrigin
 	}
@@ -185,34 +183,34 @@ func (h HandlerOpts) GetServeOrigin() string {
 }
 
 // GetServePath returns the path used for HTTP based executions
-func (h HandlerOpts) GetServePath() string {
+func (h handlerOpts) GetServePath() string {
 	if h.ServePath != nil {
 		return *h.ServePath
 	}
 	return ""
 }
 
-// GetEnv returns the env defined within HandlerOpts, or the default
+// GetEnv returns the env defined within handlerOpts, or the default
 // defined within INNGEST_ENV.
 //
 // This is the environment name used for preview/branch environments within Inngest.
-func (h HandlerOpts) GetEnv() string {
+func (h handlerOpts) GetEnv() string {
 	if h.Env == nil {
 		return os.Getenv("INNGEST_ENV")
 	}
 	return *h.Env
 }
 
-// GetRegisterURL returns the registration URL defined wtihin HandlerOpts,
+// GetRegisterURL returns the registration URL defined wtihin handlerOpts,
 // defaulting to the production Inngest URL if nil.
-func (h HandlerOpts) GetRegisterURL() string {
+func (h handlerOpts) GetRegisterURL() string {
 	if h.RegisterURL == nil {
 		return "https://www.inngest.com/fn/register"
 	}
 	return *h.RegisterURL
 }
 
-func (h HandlerOpts) IsInBandSyncAllowed() bool {
+func (h handlerOpts) IsInBandSyncAllowed() bool {
 	if h.AllowInBandSync != nil {
 		return *h.AllowInBandSync
 	}
@@ -225,7 +223,7 @@ func (h HandlerOpts) IsInBandSyncAllowed() bool {
 	return false
 }
 
-func (h HandlerOpts) isDev() bool {
+func (h handlerOpts) isDev() bool {
 	if h.Dev != nil {
 		return *h.Dev
 	}
@@ -236,26 +234,26 @@ func (h HandlerOpts) isDev() bool {
 // Handler represents a handler which serves the Inngest API via HTTP.  This provides
 // function registration to Inngest, plus the invocation of registered functions via
 // an HTTP POST.
-type Handler interface {
-	http.Handler
+// type Handler interface {
+// 	http.Handler
 
-	// SetAppName updates the handler's app name.  This is used to group functions
-	// and track deploys within the UI.
-	SetAppName(name string) Handler
+// 	// SetAppName updates the handler's app name.  This is used to group functions
+// 	// and track deploys within the UI.
+// 	SetAppName(name string) Handler
 
-	// SetOptions sets the handler's options used to register functions.
-	SetOptions(h HandlerOpts) Handler
+// 	// SetOptions sets the handler's options used to register functions.
+// 	SetOptions(h handlerOpts) Handler
 
-	// Register registers the given functions with the handler, allowing them to
-	// be invoked by Inngest.
-	Register(...ServableFunction)
+// 	// Register registers the given functions with the handler, allowing them to
+// 	// be invoked by Inngest.
+// 	Register(...ServableFunction)
 
-	// Connect establishes an outbound connection to Inngest
-	Connect(ctx context.Context, opts ConnectOpts) (connect.WorkerConnection, error)
-}
+// 	// Connect establishes an outbound connection to Inngest
+// 	Connect(ctx context.Context, opts ConnectOpts) (connect.WorkerConnection, error)
+// }
 
-// NewHandler returns a new Handler for serving Inngest functions.
-func NewHandler(c Client, opts HandlerOpts) Handler {
+// newHandler returns a new Handler for serving Inngest functions.
+func newHandler(c Client, opts handlerOpts) *handler {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
@@ -265,7 +263,7 @@ func NewHandler(c Client, opts HandlerOpts) Handler {
 	}
 
 	return &handler{
-		HandlerOpts: opts,
+		handlerOpts: opts,
 		appName:     c.AppID(),
 		client:      c,
 		funcs:       []ServableFunction{},
@@ -273,7 +271,7 @@ func NewHandler(c Client, opts HandlerOpts) Handler {
 }
 
 type handler struct {
-	HandlerOpts
+	handlerOpts
 
 	appName string
 	client  Client
@@ -282,8 +280,8 @@ type handler struct {
 	l sync.RWMutex
 }
 
-func (h *handler) SetOptions(opts HandlerOpts) Handler {
-	h.HandlerOpts = opts
+func (h *handler) SetOptions(opts handlerOpts) *handler {
+	h.handlerOpts = opts
 
 	if opts.MaxBodySize == 0 {
 		opts.MaxBodySize = DefaultMaxBodySize
@@ -295,7 +293,7 @@ func (h *handler) SetOptions(opts HandlerOpts) Handler {
 	return h
 }
 
-func (h *handler) SetAppName(name string) Handler {
+func (h *handler) SetAppName(name string) *handler {
 	h.appName = name
 	return h
 }
@@ -470,7 +468,7 @@ func (h *handler) inBandSync(
 		}
 	}
 
-	max := h.HandlerOpts.MaxBodySize
+	max := h.handlerOpts.MaxBodySize
 	if max == 0 {
 		max = DefaultMaxBodySize
 	}
@@ -824,7 +822,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
-	max := h.HandlerOpts.MaxBodySize
+	max := h.handlerOpts.MaxBodySize
 	if max == 0 {
 		max = DefaultMaxBodySize
 	}
@@ -1162,7 +1160,7 @@ func (h *handler) trust(
 		}
 	}
 
-	max := h.HandlerOpts.MaxBodySize
+	max := h.handlerOpts.MaxBodySize
 	if max == 0 {
 		max = DefaultMaxBodySize
 	}

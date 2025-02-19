@@ -18,18 +18,18 @@ func main() {
 	defer cancel()
 
 	key := "signkey-test-12345678"
-	c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: "connect-test"})
+	c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+		AppID:      "connect-test",
+		AppVersion: nil,
+		Dev:        inngestgo.BoolPtr(true),
+		Logger:     logger.StdlibLogger(ctx),
+		SigningKey: &key,
+	})
 	if err != nil {
 		panic(err)
 	}
-	h := inngestgo.NewHandler(c, inngestgo.HandlerOpts{
-		Logger:     logger.StdlibLogger(ctx),
-		SigningKey: &key,
-		AppVersion: nil,
-		Dev:        inngestgo.BoolPtr(true),
-	})
 
-	f, err := inngestgo.CreateFunction(
+	_, err = inngestgo.CreateFunction(
 		c,
 		inngestgo.FunctionOpts{ID: "conntest", Name: "connect test"},
 		inngestgo.EventTrigger("test/connect.run", nil),
@@ -39,9 +39,7 @@ func main() {
 		panic(err)
 	}
 
-	h.Register(f)
-
-	conn, err := h.Connect(ctx, inngestgo.ConnectOpts{
+	conn, err := c.Connect(ctx, inngestgo.ConnectOpts{
 		InstanceID: inngestgo.Ptr("example-worker"),
 	})
 	defer func(conn connect.WorkerConnection) {

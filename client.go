@@ -6,8 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
+
+	"github.com/inngest/inngestgo/connect"
 )
 
 const (
@@ -35,11 +39,18 @@ func SendMany(ctx context.Context, e []any) ([]string, error) {
 // Client represents a client used to send events to Inngest.
 type Client interface {
 	AppID() string
+	Connect(
+		ctx context.Context,
+		opts ConnectOpts,
+	) (connect.WorkerConnection, error)
 
 	// Send sends the specific event to the ingest API.
 	Send(ctx context.Context, evt any) (string, error)
 	// Send sends a batch of events to the ingest API.
 	SendMany(ctx context.Context, evt []any) ([]string, error)
+
+	Serve() http.Handler
+	ServeWithOpts(opts ServeOpts) http.Handler
 }
 
 type ClientOpts struct {
@@ -57,6 +68,52 @@ type ClientOpts struct {
 	// os.Getenv("INNGEST_ENV").  This only deploys to branches if the
 	// signing key is a branch signing key.
 	Env *string
+
+	// Logger is the structured logger to use from Go's builtin structured
+	// logging package.
+	Logger *slog.Logger
+
+	// SigningKey is the signing key for your app.  If nil, this defaults
+	// to os.Getenv("INNGEST_SIGNING_KEY").
+	SigningKey *string
+
+	// SigningKeyFallback is the fallback signing key for your app. If nil, this
+	// defaults to os.Getenv("INNGEST_SIGNING_KEY_FALLBACK").
+	SigningKeyFallback *string
+
+	// APIOrigin is the specified host to be used to make API calls
+	APIBaseURL *string
+
+	// EventAPIOrigin is the specified host to be used to send events to
+	EventAPIBaseURL *string
+
+	// RegisterURL is the URL to use when registering functions.  If nil
+	// this defaults to Inngest's API.
+	//
+	// This only needs to be set when self hosting.
+	RegisterURL *string
+
+	// AppVersion supplies an application version identifier. This should change
+	// whenever code within one of your Inngest function or any dependency thereof changes.
+	AppVersion *string
+
+	// MaxBodySize is the max body size to read for incoming invoke requests
+	MaxBodySize int
+
+	// URL that the function is served at.  If not supplied this is taken from
+	// the incoming request's data.
+	URL *url.URL
+
+	// UseStreaming enables streaming - continued writes to the HTTP writer.  This
+	// differs from true streaming in that we don't support server-sent events.
+	UseStreaming bool
+
+	// AllowInBandSync allows in-band syncs to occur. If nil, in-band syncs are
+	// disallowed.
+	AllowInBandSync *bool
+
+	// Dev is whether to use the Dev Server.
+	Dev *bool
 }
 
 func (c ClientOpts) validate() error {
@@ -77,6 +134,22 @@ func NewClient(opts ClientOpts) (Client, error) {
 	c := &apiClient{
 		ClientOpts: opts,
 	}
+	h := newHandler(c, handlerOpts{
+		Logger:             opts.Logger,
+		SigningKey:         opts.SigningKey,
+		SigningKeyFallback: opts.SigningKeyFallback,
+		APIBaseURL:         opts.APIBaseURL,
+		EventAPIBaseURL:    opts.EventAPIBaseURL,
+		Env:                opts.Env,
+		RegisterURL:        opts.RegisterURL,
+		AppVersion:         opts.AppVersion,
+		MaxBodySize:        opts.MaxBodySize,
+		URL:                opts.URL,
+		UseStreaming:       opts.UseStreaming,
+		AllowInBandSync:    opts.AllowInBandSync,
+		Dev:                opts.Dev,
+	})
+	c.h = h
 
 	if c.ClientOpts.HTTPClient == nil {
 		c.ClientOpts.HTTPClient = http.DefaultClient
@@ -89,6 +162,7 @@ func NewClient(opts ClientOpts) (Client, error) {
 // to send events to the ingest API
 type apiClient struct {
 	ClientOpts
+	h *handler
 }
 
 func (a apiClient) AppID() string {
@@ -117,6 +191,35 @@ func (a apiClient) GetEventKey() string {
 	}
 
 	return ""
+}
+
+type ServeOpts struct {
+	// ServeOrigin is the host to used for HTTP base function invoking.
+	// It's used to specify the host were the functions are hosted on sync.
+	// e.g. https://example.com
+	ServeOrigin *string
+
+	// ServePath is the path to use for HTTP base function invoking
+	// It's used to specify the path were the functions are hosted on sync.
+	// e.g. /api/inngest
+	ServePath *string
+}
+
+func (a apiClient) Connect(
+	ctx context.Context,
+	opts ConnectOpts,
+) (connect.WorkerConnection, error) {
+	return a.h.Connect(ctx, opts)
+}
+
+func (a apiClient) Serve() http.Handler {
+	return a.ServeWithOpts(ServeOpts{})
+}
+
+func (a apiClient) ServeWithOpts(opts ServeOpts) http.Handler {
+	a.h.handlerOpts.ServeOrigin = opts.ServeOrigin
+	a.h.handlerOpts.ServePath = opts.ServePath
+	return a.h
 }
 
 type validatable interface {
