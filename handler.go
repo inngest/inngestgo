@@ -47,8 +47,6 @@ var (
 		Connect:    sdk.ConnectV1,
 	}
 
-	defaultWorkerConcurrency = 1_000
-
 	clientCtxKey = clientCtxKeyType{}
 )
 

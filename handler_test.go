@@ -672,6 +672,7 @@ func TestInspection(t *testing.T) {
 			AppID: "inspection",
 			Dev:   BoolPtr(false),
 		})
+		r.NoError(err)
 		_, err = CreateFunction(
 			c,
 			FunctionOpts{ID: "my-servable-function"},
