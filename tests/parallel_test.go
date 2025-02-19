@@ -30,9 +30,11 @@ func TestParallel(t *testing.T) {
 		}{}
 
 		appName := randomSuffix("TestParallel")
-		h := inngestgo.NewHandler(appName, inngestgo.HandlerOpts{})
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
+		r.NoError(err)
 
-		fn1 := inngestgo.CreateFunction(
+		fn1, err := inngestgo.CreateFunction(
+			c,
 			inngestgo.FunctionOpts{
 				ID:   "my-fn-1",
 				Name: "my-fn-1",
@@ -43,9 +45,11 @@ func TestParallel(t *testing.T) {
 				return "invoked output", nil
 			},
 		)
+		r.NoError(err)
 
 		eventName := randomSuffix("my-event")
-		fn2 := inngestgo.CreateFunction(
+		_, err = inngestgo.CreateFunction(
+			c,
 			inngestgo.FunctionOpts{
 				ID:   "my-fn-2",
 				Name: "my-fn-2",
@@ -94,14 +98,13 @@ func TestParallel(t *testing.T) {
 				return nil, nil
 			},
 		)
+		r.NoError(err)
 
-		h.Register(fn1, fn2)
-
-		server, sync := serve(t, h)
+		server, sync := serve(t, c)
 		defer server.Close()
 		r.NoError(sync())
 
-		_, err := inngestgo.Send(ctx, inngestgo.Event{
+		_, err = c.Send(ctx, inngestgo.Event{
 			Name: eventName,
 			Data: map[string]any{"foo": "bar"}},
 		)
@@ -127,11 +130,13 @@ func TestParallel(t *testing.T) {
 		r := require.New(t)
 
 		appName := randomSuffix("TestParallel")
-		h := inngestgo.NewHandler(appName, inngestgo.HandlerOpts{})
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
+		r.NoError(err)
 
 		var runID string
 		eventName := randomSuffix("my-event")
-		fn := inngestgo.CreateFunction(
+		_, err = inngestgo.CreateFunction(
+			c,
 			inngestgo.FunctionOpts{
 				ID:      "my-fn",
 				Name:    "my-fn",
@@ -158,14 +163,13 @@ func TestParallel(t *testing.T) {
 				return nil, nil
 			},
 		)
+		r.NoError(err)
 
-		h.Register(fn)
-
-		server, sync := serve(t, h)
+		server, sync := serve(t, c)
 		defer server.Close()
 		r.NoError(sync())
 
-		_, err := inngestgo.Send(ctx, inngestgo.Event{
+		_, err = c.Send(ctx, inngestgo.Event{
 			Name: eventName,
 			Data: map[string]any{"foo": "bar"}},
 		)

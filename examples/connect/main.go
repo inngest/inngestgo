@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/inngest/inngest/pkg/logger"
-	"github.com/inngest/inngestgo"
-	"github.com/inngest/inngestgo/connect"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/inngest/inngest/pkg/logger"
+	"github.com/inngest/inngestgo"
+	"github.com/inngest/inngestgo/connect"
 )
 
 func main() {
@@ -17,22 +18,28 @@ func main() {
 	defer cancel()
 
 	key := "signkey-test-12345678"
-	h := inngestgo.NewHandler("connect-test", inngestgo.HandlerOpts{
-		Logger:     logger.StdlibLogger(ctx),
-		SigningKey: &key,
+	c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+		AppID:      "connect-test",
 		AppVersion: nil,
 		Dev:        inngestgo.BoolPtr(true),
+		Logger:     logger.StdlibLogger(ctx),
+		SigningKey: &key,
 	})
+	if err != nil {
+		panic(err)
+	}
 
-	f := inngestgo.CreateFunction(
+	_, err = inngestgo.CreateFunction(
+		c,
 		inngestgo.FunctionOpts{ID: "conntest", Name: "connect test"},
 		inngestgo.EventTrigger("test/connect.run", nil),
 		testRun,
 	)
+	if err != nil {
+		panic(err)
+	}
 
-	h.Register(f)
-
-	conn, err := h.Connect(ctx, inngestgo.ConnectOpts{
+	conn, err := c.Connect(ctx, inngestgo.ConnectOpts{
 		InstanceID: inngestgo.Ptr("example-worker"),
 	})
 	defer func(conn connect.WorkerConnection) {
