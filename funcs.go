@@ -7,8 +7,16 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/gosimple/slug"
 	"github.com/inngest/inngest/pkg/inngest"
 )
+
+// Slugify converts a string to a slug. This is only useful for replicating the
+// legacy slugification logic for function IDs, aiding in migration to a newer
+// SDK version.
+func Slugify(s string) string {
+	return slug.Make(s)
+}
 
 // Ptr converts the given type to a pointer.  Nil pointers are sometimes
 // used for optional arguments within configuration, meaning we need pointers
