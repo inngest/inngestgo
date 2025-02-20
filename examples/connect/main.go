@@ -17,29 +17,53 @@ func main() {
 	defer cancel()
 
 	key := "signkey-test-12345678"
-	h := inngestgo.NewHandler("connect-test", inngestgo.HandlerOpts{
+	app1 := inngestgo.NewHandler("connect-app1", inngestgo.HandlerOpts{
 		Logger:     logger.StdlibLogger(ctx),
 		SigningKey: &key,
 		AppVersion: nil,
 		Dev:        inngestgo.BoolPtr(true),
 	})
 
-	f := inngestgo.CreateFunction(
-		inngestgo.FunctionOpts{ID: "conntest", Name: "connect test"},
-		inngestgo.EventTrigger("test/connect.run", nil),
-		testRun,
-	)
+	{
+		f := inngestgo.CreateFunction(
+			inngestgo.FunctionOpts{ID: "connect-test", Name: "connect test"},
+			inngestgo.EventTrigger("test/connect.run", nil),
+			testRun,
+		)
 
-	h.Register(f)
+		app1.Register(f)
+	}
+
+	app2 := inngestgo.NewHandler("connect-app2", inngestgo.HandlerOpts{
+		Logger:     logger.StdlibLogger(ctx),
+		SigningKey: &key,
+		AppVersion: nil,
+		Dev:        inngestgo.BoolPtr(true),
+	})
+
+	{
+		f := inngestgo.CreateFunction(
+			inngestgo.FunctionOpts{ID: "connect-test", Name: "connect test"},
+			inngestgo.EventTrigger("test/connect.run", nil),
+			testRun,
+		)
+
+		app2.Register(f)
+	}
 
 	conn, err := inngestgo.Connect(ctx, inngestgo.ConnectOpts{
 		InstanceID: inngestgo.Ptr("example-worker"),
-		Apps: []inngestgo.ConnectApp{
-			{
-				Client: h,
-			},
+		Apps: []inngestgo.Handler{
+			app1,
+			app2,
 		},
 	})
+
+	go func() {
+		<-ctx.Done()
+		_ = conn.Close()
+	}()
+
 	defer func(conn connect.WorkerConnection) {
 		err := conn.Close()
 		if err != nil {
