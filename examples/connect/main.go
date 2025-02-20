@@ -32,8 +32,13 @@ func main() {
 
 	h.Register(f)
 
-	conn, err := h.Connect(ctx, inngestgo.ConnectOpts{
+	conn, err := inngestgo.Connect(ctx, inngestgo.ConnectOpts{
 		InstanceID: inngestgo.Ptr("example-worker"),
+		Apps: []inngestgo.ConnectApp{
+			{
+				Client: h,
+			},
+		},
 	})
 	defer func(conn connect.WorkerConnection) {
 		err := conn.Close()
