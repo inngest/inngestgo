@@ -2,12 +2,21 @@ package streaming
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/coder/websocket"
+	"github.com/inngest/inngest/pkg/execution/realtime/streamingtypes"
 )
 
-var url string
+type Message = streamingtypes.Message
+type Topic = streamingtypes.Topic
+type Chunk = streamingtypes.Chunk
+
+var (
+	DefaultURL = "https://api.inngest.com/v1/realtime/connect"
+)
 
 func do() {
 	stream, err := Subscribe(context.Background(), "")
@@ -28,6 +37,10 @@ func do() {
 // Subscribe subscribes to a given set of channels and topics as granted by
 // the current token.
 func Subscribe(ctx context.Context, token string) (chan StreamItem, error) {
+	return SubscribeWithURL(ctx, DefaultURL, token)
+}
+
+func SubscribeWithURL(ctx context.Context, url, token string) (chan StreamItem, error) {
 	// TODO: URL from client
 	c, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{
 		HTTPHeader: http.Header{
@@ -66,30 +79,45 @@ func Subscribe(ctx context.Context, token string) (chan StreamItem, error) {
 			if len(resp) == 0 {
 				continue
 			}
-			if resp[0] == '{' {
-				// Assume this is a fully defined JSON message.
-				//
-				// TODO: Import message type, parse.
-				sender <- StreamItem{message: &Message{}}
+
+			// Check to see if this is of kind "chunk".  If so, we know that the
+			// this is a chunk within a streaming set of messages.
+			kinder := msgKind{}
+			if err := json.Unmarshal(resp, &kinder); err != nil {
+				sender <- StreamItem{err: fmt.Errorf("error unmarshalling received data: %w", err)}
 				continue
 			}
 
-			// TODO: Parse Chunk
-			sender <- StreamItem{chunk: &Chunk{}}
+			switch kinder.Kind {
+			case string(streamingtypes.MessageKindDataStreamChunk):
+				// Check to see if this is of kind "chunk".  If so, we know that the
+				// this is a chunk within a streaming set of messages.
+				chunk := Chunk{}
+				if err := json.Unmarshal(resp, &chunk); err != nil {
+					sender <- StreamItem{err: fmt.Errorf("error unmarshalling chunk: %w", err)}
+					continue
+				}
+				sender <- StreamItem{chunk: &chunk}
+			default:
+				// Check to see if this is of kind "chunk".  If so, we know that the
+				// this is a chunk within a streaming set of messages.
+				msg := Message{}
+				if err := json.Unmarshal(resp, &kinder); err != nil {
+					sender <- StreamItem{err: fmt.Errorf("error unmarshalling message: %w", err)}
+					continue
+				}
+				sender <- StreamItem{message: &msg}
+			}
+
 		}
 	}()
 
 	return sender, nil
 }
 
-// Chunk represents a chunk of a stream.
-type Chunk struct {
-	StreamID string
-	Data     string
+type msgKind struct {
+	Kind string `json:"kind"`
 }
-
-// TODO: Import types from OSS
-type Message struct{}
 
 type StreamKind string
 
