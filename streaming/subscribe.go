@@ -102,7 +102,7 @@ func SubscribeWithURL(ctx context.Context, url, token string) (chan StreamItem, 
 				// Check to see if this is of kind "chunk".  If so, we know that the
 				// this is a chunk within a streaming set of messages.
 				msg := Message{}
-				if err := json.Unmarshal(resp, &kinder); err != nil {
+				if err := json.Unmarshal(resp, &msg); err != nil {
 					sender <- StreamItem{err: fmt.Errorf("error unmarshalling message: %w", err)}
 					continue
 				}
