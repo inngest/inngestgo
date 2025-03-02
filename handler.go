@@ -28,8 +28,6 @@ import (
 	"github.com/inngest/inngestgo/step"
 )
 
-type clientCtxKeyType struct{}
-
 var (
 	ErrTypeMismatch = fmt.Errorf("cannot invoke function with mismatched types")
 
@@ -46,8 +44,6 @@ var (
 		TrustProbe: sdk.TrustProbeV1,
 		Connect:    sdk.ConnectV1,
 	}
-
-	clientCtxKey = clientCtxKeyType{}
 )
 
 type handlerOpts struct {
@@ -895,10 +891,8 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 		stepID = &rawStepID
 	}
 
-	ctx := context.WithValue(r.Context(), clientCtxKey, h.client)
-
 	// Invoke the function, then immediately stop the streaming buffer.
-	resp, ops, err := invoke(ctx, fn, request, stepID)
+	resp, ops, err := invoke(r.Context(), fn, request, stepID)
 	streamCancel()
 
 	// NOTE: When triggering step errors, we should have an OpcodeStepError
