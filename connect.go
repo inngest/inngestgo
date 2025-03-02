@@ -16,6 +16,8 @@ const (
 )
 
 type ConnectOpts struct {
+	Apps []Client
+
 	// InstanceID represents a stable identifier to be used for identifying connected SDKs.
 	// This can be a hostname or other identifier that remains stable across restarts.
 	//
@@ -30,7 +32,7 @@ type ConnectOpts struct {
 	MaxConcurrency int
 }
 
-func (h *handler) Connect(ctx context.Context, opts ConnectOpts) (connect.WorkerConnection, error) {
+func Connect(ctx context.Context, opts ConnectOpts) (connect.WorkerConnection, error) {
 	concurrency := opts.MaxConcurrency
 	if concurrency < 1 {
 		concurrency = defaultMaxWorkerConcurrency
@@ -45,12 +47,39 @@ func (h *handler) Connect(ctx context.Context, opts ConnectOpts) (connect.Worker
 		return nil, fmt.Errorf("missing required Instance ID")
 	}
 
-	fns, err := createFunctionConfigs(h.appName, h.funcs, connectPlaceholder, true)
-	if err != nil {
-		return nil, fmt.Errorf("error creating function configs: %w", err)
+	apps := make([]connect.ConnectApp, len(opts.Apps))
+	invokers := make(map[string]connect.FunctionInvoker, len(opts.Apps))
+	for i, a := range opts.Apps {
+		app, ok := a.(*apiClient)
+		if !ok {
+			return nil, fmt.Errorf("invalid handler passed")
+		}
+
+		appName := app.AppID()
+		fns, err := createFunctionConfigs(appName, app.h.GetFunctions(), connectPlaceholder, true)
+		if err != nil {
+			return nil, fmt.Errorf("error creating function configs: %w", err)
+		}
+
+		apps[i] = connect.ConnectApp{
+			AppName:    appName,
+			Functions:  fns,
+			AppVersion: app.h.GetAppVersion(),
+		}
+
+		invokers[appName] = app.h
 	}
 
-	signingKey := h.GetSigningKey()
+	if len(opts.Apps) < 1 {
+		return nil, fmt.Errorf("must specify at least one app")
+	}
+
+	defaultClient, ok := opts.Apps[0].(*apiClient)
+	if !ok {
+		return nil, fmt.Errorf("invalid handler passed")
+	}
+
+	signingKey := defaultClient.h.GetSigningKey()
 	if signingKey == "" {
 		return nil, fmt.Errorf("signing key is required")
 	}
@@ -62,7 +91,7 @@ func (h *handler) Connect(ctx context.Context, opts ConnectOpts) (connect.Worker
 
 	var hashedFallbackKey []byte
 	{
-		if fallbackKey := h.GetSigningKeyFallback(); fallbackKey != "" {
+		if fallbackKey := defaultClient.h.GetSigningKeyFallback(); fallbackKey != "" {
 			hashedFallbackKey, err = hashedSigningKey([]byte(fallbackKey))
 			if err != nil {
 				return nil, fmt.Errorf("failed to hash fallback signing key: %w", err)
@@ -71,23 +100,21 @@ func (h *handler) Connect(ctx context.Context, opts ConnectOpts) (connect.Worker
 	}
 
 	return connect.Connect(ctx, connect.Opts{
-		AppName:                  h.appName,
-		Env:                      h.Env,
-		Functions:                fns,
+		Apps:                     apps,
+		Env:                      defaultClient.Env,
 		Capabilities:             capabilities,
 		HashedSigningKey:         hashedKey,
 		HashedSigningKeyFallback: hashedFallbackKey,
 		MaxConcurrency:           concurrency,
-		APIBaseUrl:               h.GetAPIBaseURL(),
-		IsDev:                    h.isDev(),
+		APIBaseUrl:               defaultClient.h.GetAPIBaseURL(),
+		IsDev:                    defaultClient.h.isDev(),
 		DevServerUrl:             DevServerURL(),
 		InstanceID:               opts.InstanceID,
-		AppVersion:               h.AppVersion,
 		Platform:                 Ptr(platform()),
 		SDKVersion:               SDKVersion,
 		SDKLanguage:              SDKLanguage,
 		RewriteGatewayEndpoint:   opts.RewriteGatewayEndpoint,
-	}, h, h.Logger)
+	}, invokers, defaultClient.Logger)
 }
 
 func (h *handler) getServableFunctionBySlug(slug string) ServableFunction {

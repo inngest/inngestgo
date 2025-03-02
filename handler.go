@@ -225,27 +225,6 @@ func (h handlerOpts) isDev() bool {
 	return IsDev()
 }
 
-// Handler represents a handler which serves the Inngest API via HTTP.  This provides
-// function registration to Inngest, plus the invocation of registered functions via
-// an HTTP POST.
-// type Handler interface {
-// 	http.Handler
-
-// 	// SetAppName updates the handler's app name.  This is used to group functions
-// 	// and track deploys within the UI.
-// 	SetAppName(name string) Handler
-
-// 	// SetOptions sets the handler's options used to register functions.
-// 	SetOptions(h handlerOpts) Handler
-
-// 	// Register registers the given functions with the handler, allowing them to
-// 	// be invoked by Inngest.
-// 	Register(...ServableFunction)
-
-// 	// Connect establishes an outbound connection to Inngest
-// 	Connect(ctx context.Context, opts ConnectOpts) (connect.WorkerConnection, error)
-// }
-
 // newHandler returns a new Handler for serving Inngest functions.
 func newHandler(c Client, opts handlerOpts) *handler {
 	if opts.Logger == nil {
@@ -272,6 +251,18 @@ type handler struct {
 	funcs   []ServableFunction
 	// lock prevents reading the function maps while serving
 	l sync.RWMutex
+}
+
+func (h *handler) GetAppName() string {
+	return h.appName
+}
+
+func (h *handler) GetAppVersion() *string {
+	return h.AppVersion
+}
+
+func (h *handler) GetFunctions() []ServableFunction {
+	return h.funcs
 }
 
 func (h *handler) SetOptions(opts handlerOpts) *handler {

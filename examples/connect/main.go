@@ -18,30 +18,65 @@ func main() {
 	defer cancel()
 
 	key := "signkey-test-12345678"
-	c, err := inngestgo.NewClient(inngestgo.ClientOpts{
-		AppID:      "connect-test",
-		AppVersion: nil,
-		Dev:        inngestgo.BoolPtr(true),
+	c1, err := inngestgo.NewClient(inngestgo.ClientOpts{
+		AppID:      "connect-app1",
 		Logger:     logger.StdlibLogger(ctx),
 		SigningKey: &key,
+		AppVersion: nil,
+		Dev:        inngestgo.BoolPtr(true),
 	})
 	if err != nil {
 		panic(err)
 	}
 
-	_, err = inngestgo.CreateFunction(
-		c,
-		inngestgo.FunctionOpts{ID: "conntest", Name: "connect test"},
-		inngestgo.EventTrigger("test/connect.run", nil),
-		testRun,
-	)
+	{
+		_, err := inngestgo.CreateFunction(
+			c1,
+			inngestgo.FunctionOpts{ID: "connect-test", Name: "connect test"},
+			inngestgo.EventTrigger("test/connect.run", nil),
+			testRun,
+		)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	c2, err := inngestgo.NewClient(inngestgo.ClientOpts{
+		AppID:      "connect-app2",
+		Logger:     logger.StdlibLogger(ctx),
+		SigningKey: &key,
+		AppVersion: nil,
+		Dev:        inngestgo.BoolPtr(true),
+	})
 	if err != nil {
 		panic(err)
 	}
 
-	conn, err := c.Connect(ctx, inngestgo.ConnectOpts{
+	{
+		_, err := inngestgo.CreateFunction(
+			c2,
+			inngestgo.FunctionOpts{ID: "connect-test", Name: "connect test"},
+			inngestgo.EventTrigger("test/connect.run", nil),
+			testRun,
+		)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	conn, err := inngestgo.Connect(ctx, inngestgo.ConnectOpts{
 		InstanceID: inngestgo.Ptr("example-worker"),
+		Apps: []inngestgo.Client{
+			c1,
+			c2,
+		},
 	})
+
+	go func() {
+		<-ctx.Done()
+		_ = conn.Close()
+	}()
+
 	defer func(conn connect.WorkerConnection) {
 		err := conn.Close()
 		if err != nil {

@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-
-	"github.com/inngest/inngestgo/connect"
 )
 
 const (
@@ -21,10 +19,6 @@ const (
 // Client represents a client used to send events to Inngest.
 type Client interface {
 	AppID() string
-	Connect(
-		ctx context.Context,
-		opts ConnectOpts,
-	) (connect.WorkerConnection, error)
 
 	// Send sends the specific event to the ingest API.
 	Send(ctx context.Context, evt any) (string, error)
@@ -176,22 +170,15 @@ func (a apiClient) GetEventKey() string {
 }
 
 type ServeOpts struct {
-	// ServeOrigin is the host to used for HTTP base function invoking.
+	// Origin is the host to used for HTTP base function invoking.
 	// It's used to specify the host were the functions are hosted on sync.
 	// e.g. https://example.com
-	ServeOrigin *string
+	Origin *string
 
-	// ServePath is the path to use for HTTP base function invoking
+	// Path is the path to use for HTTP base function invoking
 	// It's used to specify the path were the functions are hosted on sync.
 	// e.g. /api/inngest
-	ServePath *string
-}
-
-func (a apiClient) Connect(
-	ctx context.Context,
-	opts ConnectOpts,
-) (connect.WorkerConnection, error) {
-	return a.h.Connect(ctx, opts)
+	Path *string
 }
 
 func (a apiClient) Serve() http.Handler {
@@ -199,8 +186,8 @@ func (a apiClient) Serve() http.Handler {
 }
 
 func (a apiClient) ServeWithOpts(opts ServeOpts) http.Handler {
-	a.h.handlerOpts.ServeOrigin = opts.ServeOrigin
-	a.h.handlerOpts.ServePath = opts.ServePath
+	a.h.handlerOpts.ServeOrigin = opts.Origin
+	a.h.handlerOpts.ServePath = opts.Path
 	return a.h
 }
 
