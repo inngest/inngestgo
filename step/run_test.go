@@ -16,7 +16,7 @@ func TestStep(t *testing.T) {
 	req := &sdkrequest.Request{
 		Steps: map[string]json.RawMessage{},
 	}
-	mgr := sdkrequest.NewManager(cancel, req)
+	mgr := sdkrequest.NewManager(cancel, req, "")
 	ctx = sdkrequest.SetManager(ctx, mgr)
 
 	type response struct {
@@ -34,7 +34,7 @@ func TestStep(t *testing.T) {
 		},
 	}
 
-	opData, err := json.Marshal(map[string]any{"data": expected})
+	opData, err := json.Marshal(expected)
 	require.NoError(t, err)
 
 	name := "My test step"
@@ -50,6 +50,7 @@ func TestStep(t *testing.T) {
 			}
 
 			req.Steps[op.MustHash()] = opData
+
 			val, err := Run(ctx, name, func(ctx context.Context) (response, error) {
 				// memoized state, return doesnt matter
 				return response{}, nil
@@ -177,13 +178,18 @@ func TestStep(t *testing.T) {
 		t.Run("Appends opcodes", func(t *testing.T) {
 			name = "new step must append"
 
+			mgr := sdkrequest.NewManager(cancel, req, "")
+			ctx = sdkrequest.SetManager(ctx, mgr)
+
 			func() {
 				defer func() {
 					rcv := recover()
 					require.Equal(t, ControlHijack{}, rcv)
 				}()
 
+				require.False(t, IsWithinStep(ctx))
 				_, err := Run(ctx, name, func(ctx context.Context) (response, error) {
+					require.True(t, IsWithinStep(ctx))
 					return expected, nil
 				})
 				require.NoError(t, err)
@@ -198,7 +204,7 @@ func TestStep(t *testing.T) {
 			require.Equal(t, 1, len(mgr.Ops()))
 			require.Equal(t, []state.GeneratorOpcode{{
 				ID:   op.MustHash(),
-				Op:   enums.OpcodeStep,
+				Op:   enums.OpcodeStepRun,
 				Name: name,
 				Data: opData,
 			}}, mgr.Ops())

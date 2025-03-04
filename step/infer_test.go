@@ -2,15 +2,23 @@ package step
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
+	"github.com/inngest/inngestgo/internal/sdkrequest"
 	openai "github.com/sashabaranov/go-openai"
 )
 
 func TestInferTypes(t *testing.T) {
-	ctx := context.Background()
-
 	t.Run("It handles OpenAI requests using a 3rd party provider", func(t *testing.T) {
+
+		ctx, cancel := context.WithCancel(context.Background())
+		req := &sdkrequest.Request{
+			Steps: map[string]json.RawMessage{},
+		}
+		mgr := sdkrequest.NewManager(cancel, req, "")
+		ctx = sdkrequest.SetManager(ctx, mgr)
+
 		resp, err := Infer[openai.ChatCompletionRequest, openai.ChatCompletionResponse](
 			ctx,
 			"openai",
