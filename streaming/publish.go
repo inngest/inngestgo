@@ -53,8 +53,6 @@ func PublishWithURL(ctx context.Context, apiUrl, channel, topic string, data []b
 		}
 	}
 
-	key := mgr.SigningKey()
-
 	qp := url.Values{}
 	qp.Add("channel", channel)
 	qp.Add("topic", topic)
@@ -65,7 +63,8 @@ func PublishWithURL(ctx context.Context, apiUrl, channel, topic string, data []b
 	if err != nil {
 		return err
 	}
-	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", key))
+
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", mgr.SigningKey()))
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
