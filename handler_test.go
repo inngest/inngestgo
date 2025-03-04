@@ -328,10 +328,11 @@ func TestInvoke(t *testing.T) {
 
 		// Contains the panic message
 		r.Contains(err.Error(), "oh no!")
+		r.Contains(err.Error(), "stack:")
 
 		// Hacky checks to ensure the stack trace is present
-		r.Contains(err.Error(), "inngestgo/handler.go")
-		r.Contains(err.Error(), "inngestgo/handler_test.go")
+		r.Contains(err.Error(), "handler.go")
+		r.Contains(err.Error(), "handler_test.go")
 	})
 }
 
