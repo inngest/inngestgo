@@ -59,7 +59,7 @@ func PublishWithURL(ctx context.Context, apiUrl, channel, topic string, data []b
 	qp.Add("channel", channel)
 	qp.Add("topic", topic)
 	qp.Encode()
-	u := "https://api.inngest.com/v1/realtime/publish?" + qp.Encode()
+	u := fmt.Sprintf("%s?%s", apiUrl, qp.Encode())
 
 	req, err := http.NewRequest(http.MethodPost, u, bytes.NewReader(data))
 	if err != nil {
