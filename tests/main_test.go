@@ -8,8 +8,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/inngest/inngestgo"
 )
 
 func TestMain(m *testing.M) {
@@ -32,12 +30,6 @@ func TestMain(m *testing.M) {
 
 func setup() (func() error, error) {
 	os.Setenv("INNGEST_DEV", "1")
-
-	inngestgo.DefaultClient = inngestgo.NewClient(
-		inngestgo.ClientOpts{
-			EventKey: inngestgo.StrPtr("dev"),
-		},
-	)
 
 	if os.Getenv("DEV_SERVER_ENABLED") == "0" {
 		// Don't start the Dev Server.
