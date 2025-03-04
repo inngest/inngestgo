@@ -45,6 +45,11 @@ func PublishWithURL(ctx context.Context, apiUrl, channel, topic string, data []b
 	// for code within steps;  we must do this as publish should be used
 	// within steps and outside of steps.
 	if !step.IsWithinStep(ctx) && len(mgr.Request().CallCtx.Stack.Stack) > 0 {
+		// Only publish on the first attempt.
+		if mgr.Request().CallCtx.Attempt > 0 {
+			return nil
+		}
+
 		// If we're outside of a step context, only publish if we've replayed
 		// the last step.
 		last := mgr.Request().CallCtx.Stack.Stack[len(mgr.Request().CallCtx.Stack.Stack)-1]
