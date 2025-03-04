@@ -14,7 +14,9 @@ func TestInferTypes(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		req := &sdkrequest.Request{
-			Steps: map[string]json.RawMessage{},
+			Steps: map[string]json.RawMessage{
+				"7d3bbb5cbbc497d78ad547d8d39cbea2b3b8b69e": []byte("{}"),
+			},
 		}
 		mgr := sdkrequest.NewManager(cancel, req, "")
 		ctx = sdkrequest.SetManager(ctx, mgr)
