@@ -24,14 +24,17 @@ func TestInvoke(t *testing.T) {
 		r := require.New(t)
 
 		appName := randomSuffix("my-app")
-		h := inngestgo.NewHandler(appName, inngestgo.HandlerOpts{})
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
+		r.NoError(err)
+		// h := inngestgo.newHandler(c, inngestgo.handlerOpts{})
 
 		type ChildEventData struct {
 			Message string `json:"message"`
 		}
 
 		childFnName := "my-child-fn"
-		childFn := inngestgo.CreateFunction(
+		childFn, err := inngestgo.CreateFunction(
+			c,
 			inngestgo.FunctionOpts{
 				ID:      childFnName,
 				Name:    childFnName,
@@ -45,12 +48,14 @@ func TestInvoke(t *testing.T) {
 				return input.Event.Data.Message, nil
 			},
 		)
+		r.NoError(err)
 
 		var runID string
 		var invokeResult any
 		var invokeErr error
 		eventName := randomSuffix("my-event")
-		parentFn := inngestgo.CreateFunction(
+		_, err = inngestgo.CreateFunction(
+			c,
 			inngestgo.FunctionOpts{
 				ID:      "my-parent-fn",
 				Name:    "my-parent-fn",
@@ -63,20 +68,19 @@ func TestInvoke(t *testing.T) {
 					"invoke",
 					step.InvokeOpts{
 						Data:       map[string]any{"message": "hello"},
-						FunctionId: fmt.Sprintf("%s-%s", appName, childFnName),
+						FunctionId: childFn.FullyQualifiedID(),
 					},
 				)
 				return invokeResult, invokeErr
 			},
 		)
+		r.NoError(err)
 
-		h.Register(childFn, parentFn)
-
-		server, sync := serve(t, h)
+		server, sync := serve(t, c)
 		defer server.Close()
 		r.NoError(sync())
 
-		_, err := inngestgo.Send(ctx, inngestgo.Event{
+		_, err = c.Send(ctx, inngestgo.Event{
 			Name: eventName,
 			Data: map[string]any{"foo": "bar"}},
 		)
@@ -104,10 +108,12 @@ func TestInvoke(t *testing.T) {
 		r := require.New(t)
 
 		appName := randomSuffix("my-app")
-		h := inngestgo.NewHandler(appName, inngestgo.HandlerOpts{})
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
+		r.NoError(err)
 
 		childFnName := "my-child-fn"
-		childFn := inngestgo.CreateFunction(
+		childFn, err := inngestgo.CreateFunction(
+			c,
 			inngestgo.FunctionOpts{
 				ID:      childFnName,
 				Name:    childFnName,
@@ -121,12 +127,13 @@ func TestInvoke(t *testing.T) {
 				return nil, fmt.Errorf("oh no")
 			},
 		)
-
+		r.NoError(err)
 		var runID string
 		var invokeResult any
 		var invokeErr error
 		eventName := randomSuffix("my-event")
-		parentFn := inngestgo.CreateFunction(
+		_, err = inngestgo.CreateFunction(
+			c,
 			inngestgo.FunctionOpts{
 				ID:      "my-parent-fn",
 				Name:    "my-parent-fn",
@@ -138,20 +145,19 @@ func TestInvoke(t *testing.T) {
 				invokeResult, invokeErr = step.Invoke[any](ctx,
 					"invoke",
 					step.InvokeOpts{
-						FunctionId: fmt.Sprintf("%s-%s", appName, childFnName),
+						FunctionId: childFn.FullyQualifiedID(),
 					},
 				)
 				return invokeResult, invokeErr
 			},
 		)
+		r.NoError(err)
 
-		h.Register(childFn, parentFn)
-
-		server, sync := serve(t, h)
+		server, sync := serve(t, c)
 		defer server.Close()
 		r.NoError(sync())
 
-		_, err := inngestgo.Send(ctx, inngestgo.Event{
+		_, err = c.Send(ctx, inngestgo.Event{
 			Name: eventName,
 			Data: map[string]any{"foo": "bar"}},
 		)
@@ -184,13 +190,15 @@ func TestInvoke(t *testing.T) {
 		r := require.New(t)
 
 		appName := randomSuffix("my-app")
-		h := inngestgo.NewHandler(appName, inngestgo.HandlerOpts{})
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
+		r.NoError(err)
 
 		var runID string
 		var invokeResult any
 		var invokeErr error
 		eventName := randomSuffix("my-event")
-		fn := inngestgo.CreateFunction(
+		_, err = inngestgo.CreateFunction(
+			c,
 			inngestgo.FunctionOpts{
 				ID:      "my-fn",
 				Name:    "my-fn",
@@ -206,14 +214,13 @@ func TestInvoke(t *testing.T) {
 				return invokeResult, invokeErr
 			},
 		)
+		r.NoError(err)
 
-		h.Register(fn)
-
-		server, sync := serve(t, h)
+		server, sync := serve(t, c)
 		defer server.Close()
 		r.NoError(sync())
 
-		_, err := inngestgo.Send(ctx, inngestgo.Event{
+		_, err = c.Send(ctx, inngestgo.Event{
 			Name: eventName,
 			Data: map[string]any{"foo": "bar"}},
 		)
@@ -249,11 +256,13 @@ func TestInvoke(t *testing.T) {
 		ctx := context.Background()
 		r := require.New(t)
 		appName := randomSuffix("my-app")
-		h := inngestgo.NewHandler(appName, inngestgo.HandlerOpts{})
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
+		r.NoError(err)
 
 		var childCounter int32
 		childFnName := "my-child-fn"
-		childFn := inngestgo.CreateFunction(
+		_, err = inngestgo.CreateFunction(
+			c,
 			inngestgo.FunctionOpts{
 				ID:      childFnName,
 				Name:    childFnName,
@@ -268,11 +277,13 @@ func TestInvoke(t *testing.T) {
 				return nil, fmt.Errorf("oh no")
 			},
 		)
+		r.NoError(err)
 
 		var runID string
 		var invokeErr error
 		eventName := randomSuffix("my-event")
-		parentFn := inngestgo.CreateFunction(
+		_, err = inngestgo.CreateFunction(
+			c,
 			inngestgo.FunctionOpts{
 				ID:      "my-parent-fn",
 				Name:    "my-parent-fn",
@@ -295,14 +306,13 @@ func TestInvoke(t *testing.T) {
 				return nil, nil
 			},
 		)
+		r.NoError(err)
 
-		h.Register(childFn, parentFn)
-
-		server, sync := serve(t, h)
+		server, sync := serve(t, c)
 		defer server.Close()
 		r.NoError(sync())
 
-		_, err := inngestgo.Send(ctx, inngestgo.Event{
+		_, err = c.Send(ctx, inngestgo.Event{
 			Name: eventName,
 			Data: map[string]any{"foo": "bar"}},
 		)
@@ -329,11 +339,13 @@ func TestInvoke(t *testing.T) {
 		ctx := context.Background()
 		r := require.New(t)
 		appName := randomSuffix("my-app")
-		h := inngestgo.NewHandler(appName, inngestgo.HandlerOpts{})
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
+		r.NoError(err)
 
 		var childCounter int32
 		childFnName := "my-child-fn"
-		childFn := inngestgo.CreateFunction(
+		_, err = inngestgo.CreateFunction(
+			c,
 			inngestgo.FunctionOpts{
 				ID:      childFnName,
 				Name:    childFnName,
@@ -348,11 +360,12 @@ func TestInvoke(t *testing.T) {
 				return nil, fmt.Errorf("oh no")
 			},
 		)
-
+		r.NoError(err)
 		var runID string
 		var attempt int
 		eventName := randomSuffix("my-event")
-		parentFn := inngestgo.CreateFunction(
+		_, err = inngestgo.CreateFunction(
+			c,
 			inngestgo.FunctionOpts{
 				ID:   "my-parent-fn",
 				Name: "my-parent-fn",
@@ -373,14 +386,13 @@ func TestInvoke(t *testing.T) {
 				)
 			},
 		)
+		r.NoError(err)
 
-		h.Register(childFn, parentFn)
-
-		server, sync := serve(t, h)
+		server, sync := serve(t, c)
 		defer server.Close()
 		r.NoError(sync())
 
-		_, err := inngestgo.Send(ctx, inngestgo.Event{
+		_, err = c.Send(ctx, inngestgo.Event{
 			Name: eventName,
 			Data: map[string]any{"foo": "bar"}},
 		)
