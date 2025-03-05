@@ -27,7 +27,8 @@ type Client interface {
 
 	Serve() http.Handler
 	ServeWithOpts(opts ServeOpts) http.Handler
-	SetOptions(opts ClientOpts)
+	SetOptions(opts ClientOpts) error
+	SetURL(u *url.URL)
 }
 
 type ClientOpts struct {
@@ -195,9 +196,20 @@ func (a apiClient) ServeWithOpts(opts ServeOpts) http.Handler {
 	return a.h
 }
 
-func (a *apiClient) SetOptions(opts ClientOpts) {
+func (a *apiClient) SetOptions(opts ClientOpts) error {
+	err := opts.validate()
+	if err != nil {
+		return err
+	}
+
 	a.ClientOpts = opts
 	a.h.SetOptions(clientOptsToHandlerOpts(opts))
+	return nil
+}
+
+func (a *apiClient) SetURL(u *url.URL) {
+	a.ClientOpts.URL = u
+	a.h.SetOptions(clientOptsToHandlerOpts(a.ClientOpts))
 }
 
 type validatable interface {
