@@ -3,14 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/inngest/inngest/pkg/logger"
+	"github.com/inngest/inngestgo"
+	"github.com/inngest/inngestgo/connect"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
-
-	"github.com/inngest/inngest/pkg/logger"
-	"github.com/inngest/inngestgo"
-	"github.com/inngest/inngestgo/connect"
 )
 
 func main() {
@@ -18,57 +17,45 @@ func main() {
 	defer cancel()
 
 	key := "signkey-test-12345678"
-	c1, err := inngestgo.NewClient(inngestgo.ClientOpts{
-		AppID:      "connect-app1",
+	app1 := inngestgo.NewHandler("connect-app1", inngestgo.HandlerOpts{
 		Logger:     logger.StdlibLogger(ctx),
 		SigningKey: &key,
 		AppVersion: nil,
 		Dev:        inngestgo.BoolPtr(true),
 	})
-	if err != nil {
-		panic(err)
-	}
 
 	{
-		_, err := inngestgo.CreateFunction(
-			c1,
+		f := inngestgo.CreateFunction(
 			inngestgo.FunctionOpts{ID: "connect-test", Name: "connect test"},
 			inngestgo.EventTrigger("test/connect.run", nil),
 			testRun,
 		)
-		if err != nil {
-			panic(err)
-		}
+
+		app1.Register(f)
 	}
 
-	c2, err := inngestgo.NewClient(inngestgo.ClientOpts{
-		AppID:      "connect-app2",
+	app2 := inngestgo.NewHandler("connect-app2", inngestgo.HandlerOpts{
 		Logger:     logger.StdlibLogger(ctx),
 		SigningKey: &key,
 		AppVersion: nil,
 		Dev:        inngestgo.BoolPtr(true),
 	})
-	if err != nil {
-		panic(err)
-	}
 
 	{
-		_, err := inngestgo.CreateFunction(
-			c2,
+		f := inngestgo.CreateFunction(
 			inngestgo.FunctionOpts{ID: "connect-test", Name: "connect test"},
 			inngestgo.EventTrigger("test/connect.run", nil),
 			testRun,
 		)
-		if err != nil {
-			panic(err)
-		}
+
+		app2.Register(f)
 	}
 
 	conn, err := inngestgo.Connect(ctx, inngestgo.ConnectOpts{
 		InstanceID: inngestgo.Ptr("example-worker"),
-		Apps: []inngestgo.Client{
-			c1,
-			c2,
+		Apps: []inngestgo.Handler{
+			app1,
+			app2,
 		},
 	})
 

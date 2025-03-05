@@ -77,8 +77,8 @@ func randomSuffix(s string) string {
 	return s + uuid.NewString()
 }
 
-func serve(t *testing.T, c inngestgo.Client) (*httptest.Server, func() error) {
-	server := httptest.NewServer(c.Serve())
+func serve(t *testing.T, h inngestgo.Handler) (*httptest.Server, func() error) {
+	server := httptest.NewServer(h)
 
 	sync := func() error {
 		t.Helper()

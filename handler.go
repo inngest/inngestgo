@@ -29,6 +29,14 @@ import (
 )
 
 var (
+	// DefaultHandler provides a default handler for registering and serving functions
+	// globally.
+	//
+	// It's recommended to call SetOptions() to set configuration before serving
+	// this in production environments;  this is set up for development and will
+	// attempt to connect to the dev server.
+	DefaultHandler Handler = NewHandler("Go app", HandlerOpts{})
+
 	ErrTypeMismatch = fmt.Errorf("cannot invoke function with mismatched types")
 
 	errBadRequest      = fmt.Errorf("bad request")
@@ -46,7 +54,18 @@ var (
 	}
 )
 
-type handlerOpts struct {
+// Register adds the given functions to the default handler for serving.  You must register all
+// functions with a handler prior to serving the handler for them to be enabled.
+func Register(funcs ...ServableFunction) {
+	DefaultHandler.Register(funcs...)
+}
+
+// Serve serves all registered functions within the default handler.
+func Serve(w http.ResponseWriter, r *http.Request) {
+	DefaultHandler.ServeHTTP(w, r)
+}
+
+type HandlerOpts struct {
 	// Logger is the structured logger to use from Go's builtin structured
 	// logging package.
 	Logger *slog.Logger
@@ -108,12 +127,12 @@ type handlerOpts struct {
 	Dev *bool
 }
 
-// GetSigningKey returns the signing key defined within handlerOpts, or the default
+// GetSigningKey returns the signing key defined within HandlerOpts, or the default
 // defined within INNGEST_SIGNING_KEY.
 //
 // This is the private key used to register functions and communicate with the private
 // API.
-func (h handlerOpts) GetSigningKey() string {
+func (h HandlerOpts) GetSigningKey() string {
 	if h.SigningKey == nil {
 		return os.Getenv("INNGEST_SIGNING_KEY")
 	}
@@ -121,12 +140,12 @@ func (h handlerOpts) GetSigningKey() string {
 }
 
 // GetSigningKeyFallback returns the signing key fallback defined within
-// handlerOpts, or the default defined within INNGEST_SIGNING_KEY_FALLBACK.
+// HandlerOpts, or the default defined within INNGEST_SIGNING_KEY_FALLBACK.
 //
 // This is the fallback private key used to register functions and communicate
 // with the private API. If a request fails auth with the signing key then we'll
 // try again with the fallback
-func (h handlerOpts) GetSigningKeyFallback() string {
+func (h HandlerOpts) GetSigningKeyFallback() string {
 	if h.SigningKeyFallback == nil {
 		return os.Getenv("INNGEST_SIGNING_KEY_FALLBACK")
 	}
@@ -134,7 +153,7 @@ func (h handlerOpts) GetSigningKeyFallback() string {
 }
 
 // GetAPIOrigin returns the host to use for sending API requests
-func (h handlerOpts) GetAPIBaseURL() string {
+func (h HandlerOpts) GetAPIBaseURL() string {
 	if h.isDev() {
 		return DevServerURL()
 	}
@@ -152,7 +171,7 @@ func (h handlerOpts) GetAPIBaseURL() string {
 }
 
 // GetEventAPIOrigin returns the host to use for sending events
-func (h handlerOpts) GetEventAPIBaseURL() string {
+func (h HandlerOpts) GetEventAPIBaseURL() string {
 	if h.isDev() {
 		return DevServerURL()
 	}
@@ -169,7 +188,7 @@ func (h handlerOpts) GetEventAPIBaseURL() string {
 }
 
 // GetServeOrigin returns the host used for HTTP based executions
-func (h handlerOpts) GetServeOrigin() string {
+func (h HandlerOpts) GetServeOrigin() string {
 	if h.ServeOrigin != nil {
 		return *h.ServeOrigin
 	}
@@ -177,34 +196,34 @@ func (h handlerOpts) GetServeOrigin() string {
 }
 
 // GetServePath returns the path used for HTTP based executions
-func (h handlerOpts) GetServePath() string {
+func (h HandlerOpts) GetServePath() string {
 	if h.ServePath != nil {
 		return *h.ServePath
 	}
 	return ""
 }
 
-// GetEnv returns the env defined within handlerOpts, or the default
+// GetEnv returns the env defined within HandlerOpts, or the default
 // defined within INNGEST_ENV.
 //
 // This is the environment name used for preview/branch environments within Inngest.
-func (h handlerOpts) GetEnv() string {
+func (h HandlerOpts) GetEnv() string {
 	if h.Env == nil {
 		return os.Getenv("INNGEST_ENV")
 	}
 	return *h.Env
 }
 
-// GetRegisterURL returns the registration URL defined wtihin handlerOpts,
+// GetRegisterURL returns the registration URL defined wtihin HandlerOpts,
 // defaulting to the production Inngest URL if nil.
-func (h handlerOpts) GetRegisterURL() string {
+func (h HandlerOpts) GetRegisterURL() string {
 	if h.RegisterURL == nil {
 		return "https://www.inngest.com/fn/register"
 	}
 	return *h.RegisterURL
 }
 
-func (h handlerOpts) IsInBandSyncAllowed() bool {
+func (h HandlerOpts) IsInBandSyncAllowed() bool {
 	if h.AllowInBandSync != nil {
 		return *h.AllowInBandSync
 	}
@@ -217,7 +236,7 @@ func (h handlerOpts) IsInBandSyncAllowed() bool {
 	return false
 }
 
-func (h handlerOpts) isDev() bool {
+func (h HandlerOpts) isDev() bool {
 	if h.Dev != nil {
 		return *h.Dev
 	}
@@ -225,8 +244,30 @@ func (h handlerOpts) isDev() bool {
 	return IsDev()
 }
 
-// newHandler returns a new Handler for serving Inngest functions.
-func newHandler(c Client, opts handlerOpts) *handler {
+// Handler represents a handler which serves the Inngest API via HTTP.  This provides
+// function registration to Inngest, plus the invocation of registered functions via
+// an HTTP POST.
+type Handler interface {
+	http.Handler
+
+	// SetAppName updates the handler's app name.  This is used to group functions
+	// and track deploys within the UI.
+	SetAppName(name string) Handler
+
+	// SetOptions sets the handler's options used to register functions.
+	SetOptions(h HandlerOpts) Handler
+
+	// Register registers the given functions with the handler, allowing them to
+	// be invoked by Inngest.
+	Register(...ServableFunction)
+
+	GetAppName() string
+	GetAppVersion() *string
+	GetFunctions() []ServableFunction
+}
+
+// NewHandler returns a new Handler for serving Inngest functions.
+func NewHandler(appName string, opts HandlerOpts) Handler {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
@@ -236,18 +277,16 @@ func newHandler(c Client, opts handlerOpts) *handler {
 	}
 
 	return &handler{
-		handlerOpts: opts,
-		appName:     c.AppID(),
-		client:      c,
+		HandlerOpts: opts,
+		appName:     appName,
 		funcs:       []ServableFunction{},
 	}
 }
 
 type handler struct {
-	handlerOpts
+	HandlerOpts
 
 	appName string
-	client  Client
 	funcs   []ServableFunction
 	// lock prevents reading the function maps while serving
 	l sync.RWMutex
@@ -265,8 +304,8 @@ func (h *handler) GetFunctions() []ServableFunction {
 	return h.funcs
 }
 
-func (h *handler) SetOptions(opts handlerOpts) *handler {
-	h.handlerOpts = opts
+func (h *handler) SetOptions(opts HandlerOpts) Handler {
+	h.HandlerOpts = opts
 
 	if opts.MaxBodySize == 0 {
 		opts.MaxBodySize = DefaultMaxBodySize
@@ -278,7 +317,7 @@ func (h *handler) SetOptions(opts handlerOpts) *handler {
 	return h
 }
 
-func (h *handler) SetAppName(name string) *handler {
+func (h *handler) SetAppName(name string) Handler {
 	h.appName = name
 	return h
 }
@@ -291,11 +330,11 @@ func (h *handler) Register(funcs ...ServableFunction) {
 	// that already exists, clear it.
 	slugs := map[string]ServableFunction{}
 	for _, f := range h.funcs {
-		slugs[f.FullyQualifiedID()] = f
+		slugs[f.Slug(h.appName)] = f
 	}
 
 	for _, f := range funcs {
-		slugs[f.FullyQualifiedID()] = f
+		slugs[f.Slug(h.appName)] = f
 	}
 
 	newFuncs := make([]ServableFunction, len(slugs))
@@ -453,7 +492,7 @@ func (h *handler) inBandSync(
 		}
 	}
 
-	max := h.handlerOpts.MaxBodySize
+	max := h.HandlerOpts.MaxBodySize
 	if max == 0 {
 		max = DefaultMaxBodySize
 	}
@@ -721,13 +760,13 @@ func createFunctionConfigs(
 
 		// Modify URL to contain fn ID, step params
 		values := appURL.Query()
-		values.Set("fnId", fn.FullyQualifiedID()) // This should match the Slug below
+		values.Set("fnId", fn.Slug(appName)) // This should match the Slug below
 		values.Set("step", "step")
 		appURL.RawQuery = values.Encode()
 
 		f := sdk.SDKFunction{
 			Name:        fn.Name(),
-			Slug:        fn.FullyQualifiedID(),
+			Slug:        fn.Slug(appName),
 			Idempotency: c.Idempotency,
 			Priority:    fn.Config().Priority,
 			Triggers:    inngest.MultipleTriggers{},
@@ -807,7 +846,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
-	max := h.handlerOpts.MaxBodySize
+	max := h.HandlerOpts.MaxBodySize
 	if max == 0 {
 		max = DefaultMaxBodySize
 	}
@@ -848,8 +887,8 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	h.l.RLock()
 	var fn ServableFunction
 	for _, f := range h.funcs {
-		isOldFormat := f.ID() == fnID // Only include function slug
-		if f.FullyQualifiedID() == fnID || isOldFormat {
+		isOldFormat := f.Slug("") == fnID // Only include function slug
+		if f.Slug(h.appName) == fnID || isOldFormat {
 			fn = f
 			break
 		}
@@ -1143,7 +1182,7 @@ func (h *handler) trust(
 		}
 	}
 
-	max := h.handlerOpts.MaxBodySize
+	max := h.HandlerOpts.MaxBodySize
 	if max == 0 {
 		max = DefaultMaxBodySize
 	}
