@@ -27,6 +27,8 @@ type Client interface {
 
 	Serve() http.Handler
 	ServeWithOpts(opts ServeOpts) http.Handler
+	SetOptions(opts ClientOpts) error
+	SetURL(u *url.URL)
 }
 
 type ClientOpts struct {
@@ -110,7 +112,17 @@ func NewClient(opts ClientOpts) (Client, error) {
 	c := &apiClient{
 		ClientOpts: opts,
 	}
-	h := newHandler(c, handlerOpts{
+	c.h = newHandler(c, clientOptsToHandlerOpts(opts))
+
+	if c.ClientOpts.HTTPClient == nil {
+		c.ClientOpts.HTTPClient = http.DefaultClient
+	}
+
+	return c, nil
+}
+
+func clientOptsToHandlerOpts(opts ClientOpts) handlerOpts {
+	return handlerOpts{
 		Logger:             opts.Logger,
 		SigningKey:         opts.SigningKey,
 		SigningKeyFallback: opts.SigningKeyFallback,
@@ -124,14 +136,7 @@ func NewClient(opts ClientOpts) (Client, error) {
 		UseStreaming:       opts.UseStreaming,
 		AllowInBandSync:    opts.AllowInBandSync,
 		Dev:                opts.Dev,
-	})
-	c.h = h
-
-	if c.ClientOpts.HTTPClient == nil {
-		c.ClientOpts.HTTPClient = http.DefaultClient
 	}
-
-	return c, nil
 }
 
 // apiClient is a concrete implementation of Client that uses the given HTTP client
@@ -189,6 +194,22 @@ func (a apiClient) ServeWithOpts(opts ServeOpts) http.Handler {
 	a.h.handlerOpts.ServeOrigin = opts.Origin
 	a.h.handlerOpts.ServePath = opts.Path
 	return a.h
+}
+
+func (a *apiClient) SetOptions(opts ClientOpts) error {
+	err := opts.validate()
+	if err != nil {
+		return err
+	}
+
+	a.ClientOpts = opts
+	a.h.SetOptions(clientOptsToHandlerOpts(opts))
+	return nil
+}
+
+func (a *apiClient) SetURL(u *url.URL) {
+	a.ClientOpts.URL = u
+	a.h.SetOptions(clientOptsToHandlerOpts(a.ClientOpts))
 }
 
 type validatable interface {
