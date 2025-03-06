@@ -53,18 +53,27 @@ import (
 )
 
 func main() {
-	h := inngestgo.NewHandler("core", inngestgo.HandlerOpts{})
-	f := inngestgo.CreateFunction(
+	client, err := inngestgo.NewClient(inngestgo.ClientOpts{
+		AppID: "core",
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = inngestgo.CreateFunction(
+		client,
 		inngestgo.FunctionOpts{
-			ID:   "account-created",
-			Name: "Account creation flow",
+			ID: "account-created",
 		},
 		// Run on every api/account.created event.
 		inngestgo.EventTrigger("api/account.created", nil),
 		AccountCreated,
 	)
-	h.Register(f)
-	http.ListenAndServe(":8080", h)
+	if err != nil {
+		panic(err)
+	}
+
+	http.ListenAndServe(":8080", client.Serve())
 }
 
 // AccountCreated is a durable function which runs any time the "api/account.created"
