@@ -13,6 +13,30 @@ import (
 	"github.com/inngest/inngestgo/step"
 )
 
+func foo() {
+	client, err := inngestgo.NewClient(inngestgo.ClientOpts{
+		AppID: "core",
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = inngestgo.CreateFunction(
+		client,
+		inngestgo.FunctionOpts{
+			ID: "account-created",
+		},
+		// Run on every api/account.created event.
+		inngestgo.EventTrigger("api/account.created", nil),
+		AccountCreated,
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	http.ListenAndServe(":8080", client.Serve())
+}
+
 func main() {
 	c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 		AppID: "billing",
