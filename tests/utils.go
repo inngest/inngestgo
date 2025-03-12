@@ -77,8 +77,28 @@ func randomSuffix(s string) string {
 	return s + uuid.NewString()
 }
 
-func serve(t *testing.T, c inngestgo.Client) (*httptest.Server, func() error) {
-	server := httptest.NewServer(c.Serve())
+type serveOpts struct {
+	Middleware func(http.Handler) http.Handler
+}
+
+func serve(
+	t *testing.T,
+	c inngestgo.Client,
+	opts ...serveOpts,
+) (*httptest.Server, func() error) {
+	var o serveOpts
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+
+	handler := c.Serve()
+	if o.Middleware != nil {
+		handler = o.Middleware(handler)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", handler.ServeHTTP)
+	server := httptest.NewServer(mux)
 
 	sync := func() error {
 		t.Helper()
