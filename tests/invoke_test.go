@@ -26,7 +26,6 @@ func TestInvoke(t *testing.T) {
 		appName := randomSuffix("my-app")
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
 		r.NoError(err)
-		// h := inngestgo.newHandler(c, inngestgo.handlerOpts{})
 
 		type ChildEventData struct {
 			Message string `json:"message"`

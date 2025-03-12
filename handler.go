@@ -23,6 +23,7 @@ import (
 	"github.com/inngest/inngest/pkg/sdk"
 	"github.com/inngest/inngest/pkg/syscode"
 	sdkerrors "github.com/inngest/inngestgo/errors"
+	"github.com/inngest/inngestgo/internal"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/internal/types"
 	"github.com/inngest/inngestgo/step"
@@ -883,7 +884,14 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	// Invoke the function, then immediately stop the streaming buffer.
-	resp, ops, err := invoke(r.Context(), fn, h.GetSigningKey(), request, stepID)
+	resp, ops, err := invoke(
+		r.Context(),
+		h.client,
+		fn,
+		h.GetSigningKey(),
+		request,
+		stepID,
+	)
 	streamCancel()
 
 	// NOTE: When triggering step errors, we should have an OpcodeStepError
@@ -1212,8 +1220,9 @@ type StreamResponse struct {
 // be fully typed.
 func invoke(
 	ctx context.Context,
+	client Client,
 	sf ServableFunction,
-	signignKey string,
+	signingKey string,
 	input *sdkrequest.Request,
 	stepID *string,
 ) (any, []state.GeneratorOpcode, error) {
@@ -1226,13 +1235,15 @@ func invoke(
 	// Create a new context.  This context is cancellable and stores the opcode that ran
 	// within a step.  This allows us to prevent any execution of future tools after a
 	// tool has run.
-	fCtx, cancel := context.WithCancel(context.Background())
+	fCtx, cancel := context.WithCancel(
+		internal.ContextWithEventSender(context.Background(), client),
+	)
 	if stepID != nil {
 		fCtx = step.SetTargetStepID(fCtx, *stepID)
 	}
 
 	// This must be a pointer so that it can be mutated from within function tools.
-	mgr := sdkrequest.NewManager(cancel, input, signignKey)
+	mgr := sdkrequest.NewManager(cancel, input, signingKey)
 	fCtx = sdkrequest.SetManager(fCtx, mgr)
 
 	// Create a new Input type.  We don't know ahead of time the type signature as

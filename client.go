@@ -266,21 +266,42 @@ func (a apiClient) SendMany(ctx context.Context, e []any) ([]string, error) {
 	// each error.  We don't necessarily care about the error behind this close.
 	defer resp.Body.Close()
 
+	var respBody eventAPIResponse
+	_ = json.NewDecoder(resp.Body).Decode(&respBody)
+
 	switch resp.StatusCode {
 	case 200, 201:
-		ids := eventAPIResponse{}
-		_ = json.NewDecoder(resp.Body).Decode(&ids)
-		if len(ids.IDs) == 1 {
-			return ids.IDs, nil
-		}
-		return nil, nil
+		return respBody.IDs, nil
 	case 400:
-		return nil, fmt.Errorf("invalid event data")
+		var msg string
+		if respBody.Error != "" {
+			msg = respBody.Error
+		} else {
+			msg = "unknown error"
+		}
+
+		// E.g. the event is invalid.
+		return nil, fmt.Errorf("bad request: %s", msg)
 	case 401:
-		return nil, fmt.Errorf("unknown ingest key")
+		var msg string
+		if respBody.Error != "" {
+			msg = respBody.Error
+		} else {
+			msg = "unknown error"
+		}
+
+		// E.g. the event key is invalid.
+		return nil, fmt.Errorf("unauthorized: %s", msg)
 	case 403:
-		// The ingest key has an IP or event type allow/denylist.
-		return nil, fmt.Errorf("this ingest key is not authorized to send this event")
+		var msg string
+		if respBody.Error != "" {
+			msg = respBody.Error
+		} else {
+			msg = "unknown error"
+		}
+
+		// E.g. the ingest key has an IP or event type allow/denylist.
+		return nil, fmt.Errorf("forbidden: %s", msg)
 	}
 
 	return nil, fmt.Errorf("unknown status code sending event: %d", resp.StatusCode)
@@ -290,5 +311,5 @@ func (a apiClient) SendMany(ctx context.Context, e []any) ([]string, error) {
 type eventAPIResponse struct {
 	IDs    []string `json:"ids"`
 	Status int      `json:"status"`
-	Error  error    `json:"error,omitempty"`
+	Error  string   `json:"error,omitempty"`
 }
