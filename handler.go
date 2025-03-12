@@ -1236,7 +1236,7 @@ func invoke(
 	// within a step.  This allows us to prevent any execution of future tools after a
 	// tool has run.
 	fCtx, cancel := context.WithCancel(
-		internal.ContextWithEventSender(context.Background(), client),
+		internal.ContextWithEventSender(ctx, client),
 	)
 	if stepID != nil {
 		fCtx = step.SetTargetStepID(fCtx, *stepID)
