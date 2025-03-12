@@ -1,30 +1,11 @@
-package inngestgo
+package internal
 
-import (
-	"encoding/json"
-	"fmt"
-	"time"
+import "fmt"
 
-	"github.com/inngest/inngestgo/internal"
-)
-
-const (
-	// ExternalID is the field name used to reference the user's ID within your
-	// systems.  This is _your_ UUID or ID for referencing the user, and allows
-	// Inngest to match contacts to your users.
-	ExternalID = "external_id"
-
-	// Email is the field name used to reference the user's email.
-	Email = "email"
-)
-
-type Event = internal.Event
-
-// GenericEvent represents a single event generated from your system to be sent to
-// Inngest.
-type GenericEvent[DATA any, USER any] struct {
+type Event struct {
 	// ID is an optional event ID used for deduplication.
 	ID *string `json:"id,omitempty"`
+
 	// Name represents the name of the event.  We recommend the following
 	// simple format: "noun.action".  For example, this may be "signup.new",
 	// "payment.succeeded", "email.sent", "post.viewed".
@@ -32,12 +13,12 @@ type GenericEvent[DATA any, USER any] struct {
 	// Name is required.
 	Name string `json:"name"`
 
-	// Data is a struct or key-value map of data belonging to the event.  This should
+	// Data is a key-value map of data belonging to the event.  This should
 	// include all relevant data.  For example, a "signup.new" event may include
 	// the user's email, their plan information, the signup method, etc.
-	Data DATA `json:"data"`
+	Data map[string]any `json:"data"`
 
-	// User is a struct or key-value map of data belonging to the user that authored the
+	// User is a key-value map of data belonging to the user that authored the
 	// event.  This data will be upserted into the contact store.
 	//
 	// We match the user via one of two fields: "external_id" and "email", defined
@@ -46,7 +27,7 @@ type GenericEvent[DATA any, USER any] struct {
 	// If these fields are present in this map the attributes specified here
 	// will be updated within Inngest, and the event will be attributed to
 	// this contact.
-	User USER `json:"user,omitempty"`
+	User any `json:"user,omitempty"`
 
 	// Timestamp is the time the event occured at *millisecond* (not nanosecond)
 	// precision.  This defaults to the time the event is received if left blank.
@@ -70,32 +51,42 @@ type GenericEvent[DATA any, USER any] struct {
 	Version string `json:"v,omitempty"`
 }
 
-// Event() turns the GenericEvent into a normal Event.
-//
-// NOTE: This is a naive inefficient implementation and should not be used in performance
-// constrained systems.
-func (ge GenericEvent[D, U]) Event() Event {
-	byt, _ := json.Marshal(ge)
-	val := Event{}
-	_ = json.Unmarshal(byt, &val)
-	return val
-}
-
-func (ge GenericEvent[D, U]) Validate() error {
-	if ge.Name == "" {
+// Validate returns  an error if the event is not well formed
+func (e *Event) Validate() error {
+	if e.Name == "" {
 		return fmt.Errorf("event name must be present")
+	}
+	if e.Data == nil {
+		// Ensure that e.Data is not nil.
+		e.Data = make(map[string]any)
 	}
 	return nil
 }
 
-// NowMillis returns a timestamp with millisecond precision used for the Event.Timestamp
-// field.
-func NowMillis() int64 {
-	return time.Now().UnixMilli()
-}
+func (e Event) Map() map[string]any {
+	if e.Data == nil {
+		e.Data = make(map[string]any)
+	}
+	if e.User == nil {
+		e.User = make(map[string]any)
+	}
 
-// Timestamp converts a go time.Time into a timestamp with millisecond precision
-// used for the Event.Timestamp field.
-func Timestamp(t time.Time) int64 {
-	return t.UnixNano() / 1_000_000
+	data := map[string]any{
+		"name": e.Name,
+		"data": e.Data,
+		"user": e.User,
+		// We cast to float64 because marshalling and unmarshalling from
+		// JSON automatically uses float64 as its type;  JS has no notion
+		// of ints.
+		"ts": float64(e.Timestamp),
+	}
+
+	if e.Version != "" {
+		data["v"] = e.Version
+	}
+	if e.ID != nil {
+		data["id"] = *e.ID
+	}
+
+	return data
 }
