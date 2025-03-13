@@ -1044,6 +1044,7 @@ func TestConnectSync(t *testing.T) {
 		c, err := NewClient(ClientOpts{
 			APIBaseURL: toPtr(server.URL),
 			AppID:      "app",
+			SigningKey: toPtr(testKey),
 		})
 		r.NoError(err)
 
