@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngestgo"
 	"github.com/inngest/inngestgo/experimental"
 	"github.com/inngest/inngestgo/step"
@@ -14,6 +15,53 @@ import (
 )
 
 func TestClientMiddleware(t *testing.T) {
+	t.Run("no hooks", func(t *testing.T) {
+		// Nothing errors when 0 hooks are provided.
+
+		r := require.New(t)
+		ctx := context.Background()
+
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+			AppID: randomSuffix("app"),
+			Middleware: []experimental.Middleware{
+				{},
+			},
+		})
+		r.NoError(err)
+
+		var runID string
+		eventName := randomSuffix("event")
+		_, err = inngestgo.CreateFunction(
+			c,
+			inngestgo.FunctionOpts{
+				ID:      "fn",
+				Retries: inngestgo.IntPtr(0),
+			},
+			inngestgo.EventTrigger(eventName, nil),
+			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+				runID = input.InputCtx.RunID
+				return nil, nil
+			},
+		)
+		r.NoError(err)
+
+		server, sync := serve(t, c)
+		defer server.Close()
+		r.NoError(sync())
+
+		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
+		r.NoError(err)
+
+		r.EventuallyWithT(func(ct *assert.CollectT) {
+			a := assert.New(ct)
+			run, err := getRun(runID)
+			if !a.NoError(err) {
+				return
+			}
+			a.Equal(enums.RunStatusCompleted.String(), run.Status)
+		}, 5*time.Second, 10*time.Millisecond)
+	})
+
 	t.Run("2 steps", func(t *testing.T) {
 		r := require.New(t)
 		ctx := context.Background()
@@ -25,6 +73,9 @@ func TestClientMiddleware(t *testing.T) {
 				{
 					AfterExecution: func(ctx context.Context) {
 						logs = append(logs, "mw: AfterExecution")
+					},
+					BeforeExecution: func(ctx context.Context) {
+						logs = append(logs, "mw: BeforeExecution")
 					},
 				},
 			},
@@ -74,12 +125,14 @@ func TestClientMiddleware(t *testing.T) {
 			a := assert.New(ct)
 			a.Equal([]string{
 				// First request.
+				"mw: BeforeExecution",
 				"fn: top",
 				"a: running",
 				"mw: AfterExecution",
 
 				// Second request.
 				"fn: top",
+				"mw: BeforeExecution",
 				"fn: between steps",
 				"b: running",
 				"mw: AfterExecution",
@@ -87,11 +140,13 @@ func TestClientMiddleware(t *testing.T) {
 				// Third request.
 				"fn: top",
 				"fn: between steps",
+				"mw: BeforeExecution",
 				"fn: bottom",
 				"mw: AfterExecution",
 			}, logs)
 		}, 5*time.Second, 10*time.Millisecond)
 	})
+
 	t.Run("retry", func(t *testing.T) {
 		r := require.New(t)
 		ctx := context.Background()
@@ -103,6 +158,9 @@ func TestClientMiddleware(t *testing.T) {
 				{
 					AfterExecution: func(ctx context.Context) {
 						logs = append(logs, "mw: AfterExecution")
+					},
+					BeforeExecution: func(ctx context.Context) {
+						logs = append(logs, "mw: BeforeExecution")
 					},
 				},
 			},
@@ -142,14 +200,69 @@ func TestClientMiddleware(t *testing.T) {
 			a := assert.New(ct)
 			a.Equal([]string{
 				// First request.
+				"mw: BeforeExecution",
 				"fn: top",
 				"mw: AfterExecution",
 
 				// Second request.
+				"mw: BeforeExecution",
 				"fn: top",
 				"fn: bottom",
 				"mw: AfterExecution",
 			}, logs)
+		}, 5*time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("connect", func(t *testing.T) {
+		t.Skip("skipping until we can use Connect without specifying a logger or signing key")
+
+		r := require.New(t)
+		ctx := context.Background()
+
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+			AppID: randomSuffix("app"),
+			Middleware: []experimental.Middleware{
+				{
+					AfterExecution:  func(ctx context.Context) {},
+					BeforeExecution: func(ctx context.Context) {},
+				},
+			},
+		})
+		r.NoError(err)
+
+		var runID string
+		eventName := randomSuffix("event")
+		_, err = inngestgo.CreateFunction(
+			c,
+			inngestgo.FunctionOpts{
+				ID:      "fn",
+				Retries: inngestgo.IntPtr(0),
+			},
+			inngestgo.EventTrigger(eventName, nil),
+			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+				runID = input.InputCtx.RunID
+				return nil, nil
+			},
+		)
+		r.NoError(err)
+
+		conn, err := inngestgo.Connect(ctx, inngestgo.ConnectOpts{
+			InstanceID: inngestgo.Ptr(randomSuffix("instance")),
+			Apps:       []inngestgo.Client{c},
+		})
+		r.NoError(err)
+		defer conn.Close()
+
+		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
+		r.NoError(err)
+
+		r.EventuallyWithT(func(ct *assert.CollectT) {
+			a := assert.New(ct)
+			run, err := getRun(runID)
+			if !a.NoError(err) {
+				return
+			}
+			a.Equal(enums.RunStatusCompleted.String(), run.Status)
 		}, 5*time.Second, 10*time.Millisecond)
 	})
 }

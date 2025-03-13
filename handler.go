@@ -1245,14 +1245,23 @@ func invoke(
 	// within a step.  This allows us to prevent any execution of future tools after a
 	// tool has run.
 	fCtx, cancel := context.WithCancel(
-		internal.ContextWithEventSender(ctx, client),
+		internal.ContextWithMiddlewareManager(
+			internal.ContextWithEventSender(ctx, client),
+			mw,
+		),
 	)
 	if stepID != nil {
 		fCtx = step.SetTargetStepID(fCtx, *stepID)
 	}
 
+	if len(input.Steps) == 0 {
+		// There are no memoized steps, so the start of the function is "new
+		// code".
+		mw.BeforeExecution(fCtx)
+	}
+
 	// This must be a pointer so that it can be mutated from within function tools.
-	mgr := sdkrequest.NewManager(cancel, input, signingKey)
+	mgr := sdkrequest.NewManager(mw, cancel, input, signingKey)
 	fCtx = sdkrequest.SetManager(fCtx, mgr)
 
 	// Create a new Input type.  We don't know ahead of time the type signature as
