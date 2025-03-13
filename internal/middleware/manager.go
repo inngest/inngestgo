@@ -3,13 +3,14 @@ package middleware
 import (
 	"context"
 
+	"github.com/inngest/inngestgo/internal/fn"
 	"github.com/inngest/inngestgo/internal/types"
 )
 
 func NewMiddlewareManager() *MiddlewareManager {
 	return &MiddlewareManager{
 		idempotentHooks: &types.Set[string]{},
-		items:           []Middleware{},
+		items:           []*Middleware{},
 	}
 }
 
@@ -20,11 +21,11 @@ type MiddlewareManager struct {
 	// request.
 	idempotentHooks *types.Set[string]
 
-	items []Middleware
+	items []*Middleware
 }
 
 // Add adds middleware to the manager.
-func (m *MiddlewareManager) Add(mw ...Middleware) *MiddlewareManager {
+func (m *MiddlewareManager) Add(mw ...*Middleware) *MiddlewareManager {
 	m.items = append(m.items, mw...)
 	return m
 }
@@ -53,6 +54,17 @@ func (m *MiddlewareManager) BeforeExecution(ctx context.Context) {
 	for _, mw := range m.items {
 		if mw.BeforeExecution != nil {
 			mw.BeforeExecution(ctx)
+		}
+	}
+}
+
+func (m *MiddlewareManager) TransformInput(
+	input *TransformableInput,
+	fn fn.ServableFunction,
+) {
+	for _, mw := range m.items {
+		if mw.TransformInput != nil {
+			mw.TransformInput(input, fn)
 		}
 	}
 }

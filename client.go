@@ -96,7 +96,7 @@ type ClientOpts struct {
 	Dev *bool
 
 	// Middleware is a list of middleware to apply to the client.
-	Middleware []experimental.Middleware
+	Middleware []*experimental.Middleware
 }
 
 func (c ClientOpts) validate() error {
