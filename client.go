@@ -109,6 +109,10 @@ func NewClient(opts ClientOpts) (Client, error) {
 		return nil, err
 	}
 
+	if opts.Logger == nil {
+		opts.Logger = slog.Default()
+	}
+
 	c := &apiClient{
 		ClientOpts: opts,
 	}

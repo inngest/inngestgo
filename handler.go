@@ -136,14 +136,14 @@ func (h handlerOpts) GetSigningKeyFallback() string {
 
 // GetAPIOrigin returns the host to use for sending API requests
 func (h handlerOpts) GetAPIBaseURL() string {
-	if h.isDev() {
-		return DevServerURL()
-	}
-
 	if h.APIBaseURL == nil {
 		base := os.Getenv("INNGEST_API_BASE_URL")
 		if base != "" {
 			return base
+		}
+
+		if h.isDev() {
+			return DevServerURL()
 		}
 
 		return defaultAPIOrigin

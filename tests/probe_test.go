@@ -16,6 +16,8 @@ import (
 const sKey = "signkey-prod-000000"
 
 func TestTrustProbe(t *testing.T) {
+	devEnv(t)
+
 	t.Run("dev mode", func(t *testing.T) {
 		isDev := true
 

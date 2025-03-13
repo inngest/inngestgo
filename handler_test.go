@@ -21,6 +21,7 @@ import (
 	"github.com/inngest/inngest/pkg/syscode"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/step"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -1009,6 +1010,119 @@ func TestInBandSync(t *testing.T) {
 		respByt, err := io.ReadAll(resp.Body)
 		r.NoError(err)
 		r.Equal("", string(respByt))
+	})
+}
+
+func TestConnectSync(t *testing.T) {
+	t.Run("cloud", func(t *testing.T) {
+		// SDK sends an Authorization header when in cloud mode.
+
+		r := require.New(t)
+
+		// We need a cancellable context to stop the Connect worker.
+		connectCtx, cancelConnectCtx := context.WithCancel(context.Background())
+		defer cancelConnectCtx()
+
+		headers := http.Header{}
+		server := httptest.NewServer(http.HandlerFunc(
+			func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v0/connect/start" {
+					for k, v := range r.Header {
+						headers.Add(k, v[0])
+					}
+					cancelConnectCtx()
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{}`))
+			},
+		))
+		defer server.Close()
+
+		c, err := NewClient(ClientOpts{
+			APIBaseURL: toPtr(server.URL),
+			AppID:      "app",
+		})
+		r.NoError(err)
+
+		_, err = CreateFunction(
+			c,
+			FunctionOpts{ID: "fn"},
+			EventTrigger("event", nil),
+			func(ctx context.Context, input Input[any]) (any, error) {
+				return nil, nil
+			},
+		)
+		r.NoError(err)
+
+		_, _ = Connect(connectCtx, ConnectOpts{
+			Apps:       []Client{c},
+			InstanceID: toPtr("instance"),
+		})
+
+		r.EventuallyWithT(func(t *assert.CollectT) {
+			a := assert.New(t)
+			a.NotEmpty(headers.Get("Authorization"))
+		}, 5*time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("dev", func(t *testing.T) {
+		// SDK doesn't send an Authorization header when in dev mode.
+
+		r := require.New(t)
+
+		// We need a cancellable context to stop the Connect worker.
+		connectCtx, cancelConnectCtx := context.WithCancel(context.Background())
+		defer cancelConnectCtx()
+
+		headers := http.Header{}
+		called := false
+		server := httptest.NewServer(http.HandlerFunc(
+			func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v0/connect/start" {
+					for k, v := range r.Header {
+						headers.Add(k, v[0])
+					}
+					called = true
+					cancelConnectCtx()
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+
+				w.WriteHeader(http.StatusNotFound)
+			},
+		))
+		defer server.Close()
+
+		c, err := NewClient(ClientOpts{
+			APIBaseURL: toPtr(server.URL),
+			AppID:      "app",
+			Dev:        toPtr(true),
+		})
+		r.NoError(err)
+
+		_, err = CreateFunction(
+			c,
+			FunctionOpts{ID: "fn"},
+			EventTrigger("event", nil),
+			func(ctx context.Context, input Input[any]) (any, error) {
+				return nil, nil
+			},
+		)
+		r.NoError(err)
+
+		_, _ = Connect(connectCtx, ConnectOpts{
+			Apps:       []Client{c},
+			InstanceID: toPtr("instance"),
+		})
+
+		r.EventuallyWithT(func(t *assert.CollectT) {
+			a := assert.New(t)
+			a.Empty(headers.Get("Authorization"))
+			a.True(called)
+		}, 5*time.Second, 10*time.Millisecond)
 	})
 }
 

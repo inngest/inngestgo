@@ -13,9 +13,7 @@ import (
 )
 
 func TestSend(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
+	devEnv(t)
 
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
@@ -143,9 +141,7 @@ func TestSend(t *testing.T) {
 }
 
 func TestSendMany(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
+	devEnv(t)
 
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
