@@ -24,6 +24,7 @@ import (
 	"github.com/inngest/inngest/pkg/syscode"
 	sdkerrors "github.com/inngest/inngestgo/errors"
 	"github.com/inngest/inngestgo/internal"
+	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/internal/types"
 	"github.com/inngest/inngestgo/step"
@@ -799,6 +800,12 @@ func createFunctionConfigs(
 // invoke handles incoming POST calls to invoke a function, delegating to invoke() after validating
 // the request.
 func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
+	cImpl, ok := h.client.(*apiClient)
+	if !ok {
+		return errors.New("invalid client type")
+	}
+	mw := middleware.NewMiddlewareManager().Add(cImpl.Middleware...)
+
 	var sig string
 	defer r.Body.Close()
 
@@ -887,6 +894,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	resp, ops, err := invoke(
 		r.Context(),
 		h.client,
+		mw,
 		fn,
 		h.GetSigningKey(),
 		request,
@@ -1221,6 +1229,7 @@ type StreamResponse struct {
 func invoke(
 	ctx context.Context,
 	client Client,
+	mw *middleware.MiddlewareManager,
 	sf ServableFunction,
 	signingKey string,
 	input *sdkrequest.Request,
@@ -1322,6 +1331,8 @@ func invoke(
 				//
 				// XXX: I'm not very happy with using this;  it is dirty
 				if _, ok := r.(step.ControlHijack); ok {
+					// Step attempt ended (completed or errored).
+					mw.AfterExecution(ctx)
 					return
 				}
 				stack := string(debug.Stack())
@@ -1334,6 +1345,9 @@ func invoke(
 			reflect.ValueOf(fCtx),
 			inputVal,
 		})
+
+		// Function ended.
+		mw.AfterExecution(ctx)
 	}()
 
 	var err error
