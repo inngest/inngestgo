@@ -89,11 +89,6 @@ func (ge GenericEvent[D, U]) Map() map[string]any {
 		data = make(map[string]any)
 	}
 
-	var user any = ge.User
-	if reflect.TypeOf(user).Kind() == reflect.Ptr && reflect.ValueOf(user).IsNil() {
-		user = make(map[string]any)
-	}
-
 	out := map[string]any{
 		"name": ge.Name,
 		"data": data,
