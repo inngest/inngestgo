@@ -15,9 +15,7 @@ import (
 )
 
 func TestInvoke(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
+	devEnv(t)
 
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()

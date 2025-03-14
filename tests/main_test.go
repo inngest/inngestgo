@@ -29,19 +29,17 @@ func TestMain(m *testing.M) {
 }
 
 func setup() (func() error, error) {
-	os.Setenv("INNGEST_DEV", "1")
-
-	if os.Getenv("DEV_SERVER_ENABLED") == "0" {
-		// Don't start the Dev Server.
-		return func() error { return nil }, nil
-	}
-
 	stopDevServer, err := startDevServer()
 	if err != nil {
 		return nil, err
 	}
 
 	return stopDevServer, nil
+}
+
+func devEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("INNGEST_DEV", "1")
 }
 
 func startDevServer() (func() error, error) {

@@ -15,6 +15,7 @@ import (
 func TestRequestContext(t *testing.T) {
 	// Request context values are accessible within Inngest functions.
 
+	devEnv(t)
 	type contextKeyType struct{}
 	contextKey := contextKeyType{}
 
