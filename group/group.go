@@ -13,6 +13,7 @@ type Result struct {
 
 type Results []Result
 
+// AnyError returns an error if any of the results have an error.
 func (r Results) AnyError() error {
 	for _, result := range r {
 		if result.Error != nil {
