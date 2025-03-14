@@ -17,6 +17,10 @@ const (
 	defaultEventAPIOrigin = "https://inn.gs"
 )
 
+const (
+	executionVersionV2 = "2"
+)
+
 var (
 	SDKVersion = ""
 )
