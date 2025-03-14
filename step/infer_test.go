@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -18,7 +19,9 @@ func TestInferTypes(t *testing.T) {
 				"7d3bbb5cbbc497d78ad547d8d39cbea2b3b8b69e": []byte("{}"),
 			},
 		}
-		mgr := sdkrequest.NewManager(cancel, req, "")
+
+		mw := middleware.NewMiddlewareManager()
+		mgr := sdkrequest.NewManager(mw, cancel, req, "")
 		ctx = sdkrequest.SetManager(ctx, mgr)
 
 		resp, err := Infer[openai.ChatCompletionRequest, openai.ChatCompletionResponse](

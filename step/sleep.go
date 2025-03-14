@@ -18,7 +18,7 @@ type SleepOpts struct {
 func Sleep(ctx context.Context, id string, duration time.Duration) {
 	mgr := preflight(ctx)
 	op := mgr.NewOp(enums.OpcodeSleep, id, nil)
-	if _, ok := mgr.Step(op); ok {
+	if _, ok := mgr.Step(ctx, op); ok {
 		// We've already slept.
 		return
 	}
