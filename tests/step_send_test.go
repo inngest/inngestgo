@@ -12,20 +12,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSend(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
+func TestStepSend(t *testing.T) {
+	devEnv(t)
 
-	t.Run("success", func(t *testing.T) {
+	t.Run("Event type", func(t *testing.T) {
+		// Successfully send the builtin event type.
+
 		ctx := context.Background()
 		r := require.New(t)
+
+		type MyEvent = inngestgo.Event
 
 		appName := randomSuffix("app")
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
 		r.NoError(err)
 
-		var receivedEventID string
+		var receivedEvent *MyEvent
 		childEventName := randomSuffix("child-event")
 		_, err = inngestgo.CreateFunction(
 			c,
@@ -36,9 +38,9 @@ func TestSend(t *testing.T) {
 			inngestgo.EventTrigger(childEventName, nil),
 			func(
 				ctx context.Context,
-				input inngestgo.Input[inngestgo.GenericEvent[any, any]],
+				input inngestgo.Input[MyEvent],
 			) (any, error) {
-				receivedEventID = *input.Event.ID
+				receivedEvent = &input.Event
 				return nil, nil
 			},
 		)
@@ -55,11 +57,17 @@ func TestSend(t *testing.T) {
 				Retries: inngestgo.IntPtr(0),
 			},
 			inngestgo.EventTrigger(eventName, nil),
-			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+			func(
+				ctx context.Context,
+				input inngestgo.Input[MyEvent],
+			) (any, error) {
 				runID = input.InputCtx.RunID
 				sentEventID, sendErr = step.Send(ctx,
 					"send",
-					inngestgo.Event{Name: childEventName},
+					MyEvent{
+						Data: map[string]any{"msg": "hi"},
+						Name: childEventName,
+					},
 				)
 				return nil, sendErr
 			},
@@ -70,7 +78,7 @@ func TestSend(t *testing.T) {
 		defer server.Close()
 		r.NoError(sync())
 
-		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
+		_, err = c.Send(ctx, MyEvent{Name: eventName})
 		r.NoError(err)
 
 		var run *Run
@@ -83,11 +91,104 @@ func TestSend(t *testing.T) {
 			}
 
 			a.Equal(enums.RunStatusCompleted.String(), run.Status)
-			a.Equal(sentEventID, receivedEventID)
+			if !a.NotNil(receivedEvent) {
+				return
+			}
+			a.Equal(sentEventID, *receivedEvent.ID)
+			a.Equal(map[string]any{"msg": "hi"}, receivedEvent.Data)
 			a.NoError(sendErr)
 		}, 5*time.Second, time.Second)
 	})
-	t.Run("error", func(t *testing.T) {
+
+	t.Run("GenericEvent type", func(t *testing.T) {
+		// Successfully send a custom event type.
+
+		ctx := context.Background()
+		r := require.New(t)
+
+		type MyEventData = struct {
+			Msg string
+		}
+		type MyEvent = inngestgo.GenericEvent[MyEventData, any]
+
+		appName := randomSuffix("app")
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
+		r.NoError(err)
+
+		var receivedEvent *MyEvent
+		childEventName := randomSuffix("child-event")
+		_, err = inngestgo.CreateFunction(
+			c,
+			inngestgo.FunctionOpts{
+				ID:      "child-fn",
+				Retries: inngestgo.IntPtr(0),
+			},
+			inngestgo.EventTrigger(childEventName, nil),
+			func(
+				ctx context.Context,
+				input inngestgo.Input[MyEvent],
+			) (any, error) {
+				receivedEvent = &input.Event
+				return nil, nil
+			},
+		)
+		r.NoError(err)
+
+		var runID string
+		var sentEventID string
+		var sendErr error
+		eventName := randomSuffix("event")
+		_, err = inngestgo.CreateFunction(
+			c,
+			inngestgo.FunctionOpts{
+				ID:      "parent-fn",
+				Retries: inngestgo.IntPtr(0),
+			},
+			inngestgo.EventTrigger(eventName, nil),
+			func(
+				ctx context.Context,
+				input inngestgo.Input[MyEvent],
+			) (any, error) {
+				runID = input.InputCtx.RunID
+				sentEventID, sendErr = step.Send(ctx,
+					"send",
+					MyEvent{
+						Data: MyEventData{Msg: "hi"},
+						Name: childEventName,
+					},
+				)
+				return nil, sendErr
+			},
+		)
+		r.NoError(err)
+
+		server, sync := serve(t, c)
+		defer server.Close()
+		r.NoError(sync())
+
+		_, err = c.Send(ctx, MyEvent{Name: eventName})
+		r.NoError(err)
+
+		var run *Run
+		r.EventuallyWithT(func(ct *assert.CollectT) {
+			a := assert.New(ct)
+
+			run, err = getRun(runID)
+			if !a.NoError(err) {
+				return
+			}
+
+			a.Equal(enums.RunStatusCompleted.String(), run.Status)
+			if !a.NotNil(receivedEvent) {
+				return
+			}
+			a.Equal(sentEventID, *receivedEvent.ID)
+			a.Equal(MyEventData{Msg: "hi"}, receivedEvent.Data)
+			a.NoError(sendErr)
+		}, 5*time.Second, time.Second)
+	})
+
+	t.Run("error due to internal event name", func(t *testing.T) {
 		ctx := context.Background()
 		r := require.New(t)
 
@@ -142,14 +243,16 @@ func TestSend(t *testing.T) {
 	})
 }
 
-func TestSendMany(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
+func TestStepSendMany(t *testing.T) {
+	devEnv(t)
 
-	t.Run("success", func(t *testing.T) {
+	t.Run("Event type", func(t *testing.T) {
+		// Successfully send the builtin event type.
+
 		ctx := context.Background()
 		r := require.New(t)
+
+		type MyEvent = inngestgo.Event
 
 		appName := randomSuffix("app")
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
@@ -166,11 +269,14 @@ func TestSendMany(t *testing.T) {
 				Retries: inngestgo.IntPtr(0),
 			},
 			inngestgo.EventTrigger(eventName, nil),
-			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+			func(
+				ctx context.Context,
+				input inngestgo.Input[MyEvent],
+			) (any, error) {
 				runID = input.InputCtx.RunID
 				sentEventIDs, sendErr = step.SendMany(ctx,
 					"send",
-					[]inngestgo.Event{
+					[]MyEvent{
 						{Name: randomSuffix("child-event")},
 						{Name: randomSuffix("child-event")},
 					},
@@ -184,7 +290,7 @@ func TestSendMany(t *testing.T) {
 		defer server.Close()
 		r.NoError(sync())
 
-		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
+		_, err = c.Send(ctx, MyEvent{Name: eventName})
 		r.NoError(err)
 
 		var run *Run
@@ -201,7 +307,73 @@ func TestSendMany(t *testing.T) {
 			a.NoError(sendErr)
 		}, 5*time.Second, time.Second)
 	})
-	t.Run("error", func(t *testing.T) {
+
+	t.Run("GenericEvent type", func(t *testing.T) {
+		// Successfully send a custom event type.
+
+		ctx := context.Background()
+		r := require.New(t)
+
+		type MyEventData = struct {
+			Msg string
+		}
+		type MyEvent = inngestgo.GenericEvent[MyEventData, any]
+
+		appName := randomSuffix("app")
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
+		r.NoError(err)
+
+		var runID string
+		var sentEventIDs []string
+		var sendErr error
+		eventName := randomSuffix("event")
+		_, err = inngestgo.CreateFunction(
+			c,
+			inngestgo.FunctionOpts{
+				ID:      "parent-fn",
+				Retries: inngestgo.IntPtr(0),
+			},
+			inngestgo.EventTrigger(eventName, nil),
+			func(
+				ctx context.Context,
+				input inngestgo.Input[MyEvent],
+			) (any, error) {
+				runID = input.InputCtx.RunID
+				sentEventIDs, sendErr = step.SendMany(ctx,
+					"send",
+					[]MyEvent{
+						{Name: randomSuffix("child-event")},
+						{Name: randomSuffix("child-event")},
+					},
+				)
+				return nil, sendErr
+			},
+		)
+		r.NoError(err)
+
+		server, sync := serve(t, c)
+		defer server.Close()
+		r.NoError(sync())
+
+		_, err = c.Send(ctx, MyEvent{Name: eventName})
+		r.NoError(err)
+
+		var run *Run
+		r.EventuallyWithT(func(ct *assert.CollectT) {
+			a := assert.New(ct)
+
+			run, err = getRun(runID)
+			if !a.NoError(err) {
+				return
+			}
+
+			a.Equal(enums.RunStatusCompleted.String(), run.Status)
+			a.Len(sentEventIDs, 2)
+			a.NoError(sendErr)
+		}, 5*time.Second, time.Second)
+	})
+
+	t.Run("error due to internal event name", func(t *testing.T) {
 		ctx := context.Background()
 		r := require.New(t)
 

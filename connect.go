@@ -80,18 +80,21 @@ func Connect(ctx context.Context, opts ConnectOpts) (connect.WorkerConnection, e
 		return nil, fmt.Errorf("invalid handler passed")
 	}
 
+	var hashedKey []byte
+	var hashedFallbackKey []byte
 	signingKey := defaultClient.h.GetSigningKey()
 	if signingKey == "" {
-		return nil, fmt.Errorf("signing key is required")
-	}
+		if !defaultClient.h.isDev() {
+			// Signing key is only required in cloud mode.
+			return nil, fmt.Errorf("signing key is required")
+		}
+	} else {
+		var err error
+		hashedKey, err = hashedSigningKey([]byte(signingKey))
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash signing key: %w", err)
+		}
 
-	hashedKey, err := hashedSigningKey([]byte(signingKey))
-	if err != nil {
-		return nil, fmt.Errorf("failed to hash signing key: %w", err)
-	}
-
-	var hashedFallbackKey []byte
-	{
 		if fallbackKey := defaultClient.h.GetSigningKeyFallback(); fallbackKey != "" {
 			hashedFallbackKey, err = hashedSigningKey([]byte(fallbackKey))
 			if err != nil {

@@ -1,11 +1,16 @@
 package internal
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+	"reflect"
+)
 
-type Event struct {
+// GenericEvent represents a single event generated from your system to be sent to
+// Inngest.
+type GenericEvent[DATA any, USER any] struct {
 	// ID is an optional event ID used for deduplication.
 	ID *string `json:"id,omitempty"`
-
 	// Name represents the name of the event.  We recommend the following
 	// simple format: "noun.action".  For example, this may be "signup.new",
 	// "payment.succeeded", "email.sent", "post.viewed".
@@ -13,12 +18,12 @@ type Event struct {
 	// Name is required.
 	Name string `json:"name"`
 
-	// Data is a key-value map of data belonging to the event.  This should
+	// Data is a struct or key-value map of data belonging to the event.  This should
 	// include all relevant data.  For example, a "signup.new" event may include
 	// the user's email, their plan information, the signup method, etc.
-	Data map[string]any `json:"data"`
+	Data DATA `json:"data"`
 
-	// User is a key-value map of data belonging to the user that authored the
+	// User is a struct or key-value map of data belonging to the user that authored the
 	// event.  This data will be upserted into the contact store.
 	//
 	// We match the user via one of two fields: "external_id" and "email", defined
@@ -27,7 +32,7 @@ type Event struct {
 	// If these fields are present in this map the attributes specified here
 	// will be updated within Inngest, and the event will be attributed to
 	// this contact.
-	User any `json:"user,omitempty"`
+	User USER `json:"user,omitempty"`
 
 	// Timestamp is the time the event occured at *millisecond* (not nanosecond)
 	// precision.  This defaults to the time the event is received if left blank.
@@ -51,42 +56,90 @@ type Event struct {
 	Version string `json:"v,omitempty"`
 }
 
-// Validate returns  an error if the event is not well formed
-func (e *Event) Validate() error {
-	if e.Name == "" {
+// Event() turns the GenericEvent into a normal Event.
+//
+// NOTE: This is a naive inefficient implementation and should not be used in performance
+// constrained systems.
+func (ge GenericEvent[D, U]) Event() Event {
+	byt, _ := json.Marshal(ge)
+	val := Event{}
+	_ = json.Unmarshal(byt, &val)
+	return val
+}
+
+func (ge GenericEvent[D, U]) Validate() error {
+	if ge.Name == "" {
 		return fmt.Errorf("event name must be present")
 	}
-	if e.Data == nil {
-		// Ensure that e.Data is not nil.
-		e.Data = make(map[string]any)
+
+	if !isValidEventData(ge.Data) {
+		return fmt.Errorf("data must be a map or struct")
 	}
+
+	if !isValidEventData(ge.User) {
+		return fmt.Errorf("user must be a map or struct")
+	}
+
 	return nil
 }
 
-func (e Event) Map() map[string]any {
-	if e.Data == nil {
-		e.Data = make(map[string]any)
-	}
-	if e.User == nil {
-		e.User = make(map[string]any)
+func (ge GenericEvent[D, U]) Map() map[string]any {
+	var data any = ge.Data
+	if reflect.TypeOf(data).Kind() == reflect.Ptr && reflect.ValueOf(data).IsNil() {
+		data = make(map[string]any)
 	}
 
-	data := map[string]any{
-		"name": e.Name,
-		"data": e.Data,
-		"user": e.User,
+	out := map[string]any{
+		"name": ge.Name,
+		"data": data,
+		"user": ge.User,
 		// We cast to float64 because marshalling and unmarshalling from
 		// JSON automatically uses float64 as its type;  JS has no notion
 		// of ints.
-		"ts": float64(e.Timestamp),
+		"ts": float64(ge.Timestamp),
 	}
 
-	if e.Version != "" {
-		data["v"] = e.Version
+	if ge.Version != "" {
+		out["v"] = ge.Version
 	}
-	if e.ID != nil {
-		data["id"] = *e.ID
+	if ge.ID != nil {
+		out["id"] = *ge.ID
 	}
 
-	return data
+	return out
+}
+
+type Event = GenericEvent[map[string]any, map[string]any]
+
+// isValidEventData checks if the given vaue is one of: nil, map, or struct.
+func isValidEventData(v any) bool {
+	if v == nil {
+		return true
+	}
+
+	isDataMap := reflect.TypeOf(v).Kind() == reflect.Map
+	if isDataMap {
+		return true
+	}
+
+	isDataStruct := reflect.TypeOf(v).Kind() == reflect.Struct
+	if isDataStruct {
+		return true
+	}
+
+	if reflect.TypeOf(v).Kind() == reflect.Ptr {
+		if reflect.ValueOf(v).IsNil() {
+			return false
+		}
+
+		val := reflect.ValueOf(v).Elem()
+		if val.Kind() == reflect.Map {
+			return true
+		}
+		if val.Kind() == reflect.Struct {
+			return true
+		}
+	}
+
+	return false
 }

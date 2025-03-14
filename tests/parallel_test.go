@@ -13,10 +13,7 @@ import (
 )
 
 func TestParallel(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
+	devEnv(t)
 	t.Run("successful with a mix of step kinds", func(t *testing.T) {
 		ctx := context.Background()
 		r := require.New(t)

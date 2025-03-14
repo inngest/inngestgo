@@ -1,6 +1,6 @@
 module github.com/inngest/inngestgo
 
-go 1.23.2
+go 1.24
 
 require (
 	github.com/coder/websocket v1.8.12

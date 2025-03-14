@@ -15,6 +15,8 @@ import (
 )
 
 func TestClientMiddleware(t *testing.T) {
+	devEnv(t)
+
 	t.Run("no hooks", func(t *testing.T) {
 		// Nothing errors when 0 hooks are provided.
 
@@ -214,8 +216,6 @@ func TestClientMiddleware(t *testing.T) {
 	})
 
 	t.Run("connect", func(t *testing.T) {
-		t.Skip("skipping until we can use Connect without specifying a logger or signing key")
-
 		r := require.New(t)
 		ctx := context.Background()
 
