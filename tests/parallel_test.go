@@ -82,7 +82,15 @@ func TestParallel(t *testing.T) {
 						})
 					},
 				)
-				err := results.AnyError()
+				var err error
+				for _, r := range results {
+					if r.Error != nil {
+						if r.Error == step.ErrEventNotReceived {
+							continue
+						}
+						err = r.Error
+					}
+				}
 				if err != nil {
 					return nil, err
 				}
