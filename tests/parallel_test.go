@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ func TestParallel(t *testing.T) {
 		var step1BCounter int
 		var stepAfterCounter int
 		var results group.Results
+		var requestCount int32
 
 		appName := randomSuffix("TestParallel")
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
@@ -52,6 +54,8 @@ func TestParallel(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+				atomic.AddInt32(&requestCount, 1)
+
 				results = group.Parallel(
 					ctx,
 					func(ctx context.Context) (any, error) {
@@ -128,6 +132,7 @@ func TestParallel(t *testing.T) {
 			{Value: nil},
 			{Error: step.ErrEventNotReceived},
 		})
+		r.Equal(int(requestCount), 6)
 	})
 
 	t.Run("panic", func(t *testing.T) {
