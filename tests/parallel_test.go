@@ -200,9 +200,6 @@ func TestParallel(t *testing.T) {
 		})
 		r.NoError(err)
 
-		// Use a channel to block step 2 until step 1b has finished.
-		ch1B := make(chan struct{})
-
 		var logs []string
 		var step1ACounter int
 		var step1BCounter int
@@ -231,14 +228,13 @@ func TestParallel(t *testing.T) {
 						return step.Run(ctx, "1b", func(ctx context.Context) (any, error) {
 							logs = append(logs, "1b")
 							step1BCounter++
-							ch1B <- struct{}{}
 							return nil, nil
 						})
 					},
 					func(ctx context.Context) (any, error) {
 						return step.Run(ctx, "2", func(ctx context.Context) (any, error) {
-							// Wait for 1b to finish
-							<-ch1B
+							// Sleep to better demonstrate how step 1b runs after step 2.
+							time.Sleep(time.Second)
 
 							logs = append(logs, "2")
 							step2Counter++
@@ -273,6 +269,10 @@ func TestParallel(t *testing.T) {
 		r.Equal(1, step1ACounter)
 		r.Equal(1, step1BCounter)
 		r.Equal(1, step2Counter)
-		r.Equal(logs, []string{"1a", "1b", "2", "after"})
+
+		// Even though it looks like 1b would run before 2, it actually runs
+		// after. This is because of the way parallelism works with step
+		// discovery.
+		r.Equal(logs, []string{"1a", "2", "1b", "after"})
 	})
 }
