@@ -8,10 +8,10 @@ import (
 )
 
 // Send sends an event to Inngest.
-func Send[D any, U any](
+func Send[DATA any](
 	ctx context.Context,
 	id string,
-	event internal.GenericEvent[D, U],
+	event internal.GenericEvent[DATA],
 ) (string, error) {
 	return Run(ctx, id, func(ctx context.Context) (string, error) {
 		sender, ok := internal.EventSenderFromContext(ctx)
@@ -24,10 +24,10 @@ func Send[D any, U any](
 }
 
 // SendMany sends a batch of events to Inngest.
-func SendMany[D any, U any](
+func SendMany[DATA any](
 	ctx context.Context,
 	id string,
-	events []internal.GenericEvent[D, U],
+	events []internal.GenericEvent[DATA],
 ) ([]string, error) {
 	return Run(ctx, id, func(ctx context.Context) ([]string, error) {
 		sender, ok := internal.EventSenderFromContext(ctx)

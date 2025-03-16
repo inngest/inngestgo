@@ -32,11 +32,13 @@ func setEnvVars(t *testing.T) {
 }
 
 type EventA struct {
-	Name string `json:"name"`
-	Data struct {
-		Foo string `json:"foo"`
-		Bar string `json:"bar"`
-	} `json:"data"`
+	Name string     `json:"name"`
+	Data EventAData `json:"data"`
+}
+
+type EventAData struct {
+	Foo string `json:"foo"`
+	Bar string `json:"bar"`
 }
 
 type EventB struct{}
@@ -54,7 +56,7 @@ func TestRegister(t *testing.T) {
 			ID: "my-func-name",
 		},
 		EventTrigger("test/event.a", nil),
-		func(ctx context.Context, input Input[EventA]) (any, error) {
+		func(ctx context.Context, input Input[map[string]any]) (any, error) {
 			return nil, nil
 		},
 	)
@@ -64,7 +66,7 @@ func TestRegister(t *testing.T) {
 		c,
 		FunctionOpts{ID: "another-func"},
 		EventTrigger("test/event.b", nil),
-		func(ctx context.Context, input Input[EventB]) (any, error) {
+		func(ctx context.Context, input Input[map[string]any]) (any, error) {
 			return nil, nil
 		},
 	)
@@ -74,7 +76,7 @@ func TestRegister(t *testing.T) {
 		c,
 		FunctionOpts{ID: "batch-func", BatchEvents: &inngest.EventBatchConfig{MaxSize: 20, Timeout: "10s"}},
 		EventTrigger("test/batch.a", nil),
-		func(ctx context.Context, input Input[EventC]) (any, error) {
+		func(ctx context.Context, input Input[map[string]any]) (any, error) {
 			return nil, nil
 		},
 	)
@@ -92,10 +94,7 @@ func TestInvoke(t *testing.T) {
 
 		input := EventA{
 			Name: "test/event.a",
-			Data: struct {
-				Foo string `json:"foo"`
-				Bar string `json:"bar"`
-			}{
+			Data: EventAData{
 				Foo: "potato",
 				Bar: "squished",
 			},
@@ -107,7 +106,7 @@ func TestInvoke(t *testing.T) {
 			c,
 			FunctionOpts{ID: "my-func-name"},
 			EventTrigger("test/event.a", nil),
-			func(ctx context.Context, event Input[EventA]) (any, error) {
+			func(ctx context.Context, event Input[EventAData]) (any, error) {
 				require.EqualValues(t, event.Event, input)
 				return resp, nil
 			},
@@ -129,10 +128,7 @@ func TestInvoke(t *testing.T) {
 		r.NoError(err)
 		input := EventA{
 			Name: "test/event.a",
-			Data: struct {
-				Foo string `json:"foo"`
-				Bar string `json:"bar"`
-			}{
+			Data: EventAData{
 				Foo: "potato",
 				Bar: "squished",
 			},
@@ -144,7 +140,7 @@ func TestInvoke(t *testing.T) {
 			c,
 			FunctionOpts{ID: "my-func-name", BatchEvents: &inngest.EventBatchConfig{MaxSize: 5, Timeout: "10s"}},
 			EventTrigger("test/event.a", nil),
-			func(ctx context.Context, event Input[EventA]) (any, error) {
+			func(ctx context.Context, event Input[EventAData]) (any, error) {
 				require.EqualValues(t, event.Event, input)
 				require.EqualValues(t, len(event.Events), 5)
 				return resp, nil
@@ -166,10 +162,7 @@ func TestInvoke(t *testing.T) {
 		r.NoError(err)
 		input := EventA{
 			Name: "test/event.a",
-			Data: struct {
-				Foo string `json:"foo"`
-				Bar string `json:"bar"`
-			}{
+			Data: EventAData{
 				Foo: "potato",
 				Bar: "squished",
 			},
@@ -181,9 +174,9 @@ func TestInvoke(t *testing.T) {
 			c,
 			FunctionOpts{ID: "my-func-name"},
 			EventTrigger("test/event.a", nil),
-			func(ctx context.Context, event Input[*EventA]) (any, error) {
+			func(ctx context.Context, event Input[EventAData]) (any, error) {
 				require.NotNil(t, event.Event)
-				require.EqualValues(t, *event.Event, input)
+				require.EqualValues(t, event.Event, input)
 				return resp, nil
 			},
 		)
@@ -206,10 +199,7 @@ func TestInvoke(t *testing.T) {
 		resp := map[string]any{"test": true}
 		input := EventA{
 			Name: "test/event.a",
-			Data: struct {
-				Foo string `json:"foo"`
-				Bar string `json:"bar"`
-			}{
+			Data: EventAData{
 				Foo: "potato",
 				Bar: "squished",
 			},
@@ -218,15 +208,11 @@ func TestInvoke(t *testing.T) {
 			c,
 			FunctionOpts{ID: "my-func-name"},
 			EventTrigger("test/event.a", nil),
-			func(ctx context.Context, event Input[any]) (any, error) {
+			func(ctx context.Context, event Input[map[string]any]) (any, error) {
 				require.NotNil(t, event.Event)
-				val, ok := event.Event.(map[string]any)
-				require.True(t, ok)
-				require.EqualValues(t, input.Name, val["name"])
-				val, ok = val["data"].(map[string]any)
-				require.True(t, ok)
-				require.EqualValues(t, input.Data.Foo, val["foo"])
-				require.EqualValues(t, input.Data.Bar, val["bar"])
+				require.EqualValues(t, input.Name, event.Event.Name)
+				require.EqualValues(t, input.Data.Foo, event.Event.Data["foo"])
+				require.EqualValues(t, input.Data.Bar, event.Event.Data["bar"])
 				return resp, nil
 			},
 		)
@@ -262,12 +248,9 @@ func TestInvoke(t *testing.T) {
 			EventTrigger("test/event.a", nil),
 			func(ctx context.Context, event Input[map[string]any]) (any, error) {
 				require.NotNil(t, event.Event)
-				val := event.Event
-				require.EqualValues(t, input.Name, val["name"])
-				val, ok := val["data"].(map[string]any)
-				require.True(t, ok)
-				require.EqualValues(t, input.Data.Foo, val["foo"])
-				require.EqualValues(t, input.Data.Bar, val["bar"])
+				require.EqualValues(t, input.Name, event.Event.Name)
+				require.EqualValues(t, input.Data.Foo, event.Event.Data["foo"])
+				require.EqualValues(t, input.Data.Bar, event.Event.Data["bar"])
 				return resp, nil
 			},
 		)
@@ -313,7 +296,7 @@ func TestInvoke(t *testing.T) {
 			c,
 			FunctionOpts{ID: "my-fn"},
 			EventTrigger("my-event", nil),
-			func(ctx context.Context, event Input[any]) (any, error) {
+			func(ctx context.Context, event Input[map[string]any]) (any, error) {
 				panic("oh no!")
 			},
 		)
@@ -345,10 +328,7 @@ func TestServe(t *testing.T) {
 
 	event := EventA{
 		Name: "test/event.a",
-		Data: struct {
-			Foo string `json:"foo"`
-			Bar string `json:"bar"`
-		}{
+		Data: EventAData{
 			Foo: "potato",
 			Bar: "squished",
 		},
@@ -433,7 +413,7 @@ func TestSteps(t *testing.T) {
 		c,
 		FunctionOpts{ID: "step-function"},
 		EventTrigger("test/event.a", nil),
-		func(ctx context.Context, input Input[EventA]) (any, error) {
+		func(ctx context.Context, input Input[EventAData]) (any, error) {
 			atomic.AddInt32(&fnCt, 1)
 			stepA, _ := step.Run(ctx, "First step", func(ctx context.Context) (map[string]any, error) {
 				atomic.AddInt32(&aCt, 1)

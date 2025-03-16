@@ -40,7 +40,7 @@ func TestInvoke(t *testing.T) {
 			inngestgo.EventTrigger("never", nil),
 			func(
 				ctx context.Context,
-				input inngestgo.Input[inngestgo.GenericEvent[ChildEventData, any]],
+				input inngestgo.Input[ChildEventData],
 			) (any, error) {
 				return input.Event.Data.Message, nil
 			},

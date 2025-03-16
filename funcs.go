@@ -9,6 +9,7 @@ import (
 
 	"github.com/gosimple/slug"
 	"github.com/inngest/inngest/pkg/inngest"
+	"github.com/inngest/inngestgo/internal"
 )
 
 // Slugify converts a string to a slug. This is only useful for replicating the
@@ -292,10 +293,10 @@ type ServableFunction interface {
 
 // Input is the input data passed to your function.  It is comprised of the triggering event
 // and call context.
-type Input[T any] struct {
-	Event    T        `json:"event"`
-	Events   []T      `json:"events"`
-	InputCtx InputCtx `json:"ctx"`
+type Input[DATA any] struct {
+	Event    internal.GenericEvent[DATA]   `json:"event"`
+	Events   []internal.GenericEvent[DATA] `json:"events"`
+	InputCtx InputCtx                      `json:"ctx"`
 }
 
 type InputCtx struct {

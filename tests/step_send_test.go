@@ -38,7 +38,7 @@ func TestStepSend(t *testing.T) {
 			inngestgo.EventTrigger(childEventName, nil),
 			func(
 				ctx context.Context,
-				input inngestgo.Input[MyEvent],
+				input inngestgo.Input[map[string]any],
 			) (any, error) {
 				receivedEvent = &input.Event
 				return nil, nil
@@ -59,7 +59,7 @@ func TestStepSend(t *testing.T) {
 			inngestgo.EventTrigger(eventName, nil),
 			func(
 				ctx context.Context,
-				input inngestgo.Input[MyEvent],
+				input inngestgo.Input[any],
 			) (any, error) {
 				runID = input.InputCtx.RunID
 				sentEventID, sendErr = step.Send(ctx,
@@ -109,7 +109,7 @@ func TestStepSend(t *testing.T) {
 		type MyEventData = struct {
 			Msg string
 		}
-		type MyEvent = inngestgo.GenericEvent[MyEventData, any]
+		type MyEvent = inngestgo.GenericEvent[MyEventData]
 
 		appName := randomSuffix("app")
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
@@ -126,7 +126,7 @@ func TestStepSend(t *testing.T) {
 			inngestgo.EventTrigger(childEventName, nil),
 			func(
 				ctx context.Context,
-				input inngestgo.Input[MyEvent],
+				input inngestgo.Input[MyEventData],
 			) (any, error) {
 				receivedEvent = &input.Event
 				return nil, nil
@@ -147,7 +147,7 @@ func TestStepSend(t *testing.T) {
 			inngestgo.EventTrigger(eventName, nil),
 			func(
 				ctx context.Context,
-				input inngestgo.Input[MyEvent],
+				input inngestgo.Input[MyEventData],
 			) (any, error) {
 				runID = input.InputCtx.RunID
 				sentEventID, sendErr = step.Send(ctx,
@@ -271,7 +271,7 @@ func TestStepSendMany(t *testing.T) {
 			inngestgo.EventTrigger(eventName, nil),
 			func(
 				ctx context.Context,
-				input inngestgo.Input[MyEvent],
+				input inngestgo.Input[any],
 			) (any, error) {
 				runID = input.InputCtx.RunID
 				sentEventIDs, sendErr = step.SendMany(ctx,
@@ -317,7 +317,7 @@ func TestStepSendMany(t *testing.T) {
 		type MyEventData = struct {
 			Msg string
 		}
-		type MyEvent = inngestgo.GenericEvent[MyEventData, any]
+		type MyEvent = inngestgo.GenericEvent[MyEventData]
 
 		appName := randomSuffix("app")
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
@@ -336,7 +336,7 @@ func TestStepSendMany(t *testing.T) {
 			inngestgo.EventTrigger(eventName, nil),
 			func(
 				ctx context.Context,
-				input inngestgo.Input[MyEvent],
+				input inngestgo.Input[MyEventData],
 			) (any, error) {
 				runID = input.InputCtx.RunID
 				sentEventIDs, sendErr = step.SendMany(ctx,

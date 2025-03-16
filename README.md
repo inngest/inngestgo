@@ -82,7 +82,10 @@ func main() {
 // It is invoked by Inngest, with each step being backed by Inngest's orchestrator.
 // Function state is automatically managed, and persists across server restarts,
 // cloud migrations, and language changes.
-func AccountCreated(ctx context.Context, input inngestgo.Input[AccountCreatedEvent]) (any, error) {
+func AccountCreated(
+	ctx context.Context,
+	input inngestgo.Input[AccountCreatedEventData],
+) (any, error) {
 	// Sleep for a second, minute, hour, week across server restarts.
 	step.Sleep(ctx, "initial-delay", time.Second)
 
@@ -136,16 +139,16 @@ func AccountCreated(ctx context.Context, input inngestgo.Input[AccountCreatedEve
 //	type AccountCreatedEvent struct {
 //		Name      string                  `json:"name"`
 //		Data      AccountCreatedEventData `json:"data"`
-//		User      any                     `json:"user"`
+//		User      map[string]any          `json:"user"`
 //		Timestamp int64                   `json:"ts,omitempty"`
 //		Version   string                  `json:"v,omitempty"`
 //	}
-type AccountCreatedEvent inngestgo.GenericEvent[AccountCreatedEventData, any]
+type AccountCreatedEvent inngestgo.GenericEvent[AccountCreatedEventData]
 type AccountCreatedEventData struct {
 	AccountID string
 }
 
-type FunctionCreatedEvent inngestgo.GenericEvent[FunctionCreatedEventData, any]
+type FunctionCreatedEvent inngestgo.GenericEvent[FunctionCreatedEventData]
 type FunctionCreatedEventData struct {
 	FunctionID string
 }
