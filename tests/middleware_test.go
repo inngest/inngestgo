@@ -265,4 +265,64 @@ func TestClientMiddleware(t *testing.T) {
 			a.Equal(enums.RunStatusCompleted.String(), run.Status)
 		}, 5*time.Second, 10*time.Millisecond)
 	})
+
+	t.Run("multiple", func(t *testing.T) {
+		r := require.New(t)
+		ctx := context.Background()
+
+		logs := []string{}
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+			AppID: randomSuffix("app"),
+			Middleware: []experimental.Middleware{
+				{
+					AfterExecution: func(ctx context.Context) {
+						logs = append(logs, "1: AfterExecution")
+					},
+					BeforeExecution: func(ctx context.Context) {
+						logs = append(logs, "1: BeforeExecution")
+					},
+				},
+				{
+					AfterExecution: func(ctx context.Context) {
+						logs = append(logs, "2: AfterExecution")
+					},
+					BeforeExecution: func(ctx context.Context) {
+						logs = append(logs, "2: BeforeExecution")
+					},
+				},
+			},
+		})
+		r.NoError(err)
+
+		eventName := randomSuffix("event")
+		_, err = inngestgo.CreateFunction(
+			c,
+			inngestgo.FunctionOpts{
+				ID:      "fn",
+				Retries: inngestgo.IntPtr(0),
+			},
+			inngestgo.EventTrigger(eventName, nil),
+			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+				return nil, nil
+			},
+		)
+		r.NoError(err)
+
+		server, sync := serve(t, c)
+		defer server.Close()
+		r.NoError(sync())
+
+		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
+		r.NoError(err)
+
+		r.EventuallyWithT(func(ct *assert.CollectT) {
+			a := assert.New(ct)
+			a.Equal([]string{
+				"1: BeforeExecution",
+				"2: BeforeExecution",
+				"2: AfterExecution",
+				"1: AfterExecution",
+			}, logs)
+		}, 5*time.Second, 10*time.Millisecond)
+	})
 }

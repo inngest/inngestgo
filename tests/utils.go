@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/inngest/inngestgo"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -45,32 +47,26 @@ func getRun(id string) (*Run, error) {
 	return &body.Data, nil
 }
 
-func waitForRun(id *string, status string) (*Run, error) {
-	start := time.Now()
-	timeout := 5 * time.Second
+func waitForRun(t *testing.T, id *string, status string) *Run {
+	r := require.New(t)
 
-	for {
-		if time.Now().After(start.Add(timeout)) {
-			break
+	var run *Run
+	r.EventuallyWithT(func(ct *assert.CollectT) {
+		a := assert.New(ct)
+
+		if !a.NotNil(id, "run ID is nil") {
+			return
 		}
 
-		if id == nil || *id != "" {
-			run, err := getRun(*id)
-			if err != nil {
-				return nil, err
-			}
-			if run.Status == status {
-				return run, nil
-			}
+		var err error
+		run, err = getRun(*id)
+		if !a.NoError(err) {
+			return
 		}
-		<-time.After(100 * time.Millisecond)
-	}
 
-	if id == nil || *id == "" {
-		return nil, fmt.Errorf("run ID is empty")
-	}
-
-	return nil, fmt.Errorf("run did not reach status %s", status)
+		a.Equal(status, run.Status)
+	}, 5*time.Second, time.Second)
+	return run
 }
 
 func randomSuffix(s string) string {

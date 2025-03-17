@@ -16,8 +16,11 @@ func NewMiddlewareManager() *MiddlewareManager {
 // MiddlewareManager is a thin wrapper around middleware, allowing our business
 // logic to be oblivious of how many middlewares exist.
 type MiddlewareManager struct {
+	// idempotentHooks used to ensure idempotent hooks are only called once per
+	// request.
 	idempotentHooks *types.Set[string]
-	items           []Middleware
+
+	items []Middleware
 }
 
 // Add adds middleware to the manager.
@@ -27,7 +30,11 @@ func (m *MiddlewareManager) Add(mw ...Middleware) *MiddlewareManager {
 }
 
 func (m *MiddlewareManager) AfterExecution(ctx context.Context) {
-	for _, mw := range m.items {
+	for i := range m.items {
+		// We iterate in reverse order so that the innermost middleware is
+		// executed first.
+		mw := m.items[len(m.items)-1-i]
+
 		if mw.AfterExecution != nil {
 			mw.AfterExecution(ctx)
 		}

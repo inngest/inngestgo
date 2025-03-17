@@ -33,7 +33,7 @@ func Run[T any](
 ) (T, error) {
 	targetID := getTargetStepID(ctx)
 	mgr := preflight(ctx)
-	op := mgr.NewOp(enums.OpcodeStep, id, nil)
+	op := mgr.NewOp(enums.OpcodeStepRun, id, nil)
 	hashedID := op.MustHash()
 
 	if val, ok := mgr.Step(ctx, op); ok {
