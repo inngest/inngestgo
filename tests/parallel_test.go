@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngestgo"
 	"github.com/inngest/inngestgo/group"
 	"github.com/inngest/inngestgo/step"
@@ -182,9 +183,7 @@ func TestParallel(t *testing.T) {
 		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
 		r.NoError(err)
 
-		run, err := waitForRun(&runID, StatusFailed)
-		r.NoError(err)
-
+		run := waitForRun(t, &runID, enums.RunStatusFailed.String())
 		output, ok := run.Output.(map[string]any)
 		r.True(ok)
 
