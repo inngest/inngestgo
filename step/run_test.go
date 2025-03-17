@@ -45,7 +45,7 @@ func TestStep(t *testing.T) {
 			// indexes
 			name = "struct"
 			op := sdkrequest.UnhashedOp{
-				Op: enums.OpcodeStep,
+				Op: enums.OpcodeStepRun,
 				ID: name,
 			}
 
@@ -65,7 +65,7 @@ func TestStep(t *testing.T) {
 			// indexes
 			name = "struct ptrs"
 			op := sdkrequest.UnhashedOp{
-				Op: enums.OpcodeStep,
+				Op: enums.OpcodeStepRun,
 				ID: name,
 			}
 
@@ -85,7 +85,7 @@ func TestStep(t *testing.T) {
 				// indexes
 				name = "slices-data"
 				op := sdkrequest.UnhashedOp{
-					Op: enums.OpcodeStep,
+					Op: enums.OpcodeStepRun,
 					ID: name,
 				}
 
@@ -109,7 +109,7 @@ func TestStep(t *testing.T) {
 				// indexes
 				name = "slices-raw"
 				op := sdkrequest.UnhashedOp{
-					Op: enums.OpcodeStep,
+					Op: enums.OpcodeStepRun,
 					ID: name,
 				}
 
@@ -132,7 +132,7 @@ func TestStep(t *testing.T) {
 			// indexes
 			name = "ints"
 			op := sdkrequest.UnhashedOp{
-				Op: enums.OpcodeStep,
+				Op: enums.OpcodeStepRun,
 				ID: name,
 			}
 
@@ -155,7 +155,7 @@ func TestStep(t *testing.T) {
 			// indexes
 			name = "nil"
 			op := sdkrequest.UnhashedOp{
-				Op: enums.OpcodeStep,
+				Op: enums.OpcodeStepRun,
 				ID: name,
 			}
 
@@ -196,7 +196,7 @@ func TestStep(t *testing.T) {
 			}()
 
 			op := sdkrequest.UnhashedOp{
-				Op: enums.OpcodeStep,
+				Op: enums.OpcodeStepRun,
 				ID: name,
 			}
 
