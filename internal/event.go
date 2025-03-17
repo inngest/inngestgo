@@ -64,12 +64,9 @@ func (ge GenericEvent[D]) Validate() error {
 		return fmt.Errorf("event name must be present")
 	}
 
-	if !isValidEventData(ge.Data) {
-		return fmt.Errorf("data must be a map or struct")
-	}
-
-	if !isValidEventData(ge.User) {
-		return fmt.Errorf("user must be a map or struct")
+	err := ValidateEventDataType(ge.Data)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -103,35 +100,36 @@ func (ge GenericEvent[D]) Map() map[string]any {
 
 type Event = GenericEvent[map[string]any]
 
-// isValidEventData checks if the given vaue is one of: nil, map, or struct.
-func isValidEventData(v any) bool {
+// ValidateEventDataType checks if the given type is one of: nil, map, or
+// struct.
+func ValidateEventDataType(v any) error {
 	if v == nil {
-		return true
+		return nil
 	}
 
 	isDataMap := reflect.TypeOf(v).Kind() == reflect.Map
 	if isDataMap {
-		return true
+		return nil
 	}
 
 	isDataStruct := reflect.TypeOf(v).Kind() == reflect.Struct
 	if isDataStruct {
-		return true
+		return nil
 	}
 
 	if reflect.TypeOf(v).Kind() == reflect.Ptr {
 		if reflect.ValueOf(v).IsNil() {
-			return false
+			return fmt.Errorf("event data must be a map or struct")
 		}
 
 		val := reflect.ValueOf(v).Elem()
 		if val.Kind() == reflect.Map {
-			return true
+			return nil
 		}
 		if val.Kind() == reflect.Struct {
-			return true
+			return nil
 		}
 	}
 
-	return false
+	return fmt.Errorf("event data must be a map or struct")
 }

@@ -222,8 +222,10 @@ func CreateFunction[T any](
 	}
 
 	zt := sf.ZeroType()
-	if zt.Interface() == nil && zt.NumMethod() > 0 {
-		return nil, errors.New("You cannot use an interface type as the input within an Inngest function.")
+	eventDataField := zt.FieldByName("Data")
+	err = internal.ValidateEventDataType(eventDataField.Interface())
+	if err != nil {
+		return nil, err
 	}
 
 	// TODO: This feels wrong but is necessary since there isn't a

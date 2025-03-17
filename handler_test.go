@@ -31,18 +31,15 @@ func setEnvVars(t *testing.T) {
 	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", string(testKeyFallback))
 }
 
-type EventA struct {
-	Name string     `json:"name"`
-	Data EventAData `json:"data"`
-}
+type EventA = GenericEvent[EventAData]
 
 type EventAData struct {
 	Foo string `json:"foo"`
 	Bar string `json:"bar"`
 }
 
-type EventB struct{}
-type EventC struct{}
+type EventB = GenericEvent[map[string]any]
+type EventC = GenericEvent[map[string]any]
 
 func TestRegister(t *testing.T) {
 	r := require.New(t)
@@ -107,7 +104,7 @@ func TestInvoke(t *testing.T) {
 			FunctionOpts{ID: "my-func-name"},
 			EventTrigger("test/event.a", nil),
 			func(ctx context.Context, event Input[EventAData]) (any, error) {
-				require.EqualValues(t, event.Event, input)
+				require.EqualValues(t, input, event.Event)
 				return resp, nil
 			},
 		)
@@ -267,7 +264,7 @@ func TestInvoke(t *testing.T) {
 
 	// This is silly and no one should ever do this.  The tests are here
 	// so that we ensure the code panics on creation.
-	t.Run("With an io.Reader as a function type", func(t *testing.T) {
+	t.Run("With an int as the event data type", func(t *testing.T) {
 		// Creating a function with an interface is impossible.  This can
 		// never go into production, and you should always be testing this
 		// before deploying to Inngest.
@@ -279,11 +276,12 @@ func TestInvoke(t *testing.T) {
 			c,
 			FunctionOpts{ID: "my-func-name"},
 			EventTrigger("test/event.a", nil),
-			func(ctx context.Context, event Input[io.Reader]) (any, error) {
+			func(ctx context.Context, event Input[int]) (any, error) {
 				return nil, nil
 			},
 		)
 		r.Error(err)
+		r.Equal("event data must be a map or struct", err.Error())
 	})
 
 	t.Run("captures panic stack", func(t *testing.T) {
@@ -341,7 +339,7 @@ func TestServe(t *testing.T) {
 		c,
 		FunctionOpts{ID: "my-servable-function"},
 		EventTrigger("test/event.a", nil),
-		func(ctx context.Context, input Input[EventA]) (any, error) {
+		func(ctx context.Context, input Input[EventAData]) (any, error) {
 			atomic.AddInt32(&called, 1)
 			require.EqualValues(t, event, input.Event)
 			return result, nil

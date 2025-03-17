@@ -4,7 +4,7 @@ itest:
 
 .PHONY: utest
 utest:
-	go test -test.v -short
+	go test $(go list ./... | grep -v "/tests") -v -race -count=1 -short
 
 .PHONY: lint
 lint:
