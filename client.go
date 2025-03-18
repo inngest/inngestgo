@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+
+	"github.com/inngest/inngestgo/experimental"
 )
 
 const (
@@ -92,6 +94,9 @@ type ClientOpts struct {
 
 	// Dev is whether to use the Dev Server.
 	Dev *bool
+
+	// Middleware is a list of middleware to apply to the client.
+	Middleware []experimental.Middleware
 }
 
 func (c ClientOpts) validate() error {

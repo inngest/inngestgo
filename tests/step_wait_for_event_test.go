@@ -96,7 +96,6 @@ func TestStepWaitForEvent(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				fmt.Println("run")
 				runID = input.InputCtx.RunID
 				stepResult, stepError = step.WaitForEvent[map[string]any](ctx,
 					"a",

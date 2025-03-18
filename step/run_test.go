@@ -7,6 +7,7 @@ import (
 
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/execution/state"
+	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/stretchr/testify/require"
 )
@@ -16,7 +17,9 @@ func TestStep(t *testing.T) {
 	req := &sdkrequest.Request{
 		Steps: map[string]json.RawMessage{},
 	}
-	mgr := sdkrequest.NewManager(cancel, req, "")
+
+	mw := middleware.NewMiddlewareManager()
+	mgr := sdkrequest.NewManager(mw, cancel, req, "")
 	ctx = sdkrequest.SetManager(ctx, mgr)
 
 	type response struct {
@@ -178,7 +181,8 @@ func TestStep(t *testing.T) {
 		t.Run("Appends opcodes", func(t *testing.T) {
 			name = "new step must append"
 
-			mgr := sdkrequest.NewManager(cancel, req, "")
+			mw := middleware.NewMiddlewareManager()
+			mgr := sdkrequest.NewManager(mw, cancel, req, "")
 			ctx = sdkrequest.SetManager(ctx, mgr)
 
 			func() {
