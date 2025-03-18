@@ -25,8 +25,10 @@ type MiddlewareManager struct {
 }
 
 // Add adds middleware to the manager.
-func (m *MiddlewareManager) Add(mw ...*Middleware) *MiddlewareManager {
-	m.items = append(m.items, mw...)
+func (m *MiddlewareManager) Add(mw ...func() *Middleware) *MiddlewareManager {
+	for _, mw := range mw {
+		m.items = append(m.items, mw())
+	}
 	return m
 }
 

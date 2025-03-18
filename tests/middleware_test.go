@@ -24,11 +24,13 @@ func TestClientMiddleware(t *testing.T) {
 		r := require.New(t)
 		ctx := context.Background()
 
+		newMW := func() *experimental.Middleware {
+			return &experimental.Middleware{}
+		}
+
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
-			AppID: randomSuffix("app"),
-			Middleware: []*experimental.Middleware{
-				{},
-			},
+			AppID:      randomSuffix("app"),
+			Middleware: []func() *experimental.Middleware{newMW},
 		})
 		r.NoError(err)
 
@@ -70,24 +72,26 @@ func TestClientMiddleware(t *testing.T) {
 		ctx := context.Background()
 
 		logs := []string{}
-		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
-			AppID: randomSuffix("app"),
-			Middleware: []*experimental.Middleware{
-				{
-					AfterExecution: func(ctx context.Context) {
-						logs = append(logs, "mw: AfterExecution")
-					},
-					BeforeExecution: func(ctx context.Context) {
-						logs = append(logs, "mw: BeforeExecution")
-					},
-					TransformInput: func(
-						input *middleware.TransformableInput,
-						fn inngestgo.ServableFunction,
-					) {
-						logs = append(logs, "mw: TransformInput")
-					},
+		newMW := func() *experimental.Middleware {
+			return &experimental.Middleware{
+				AfterExecution: func(ctx context.Context) {
+					logs = append(logs, "mw: AfterExecution")
 				},
-			},
+				BeforeExecution: func(ctx context.Context) {
+					logs = append(logs, "mw: BeforeExecution")
+				},
+				TransformInput: func(
+					input *middleware.TransformableInput,
+					fn inngestgo.ServableFunction,
+				) {
+					logs = append(logs, "mw: TransformInput")
+				},
+			}
+		}
+
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+			AppID:      randomSuffix("app"),
+			Middleware: []func() *experimental.Middleware{newMW},
 		})
 		r.NoError(err)
 
@@ -164,24 +168,26 @@ func TestClientMiddleware(t *testing.T) {
 		ctx := context.Background()
 
 		logs := []string{}
-		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
-			AppID: randomSuffix("app"),
-			Middleware: []*experimental.Middleware{
-				{
-					AfterExecution: func(ctx context.Context) {
-						logs = append(logs, "mw: AfterExecution")
-					},
-					BeforeExecution: func(ctx context.Context) {
-						logs = append(logs, "mw: BeforeExecution")
-					},
-					TransformInput: func(
-						input *middleware.TransformableInput,
-						fn inngestgo.ServableFunction,
-					) {
-						logs = append(logs, "mw: TransformInput")
-					},
+		newMW := func() *experimental.Middleware {
+			return &experimental.Middleware{
+				AfterExecution: func(ctx context.Context) {
+					logs = append(logs, "mw: AfterExecution")
 				},
-			},
+				BeforeExecution: func(ctx context.Context) {
+					logs = append(logs, "mw: BeforeExecution")
+				},
+				TransformInput: func(
+					input *middleware.TransformableInput,
+					fn inngestgo.ServableFunction,
+				) {
+					logs = append(logs, "mw: TransformInput")
+				},
+			}
+		}
+
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+			AppID:      randomSuffix("app"),
+			Middleware: []func() *experimental.Middleware{newMW},
 		})
 		r.NoError(err)
 
@@ -237,14 +243,16 @@ func TestClientMiddleware(t *testing.T) {
 		r := require.New(t)
 		ctx := context.Background()
 
+		newMW := func() *experimental.Middleware {
+			return &experimental.Middleware{
+				AfterExecution:  func(ctx context.Context) {},
+				BeforeExecution: func(ctx context.Context) {},
+			}
+		}
+
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
-			AppID: randomSuffix("app"),
-			Middleware: []*experimental.Middleware{
-				{
-					AfterExecution:  func(ctx context.Context) {},
-					BeforeExecution: func(ctx context.Context) {},
-				},
-			},
+			AppID:      randomSuffix("app"),
+			Middleware: []func() *experimental.Middleware{newMW},
 		})
 		r.NoError(err)
 
@@ -289,38 +297,44 @@ func TestClientMiddleware(t *testing.T) {
 		ctx := context.Background()
 
 		logs := []string{}
+
+		newMW1 := func() *experimental.Middleware {
+			return &experimental.Middleware{
+				AfterExecution: func(ctx context.Context) {
+					logs = append(logs, "1: AfterExecution")
+				},
+				BeforeExecution: func(ctx context.Context) {
+					logs = append(logs, "1: BeforeExecution")
+				},
+				TransformInput: func(
+					input *middleware.TransformableInput,
+					fn inngestgo.ServableFunction,
+				) {
+					logs = append(logs, "1: TransformInput")
+				},
+			}
+		}
+
+		newMW2 := func() *experimental.Middleware {
+			return &experimental.Middleware{
+				AfterExecution: func(ctx context.Context) {
+					logs = append(logs, "2: AfterExecution")
+				},
+				BeforeExecution: func(ctx context.Context) {
+					logs = append(logs, "2: BeforeExecution")
+				},
+				TransformInput: func(
+					input *middleware.TransformableInput,
+					fn inngestgo.ServableFunction,
+				) {
+					logs = append(logs, "2: TransformInput")
+				},
+			}
+		}
+
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
-			AppID: randomSuffix("app"),
-			Middleware: []*experimental.Middleware{
-				{
-					AfterExecution: func(ctx context.Context) {
-						logs = append(logs, "1: AfterExecution")
-					},
-					BeforeExecution: func(ctx context.Context) {
-						logs = append(logs, "1: BeforeExecution")
-					},
-					TransformInput: func(
-						input *middleware.TransformableInput,
-						fn inngestgo.ServableFunction,
-					) {
-						logs = append(logs, "1: TransformInput")
-					},
-				},
-				{
-					AfterExecution: func(ctx context.Context) {
-						logs = append(logs, "2: AfterExecution")
-					},
-					BeforeExecution: func(ctx context.Context) {
-						logs = append(logs, "2: BeforeExecution")
-					},
-					TransformInput: func(
-						input *middleware.TransformableInput,
-						fn inngestgo.ServableFunction,
-					) {
-						logs = append(logs, "2: TransformInput")
-					},
-				},
-			},
+			AppID:      randomSuffix("app"),
+			Middleware: []func() *experimental.Middleware{newMW1, newMW2},
 		})
 		r.NoError(err)
 
@@ -365,22 +379,24 @@ func TestClientMiddleware(t *testing.T) {
 			r := require.New(t)
 			ctx := context.Background()
 
-			c, err := inngestgo.NewClient(inngestgo.ClientOpts{
-				AppID: randomSuffix("app"),
-				Middleware: []*experimental.Middleware{
-					{
-						TransformInput: func(
-							input *middleware.TransformableInput,
-							fn inngestgo.ServableFunction,
-						) {
-							input.Event.Data["transformed"] = true
+			newMW := func() *experimental.Middleware {
+				return &experimental.Middleware{
+					TransformInput: func(
+						input *middleware.TransformableInput,
+						fn inngestgo.ServableFunction,
+					) {
+						input.Event.Data["transformed"] = true
 
-							for _, evt := range input.Events {
-								evt.Data["transformed"] = true
-							}
-						},
+						for _, evt := range input.Events {
+							evt.Data["transformed"] = true
+						}
 					},
-				},
+				}
+			}
+
+			c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+				AppID:      randomSuffix("app"),
+				Middleware: []func() *experimental.Middleware{newMW},
 			})
 			r.NoError(err)
 
@@ -443,22 +459,24 @@ func TestClientMiddleware(t *testing.T) {
 			r := require.New(t)
 			ctx := context.Background()
 
-			c, err := inngestgo.NewClient(inngestgo.ClientOpts{
-				AppID: randomSuffix("app"),
-				Middleware: []*experimental.Middleware{
-					{
-						TransformInput: func(
-							input *middleware.TransformableInput,
-							fn inngestgo.ServableFunction,
-						) {
-							input.Event.Data["transformed"] = true
+			newMW := func() *experimental.Middleware {
+				return &experimental.Middleware{
+					TransformInput: func(
+						input *middleware.TransformableInput,
+						fn inngestgo.ServableFunction,
+					) {
+						input.Event.Data["transformed"] = true
 
-							for _, evt := range input.Events {
-								evt.Data["transformed"] = true
-							}
-						},
+						for _, evt := range input.Events {
+							evt.Data["transformed"] = true
+						}
 					},
-				},
+				}
+			}
+
+			c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+				AppID:      randomSuffix("app"),
+				Middleware: []func() *experimental.Middleware{newMW},
 			})
 			r.NoError(err)
 
@@ -527,20 +545,22 @@ func TestClientMiddleware(t *testing.T) {
 			type contextKeyType struct{}
 			contextKey := contextKeyType{}
 
-			c, err := inngestgo.NewClient(inngestgo.ClientOpts{
-				AppID: randomSuffix("app"),
-				Middleware: []*experimental.Middleware{
-					{
-						TransformInput: func(
-							input *middleware.TransformableInput,
-							fn inngestgo.ServableFunction,
-						) {
-							input.WithContext(context.WithValue(
-								input.Context(), contextKey, "hello",
-							))
-						},
+			newMW := func() *experimental.Middleware {
+				return &experimental.Middleware{
+					TransformInput: func(
+						input *middleware.TransformableInput,
+						fn inngestgo.ServableFunction,
+					) {
+						input.WithContext(context.WithValue(
+							input.Context(), contextKey, "hello",
+						))
 					},
-				},
+				}
+			}
+
+			c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+				AppID:      randomSuffix("app"),
+				Middleware: []func() *experimental.Middleware{newMW},
 			})
 			r.NoError(err)
 
