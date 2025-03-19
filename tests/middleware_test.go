@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync/atomic"
 	"testing"
@@ -81,6 +82,187 @@ func TestClientMiddleware(t *testing.T) {
 		}, 5*time.Second, 10*time.Millisecond)
 	})
 
+	t.Run("step output, fn output", func(t *testing.T) {
+		r := require.New(t)
+		ctx := context.Background()
+
+		var (
+			results SafeSlice[any]
+			errors  SafeSlice[error]
+		)
+
+		newMW := func() experimental.Middleware {
+			return &inlineMiddleware{
+				afterExecutionFn: func(ctx context.Context, call experimental.CallContext, result any, err error) {
+					results.Append(result)
+					errors.Append(err)
+				},
+			}
+		}
+
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+			AppID:      randomSuffix("app"),
+			Middleware: []func() experimental.Middleware{newMW},
+			Logger:     slog.New(slog.DiscardHandler),
+		})
+		r.NoError(err)
+
+		eventName := randomSuffix("event")
+		_, err = inngestgo.CreateFunction(
+			c,
+			inngestgo.FunctionOpts{
+				ID:      "fn",
+				Retries: inngestgo.IntPtr(1),
+			},
+			inngestgo.EventTrigger(eventName, nil),
+			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+				step.Run(ctx, "step", func(ctx context.Context) (string, error) {
+					return "ok", nil
+				})
+				return 1.1, nil
+			},
+		)
+		r.NoError(err)
+
+		server, sync := serve(t, c)
+		defer server.Close()
+		r.NoError(sync())
+
+		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
+		r.NoError(err)
+
+		r.EventuallyWithT(func(ct *assert.CollectT) {
+			a := assert.New(ct)
+			a.Equal([]any{
+				// First request.
+				"ok",
+				1.1,
+			}, results.Load())
+			a.Equal([]error{
+				nil,
+				nil,
+			}, errors.Load(), "%#v", errors.Load())
+		}, 5*time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("step error", func(t *testing.T) {
+		r := require.New(t)
+		ctx := context.Background()
+
+		var (
+			results SafeSlice[any]
+			errors  SafeSlice[error]
+		)
+
+		newMW := func() experimental.Middleware {
+			return &inlineMiddleware{
+				afterExecutionFn: func(ctx context.Context, call experimental.CallContext, result any, err error) {
+					results.Append(result)
+					errors.Append(err)
+				},
+			}
+		}
+
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+			AppID:      randomSuffix("app"),
+			Middleware: []func() experimental.Middleware{newMW},
+			Logger:     slog.New(slog.DiscardHandler),
+		})
+		r.NoError(err)
+
+		eventName := randomSuffix("event")
+		_, err = inngestgo.CreateFunction(
+			c,
+			inngestgo.FunctionOpts{
+				ID:      "fn",
+				Retries: inngestgo.IntPtr(1),
+			},
+			inngestgo.EventTrigger(eventName, nil),
+			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+				step.Run(ctx, "step", func(ctx context.Context) (string, error) {
+					return "ok", fmt.Errorf("this is an error")
+				})
+				return 1.1, nil
+			},
+		)
+		r.NoError(err)
+
+		server, sync := serve(t, c)
+		defer server.Close()
+		r.NoError(sync())
+
+		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
+		r.NoError(err)
+
+		r.EventuallyWithT(func(ct *assert.CollectT) {
+			a := assert.New(ct)
+			a.Equal([]any{
+				// First request.
+				"ok",
+			}, results.Load())
+			a.Equal([]error{
+				fmt.Errorf("this is an error"),
+			}, errors.Load(), "%#v", errors.Load())
+		}, 5*time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("fn error", func(t *testing.T) {
+		r := require.New(t)
+		ctx := context.Background()
+
+		var (
+			results SafeSlice[any]
+			errors  SafeSlice[error]
+		)
+
+		newMW := func() experimental.Middleware {
+			return &inlineMiddleware{
+				afterExecutionFn: func(ctx context.Context, call experimental.CallContext, result any, err error) {
+					results.Append(result)
+					errors.Append(err)
+				},
+			}
+		}
+
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+			AppID:      randomSuffix("app"),
+			Middleware: []func() experimental.Middleware{newMW},
+			Logger:     slog.New(slog.DiscardHandler),
+		})
+		r.NoError(err)
+
+		eventName := randomSuffix("event")
+		_, err = inngestgo.CreateFunction(
+			c,
+			inngestgo.FunctionOpts{
+				ID:      "fn",
+				Retries: inngestgo.IntPtr(1),
+			},
+			inngestgo.EventTrigger(eventName, nil),
+			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+				return nil, fmt.Errorf("fn error")
+			},
+		)
+		r.NoError(err)
+
+		server, sync := serve(t, c)
+		defer server.Close()
+		r.NoError(sync())
+
+		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
+		r.NoError(err)
+
+		r.EventuallyWithT(func(ct *assert.CollectT) {
+			a := assert.New(ct)
+			a.Equal([]any{
+				nil,
+			}, results.Load())
+			a.Equal([]error{
+				fmt.Errorf("fn error"),
+			}, errors.Load(), "%#v", errors.Load())
+		}, 5*time.Second, 10*time.Millisecond)
+	})
+
 	t.Run("no hooks", func(t *testing.T) {
 		// Nothing errors when 0 hooks are provided.
 
@@ -129,10 +311,10 @@ func TestClientMiddleware(t *testing.T) {
 		var logs SafeSlice[string]
 		newMW := func() experimental.Middleware {
 			return &inlineMiddleware{
-				afterExecutionFn: func(ctx context.Context) {
+				afterExecutionFn: func(ctx context.Context, call experimental.CallContext, result any, err error) {
 					logs.Append("mw: AfterExecution")
 				},
-				beforeExecutionFn: func(ctx context.Context) {
+				beforeExecutionFn: func(ctx context.Context, call experimental.CallContext) {
 					logs.Append("mw: BeforeExecution")
 				},
 				transformInputFn: func(
@@ -225,10 +407,10 @@ func TestClientMiddleware(t *testing.T) {
 		var logs SafeSlice[string]
 		newMW := func() experimental.Middleware {
 			return &inlineMiddleware{
-				afterExecutionFn: func(ctx context.Context) {
+				afterExecutionFn: func(ctx context.Context, call experimental.CallContext, result any, err error) {
 					logs.Append("mw: AfterExecution")
 				},
-				beforeExecutionFn: func(ctx context.Context) {
+				beforeExecutionFn: func(ctx context.Context, call experimental.CallContext) {
 					logs.Append("mw: BeforeExecution")
 				},
 				transformInputFn: func(
@@ -301,8 +483,8 @@ func TestClientMiddleware(t *testing.T) {
 
 		newMW := func() experimental.Middleware {
 			return &inlineMiddleware{
-				afterExecutionFn:  func(ctx context.Context) {},
-				beforeExecutionFn: func(ctx context.Context) {},
+				afterExecutionFn:  func(ctx context.Context, call experimental.CallContext, result any, err error) {},
+				beforeExecutionFn: func(ctx context.Context, call experimental.CallContext) {},
 			}
 		}
 
@@ -349,10 +531,10 @@ func TestClientMiddleware(t *testing.T) {
 
 		newMW1 := func() experimental.Middleware {
 			return &inlineMiddleware{
-				afterExecutionFn: func(ctx context.Context) {
+				afterExecutionFn: func(ctx context.Context, call experimental.CallContext, result any, err error) {
 					logs.Append("1: AfterExecution")
 				},
-				beforeExecutionFn: func(ctx context.Context) {
+				beforeExecutionFn: func(ctx context.Context, call experimental.CallContext) {
 					logs.Append("1: BeforeExecution")
 				},
 				transformInputFn: func(
@@ -366,10 +548,10 @@ func TestClientMiddleware(t *testing.T) {
 
 		newMW2 := func() experimental.Middleware {
 			return &inlineMiddleware{
-				afterExecutionFn: func(ctx context.Context) {
+				afterExecutionFn: func(ctx context.Context, call experimental.CallContext, result any, err error) {
 					logs.Append("2: AfterExecution")
 				},
-				beforeExecutionFn: func(ctx context.Context) {
+				beforeExecutionFn: func(ctx context.Context, call experimental.CallContext) {
 					logs.Append("2: BeforeExecution")
 				},
 				transformInputFn: func(
@@ -730,8 +912,8 @@ type inlineMiddleware struct {
 	// automatically implement any new methods.
 	experimental.BaseMiddleware
 
-	beforeExecutionFn func(ctx context.Context)
-	afterExecutionFn  func(ctx context.Context)
+	beforeExecutionFn func(ctx context.Context, call experimental.CallContext)
+	afterExecutionFn  func(ctx context.Context, call experimental.CallContext, result any, err error)
 	transformInputFn  func(input *experimental.TransformableInput, fn inngestgo.ServableFunction)
 	onPanic           func(ctx context.Context, call experimental.CallContext, recovery any, stack string)
 }
@@ -740,14 +922,14 @@ func (m *inlineMiddleware) BeforeExecution(ctx context.Context, call experimenta
 	if m.beforeExecutionFn == nil {
 		return
 	}
-	m.beforeExecutionFn(ctx)
+	m.beforeExecutionFn(ctx, call)
 }
 
 func (m *inlineMiddleware) AfterExecution(ctx context.Context, call experimental.CallContext, result any, err error) {
 	if m.afterExecutionFn == nil {
 		return
 	}
-	m.afterExecutionFn(ctx)
+	m.afterExecutionFn(ctx, call, result, err)
 }
 
 func (m *inlineMiddleware) OnPanic(ctx context.Context, call experimental.CallContext, recovery any, stack string) {

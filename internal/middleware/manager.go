@@ -52,6 +52,14 @@ func (m *MiddlewareManager) BeforeExecution(ctx context.Context, call CallContex
 }
 
 func (m *MiddlewareManager) AfterExecution(ctx context.Context, call CallContext, result any, err error) {
+	// Only allow AftereExecution to be called once. This simplifies code since
+	// execution can start at the function or step level.
+	hook := "AfterExecution"
+	if m.idempotentHooks.Contains(hook) {
+		return
+	}
+	m.idempotentHooks.Add(hook)
+
 	for i := range m.items {
 		// We iterate in reverse order so that the innermost middleware is
 		// executed first.

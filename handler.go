@@ -1298,7 +1298,10 @@ func invoke(
 				// XXX: I'm not very happy with using this;  it is dirty
 				if _, ok := r.(step.ControlHijack); ok {
 					// Step attempt ended (completed or errored).
-					// TODO: VALUE
+					//
+					// Note that if this is a step.Run, middleware has already been invoked
+					// via step.Run and this is skipped due to idempotency in the middleware manager.
+					// Because this isn't a step.Run, it's safe to call this with nil data and error.
 					mw.AfterExecution(ctx, callCtx, nil, nil)
 					return
 				}
@@ -1359,9 +1362,12 @@ func invoke(
 			inputVal,
 		})
 
-		// Function ended.
-		// TODO: TYPES
-		mw.AfterExecution(ctx, mgr.MiddlewareCallCtx(), nil, nil)
+		// Function ended.  Get the types for the middleare call.
+		var outErr error
+		if !res[1].IsNil() {
+			outErr = res[1].Interface().(error)
+		}
+		mw.AfterExecution(ctx, mgr.MiddlewareCallCtx(), res[0].Interface(), outErr)
 	}()
 
 	var err error

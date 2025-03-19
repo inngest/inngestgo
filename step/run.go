@@ -105,8 +105,9 @@ func Run[T any](
 
 	// We're about to run a step callback, which is "new code".
 	mw.BeforeExecution(ctx, mgr.MiddlewareCallCtx())
-
 	result, err := f(setWithinStep(ctx))
+	mw.AfterExecution(ctx, mgr.MiddlewareCallCtx(), result, err)
+
 	if err != nil {
 		// If tihs is a StepFailure already, fail fast.
 		if errors.IsStepError(err) {
