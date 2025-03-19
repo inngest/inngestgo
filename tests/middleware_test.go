@@ -322,8 +322,9 @@ func TestClientMiddleware(t *testing.T) {
 					logs.Append("mw: BeforeExecution")
 				},
 				transformInputFn: func(
+					ctx context.Context,
+					call experimental.CallContext,
 					input *experimental.TransformableInput,
-					fn inngestgo.ServableFunction,
 				) {
 					logs.Append("mw: TransformInput")
 				},
@@ -418,8 +419,9 @@ func TestClientMiddleware(t *testing.T) {
 					logs.Append("mw: BeforeExecution")
 				},
 				transformInputFn: func(
+					ctx context.Context,
+					call experimental.CallContext,
 					input *experimental.TransformableInput,
-					fn inngestgo.ServableFunction,
 				) {
 					logs.Append("mw: TransformInput")
 				},
@@ -542,8 +544,9 @@ func TestClientMiddleware(t *testing.T) {
 					logs.Append("1: BeforeExecution")
 				},
 				transformInputFn: func(
+					ctx context.Context,
+					call experimental.CallContext,
 					input *experimental.TransformableInput,
-					fn inngestgo.ServableFunction,
 				) {
 					logs.Append("1: TransformInput")
 				},
@@ -559,8 +562,9 @@ func TestClientMiddleware(t *testing.T) {
 					logs.Append("2: BeforeExecution")
 				},
 				transformInputFn: func(
+					ctx context.Context,
+					call experimental.CallContext,
 					input *experimental.TransformableInput,
-					fn inngestgo.ServableFunction,
 				) {
 					logs.Append("2: TransformInput")
 				},
@@ -617,8 +621,9 @@ func TestClientMiddleware(t *testing.T) {
 			newMW := func() experimental.Middleware {
 				return &inlineMiddleware{
 					transformInputFn: func(
+						ctx context.Context,
+						call experimental.CallContext,
 						input *experimental.TransformableInput,
-						fn inngestgo.ServableFunction,
 					) {
 						input.Event.Data["transformed"] = true
 
@@ -694,8 +699,9 @@ func TestClientMiddleware(t *testing.T) {
 			newMW := func() experimental.Middleware {
 				return &inlineMiddleware{
 					transformInputFn: func(
+						ctx context.Context,
+						call experimental.CallContext,
 						input *experimental.TransformableInput,
-						fn inngestgo.ServableFunction,
 					) {
 						input.Event.Data["transformed"] = true
 
@@ -774,8 +780,9 @@ func TestClientMiddleware(t *testing.T) {
 			newMW := func() experimental.Middleware {
 				return &inlineMiddleware{
 					transformInputFn: func(
+						ctx context.Context,
+						call experimental.CallContext,
 						input *experimental.TransformableInput,
-						fn inngestgo.ServableFunction,
 					) {
 						input.WithContext(context.WithValue(
 							input.Context(), contextKey, "hello",
@@ -918,7 +925,7 @@ type inlineMiddleware struct {
 
 	beforeExecutionFn func(ctx context.Context, call experimental.CallContext)
 	afterExecutionFn  func(ctx context.Context, call experimental.CallContext, result any, err error)
-	transformInputFn  func(input *experimental.TransformableInput, fn inngestgo.ServableFunction)
+	transformInputFn  func(ctx context.Context, call experimental.CallContext, input *experimental.TransformableInput)
 	onPanic           func(ctx context.Context, call experimental.CallContext, recovery any, stack string)
 }
 
@@ -944,13 +951,14 @@ func (m *inlineMiddleware) OnPanic(ctx context.Context, call experimental.CallCo
 }
 
 func (m *inlineMiddleware) TransformInput(
+	ctx context.Context,
+	call experimental.CallContext,
 	input *experimental.TransformableInput,
-	fn inngestgo.ServableFunction,
 ) {
 	if m.transformInputFn == nil {
 		return
 	}
-	m.transformInputFn(input, fn)
+	m.transformInputFn(ctx, call, input)
 }
 
 // mockLogHandler is a mock slog.Handler that can be used to test the

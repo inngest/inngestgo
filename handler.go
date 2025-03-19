@@ -1286,6 +1286,11 @@ func invoke(
 	var (
 		res      []reflect.Value
 		panicErr error
+
+		// fnResponse is the actual response from the fn
+		fnResponse any
+		// fnError is the actual error from the fn.
+		fnError error
 	)
 	func() {
 		defer func() {
@@ -1335,7 +1340,7 @@ func invoke(
 			mwInput.WithContext(fCtx)
 
 			// Run hook.
-			mw.TransformInput(mwInput, sf)
+			mw.TransformInput(ctx, mgr.MiddlewareCallCtx(), mwInput)
 
 			// Update the context in case the hook changed it.
 			fCtx = mwInput.Context()
@@ -1362,33 +1367,40 @@ func invoke(
 			inputVal,
 		})
 
-		// Function ended.  Get the types for the middleare call.
-		var outErr error
-		if !res[1].IsNil() {
-			outErr = res[1].Interface().(error)
+		// Set the function response.
+		if res != nil && len(res) >= 1 {
+			fnResponse = res[0].Interface()
 		}
-		mw.AfterExecution(ctx, mgr.MiddlewareCallCtx(), res[0].Interface(), outErr)
+
+		// Function ended.  Get the types for the middleare call.
+		if len(res) >= 2 && !res[1].IsNil() {
+			fnError = res[1].Interface().(error)
+		}
+
+		mw.AfterExecution(ctx, mgr.MiddlewareCallCtx(), fnResponse, fnError)
+
+		{
+			// Transform output via MW
+			out := &middleware.TransformableOutput{
+				Result: fnResponse,
+				Error:  fnError,
+			}
+			mw.TransformOutput(ctx, mgr.MiddlewareCallCtx(), out)
+			// And update the vars
+			fnResponse = out.Result
+			fnError = out.Error
+		}
 	}()
 
-	var err error
+	// Override errors here.
 	if panicErr != nil {
-		err = panicErr
+		fnError = panicErr
 	} else if mgr.Err() != nil {
 		// This is higher precedence than a return error.
-		err = mgr.Err()
-	} else if res != nil && !res[1].IsNil() {
-		// The function returned an error.
-		err = res[1].Interface().(error)
+		fnError = mgr.Err()
 	}
 
-	var response any
-	if res != nil {
-		// Panicking in tools interferes with grabbing the response;  it's always
-		// an empty array if tools panic to hijack control flow.
-		response = res[0].Interface()
-	}
-
-	return response, mgr.Ops(), err
+	return fnResponse, mgr.Ops(), fnError
 }
 
 // updateInput applies the middleware input to the function input.

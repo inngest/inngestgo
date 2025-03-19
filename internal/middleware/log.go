@@ -5,8 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"sync/atomic"
-
-	"github.com/inngest/inngestgo/internal/fn"
 )
 
 type logContextKeyType struct{}
@@ -48,8 +46,9 @@ func (l *logMiddlewareRequest) BeforeExecution(ctx context.Context, call CallCon
 }
 
 func (l *logMiddlewareRequest) TransformInput(
+	ctx context.Context,
+	call CallContext,
 	input *TransformableInput,
-	fn fn.ServableFunction,
 ) {
 	// Add the logger to the context so that it can be used by the
 	// Inngest function.

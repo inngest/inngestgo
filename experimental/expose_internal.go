@@ -17,6 +17,11 @@ type Middleware = middleware.Middleware
 // begins.  This allows you to eg. implement data offloading to an external service.
 type TransformableInput = middleware.TransformableInput
 
+// TransformableOutput is passed to the TransformOutput middleware method as a
+// pointer, allowing step and function return values to be modified after execution.
+// This allows you to eg. implement data offloading to an external service.
+type TransformableOutput = middleware.TransformableOutput
+
 // LoggerFromContext returns the stdlib logger from the context.
 // Returns an error if no logger is present.
 var LoggerFromContext = middleware.LoggerFromContext

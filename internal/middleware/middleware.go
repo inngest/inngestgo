@@ -23,8 +23,25 @@ type CallContext struct {
 // To avoid implementing each method as a noop, embed the BaseMiddleware struct
 // in your struct implementation.
 type Middleware interface {
+	// TransformInput is called before entering the Inngest function. It gives
+	// an opportunity to modify the input before it is sent to the function.
+	TransformInput(
+		ctx context.Context,
+		call CallContext,
+		input *TransformableInput,
+	)
+
 	// BeforeExecution is called before executing "new code".
 	BeforeExecution(ctx context.Context, call CallContext)
+
+	// TransformOutput is called after a step finishes execution or a function
+	// returns results.  It gives an opportunity to modify the output before it
+	// is stored in function state or logs.
+	TransformOutput(
+		ctx context.Context,
+		call CallContext,
+		output *TransformableOutput,
+	)
 
 	// AfterExecution is called after executing "new code".  It is called with
 	// the result of any step (or the return value of the functon), plus any
@@ -35,13 +52,6 @@ type Middleware interface {
 
 	// OnPanic is called if the function panics with the recovered value and stack.
 	OnPanic(ctx context.Context, call CallContext, recovered any, stack string)
-
-	// TransformInput is called before entering the Inngest function. It gives
-	// an opportunity to modify the input before it is sent to the function.
-	TransformInput(
-		input *TransformableInput,
-		fn fn.ServableFunction,
-	)
 }
 
 // ensure that the MiddlewareManager implements Middleware at compile time.
@@ -60,15 +70,32 @@ func (m *BaseMiddleware) AfterExecution(ctx context.Context, call CallContext, r
 	// Noop.
 }
 
+func (m *BaseMiddleware) TransformOutput(
+	ctx context.Context,
+	call CallContext,
+	output *TransformableOutput,
+) {
+	//Noop
+}
+
 func (m *BaseMiddleware) OnPanic(ctx context.Context, call CallContext, recovered any, stack string) {
 	// Noop.
 }
 
 func (m *BaseMiddleware) TransformInput(
+	ctx context.Context,
+	call CallContext,
 	input *TransformableInput,
-	fn fn.ServableFunction,
 ) {
 	// Noop.
+}
+
+// TransformableOutput is passed to the TransformOutput middleware method as a
+// pointer, allowing step and function return values to be modified after execution.
+// This allows you to eg. implement data offloading to an external service.
+type TransformableOutput struct {
+	Result any
+	Error  error
 }
 
 // TransformableInput is passed to the TransformInput middleware method as a

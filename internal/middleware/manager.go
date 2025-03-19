@@ -3,7 +3,6 @@ package middleware
 import (
 	"context"
 
-	"github.com/inngest/inngestgo/internal/fn"
 	"github.com/inngest/inngestgo/internal/types"
 )
 
@@ -69,12 +68,34 @@ func (m *MiddlewareManager) AfterExecution(ctx context.Context, call CallContext
 	}
 }
 
+func (m *MiddlewareManager) TransformOutput(
+	ctx context.Context,
+	call CallContext,
+	output *TransformableOutput,
+) {
+	// Only allow TransformOutput to be called once. This simplifies code since
+	// execution can start at the function or step level.
+	hook := "TransformOutput"
+	if m.idempotentHooks.Contains(hook) {
+		return
+	}
+	m.idempotentHooks.Add(hook)
+
+	for i := range m.items {
+		// We iterate in reverse order so that the innermost middleware is
+		// executed first.
+		mw := m.items[len(m.items)-1-i]
+		mw.TransformOutput(ctx, call, output)
+	}
+}
+
 func (m *MiddlewareManager) TransformInput(
+	ctx context.Context,
+	call CallContext,
 	input *TransformableInput,
-	fn fn.ServableFunction,
 ) {
 	for _, mw := range m.items {
-		mw.TransformInput(input, fn)
+		mw.TransformInput(ctx, call, input)
 	}
 }
 
