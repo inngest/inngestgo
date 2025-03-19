@@ -24,6 +24,7 @@ import (
 	"github.com/inngest/inngest/pkg/syscode"
 	sdkerrors "github.com/inngest/inngestgo/errors"
 	"github.com/inngest/inngestgo/internal"
+	"github.com/inngest/inngestgo/internal/event"
 	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/internal/types"
@@ -1254,12 +1255,6 @@ func invoke(
 		fCtx = step.SetTargetStepID(fCtx, *stepID)
 	}
 
-	if len(input.Steps) == 0 {
-		// There are no memoized steps, so the start of the function is "new
-		// code".
-		mw.BeforeExecution(fCtx)
-	}
-
 	// This must be a pointer so that it can be mutated from within function tools.
 	mgr := sdkrequest.NewManager(mw, cancel, input, signingKey)
 	fCtx = sdkrequest.SetManager(fCtx, mgr)
@@ -1270,53 +1265,13 @@ func invoke(
 	fVal := reflect.ValueOf(sf.Func())
 	inputVal := reflect.New(fVal.Type().In(1)).Elem()
 
-	// If we have an actual value to add to the event, vs `Input[any]`, set it.
-	if sf.ZeroEvent() != nil {
-		eventType := reflect.TypeOf(sf.ZeroEvent())
-
-		// Create a new copy of the event.
-		evtPtr := reflect.New(eventType).Interface()
-		if err := json.Unmarshal(input.Event, evtPtr); err != nil {
-			return nil, nil, fmt.Errorf("error unmarshalling event for function: %w", err)
-		}
-		evt := reflect.ValueOf(evtPtr).Elem()
-		inputVal.FieldByName("Event").Set(evt)
-
-		// events
-		sliceType := reflect.SliceOf(eventType)
-		evtList := reflect.MakeSlice(sliceType, 0, len(input.Events))
-
-		for _, rawjson := range input.Events {
-			newEvent := reflect.New(eventType).Interface()
-
-			if err := json.Unmarshal(rawjson, &newEvent); err != nil {
-				return nil, nil, fmt.Errorf("non-zero event: error unmarshalling event in event list: %w", err)
-			}
-
-			evtList = reflect.Append(evtList, reflect.ValueOf(newEvent).Elem())
-		}
-		inputVal.FieldByName("Events").Set(evtList)
-	} else {
-		// Use a raw map to hold the input.
-		val := map[string]any{}
-		if err := json.Unmarshal(input.Event, &val); err != nil {
-			return nil, nil, fmt.Errorf("error unmarshalling event for function: %w", err)
-		}
-		inputVal.FieldByName("Event").Set(reflect.ValueOf(val))
-
-		// events
-		events := make([]any, len(input.Events))
-		for i, rawjson := range input.Events {
-			var val map[string]any
-
-			if err := json.Unmarshal(rawjson, &val); err != nil {
-				return nil, nil, fmt.Errorf("zero event: error unmarshalling event in event list: %w", err)
-			}
-
-			events[i] = val
-		}
-		inputVal.FieldByName("Events").Set(reflect.ValueOf(events))
-	}
+	updateInput(
+		mgr,
+		sf,
+		inputVal,
+		input.Event,
+		types.ToAnySlice(input.Events),
+	)
 
 	// Set InputCtx
 	callCtx := InputCtx{
@@ -1349,6 +1304,48 @@ func invoke(
 			}
 		}()
 
+		// Run the TransformInput middleware hook.
+		{
+			// Build TransformableInput.
+			var evt Event
+			_ = json.Unmarshal(input.Event, &evt)
+			evts := make([]*event.Event, len(input.Events))
+			for i, rawjson := range input.Events {
+				var evt event.Event
+				if err := json.Unmarshal(rawjson, &evt); err != nil {
+					mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
+					panic(step.ControlHijack{})
+				}
+				evts[i] = &evt
+			}
+			mwInput := &middleware.TransformableInput{
+				Event:  &evt,
+				Events: evts,
+			}
+			mwInput.WithContext(fCtx)
+
+			// Run hook.
+			mw.TransformInput(mwInput, sf)
+
+			// Update the context in case the hook changed it.
+			fCtx = mwInput.Context()
+
+			// Update the input we're passing to the Inngest function.
+			updateInput(
+				mgr,
+				sf,
+				inputVal,
+				mwInput.Event,
+				types.ToAnySlice(mwInput.Events),
+			)
+		}
+
+		if len(input.Steps) == 0 {
+			// There are no memoized steps, so the start of the function is "new
+			// code".
+			mw.BeforeExecution(fCtx)
+		}
+
 		// Call the defined function with the input data.
 		res = fVal.Call([]reflect.Value{
 			reflect.ValueOf(fCtx),
@@ -1378,4 +1375,100 @@ func invoke(
 	}
 
 	return response, mgr.Ops(), err
+}
+
+// updateInput applies the middleware input to the function input.
+func updateInput(
+	mgr sdkrequest.InvocationManager,
+	fn ServableFunction,
+	fnInput reflect.Value,
+	// mwInput *middleware.TransformableInput,
+	event any,
+	events []any,
+) {
+	// If we have an actual value to add to the event, vs `Input[any]`, set it.
+	if fn.ZeroEvent() != nil {
+		eventType := reflect.TypeOf(fn.ZeroEvent())
+
+		// Apply event.
+		{
+			// byt, err := json.Marshal(mwInput.Event)
+			byt, err := json.Marshal(event)
+			if err != nil {
+				mgr.SetErr(fmt.Errorf("error marshalling event for function: %w", err))
+				panic(step.ControlHijack{})
+			}
+
+			// The same type as the event.
+			newEvent := reflect.New(eventType).Interface()
+
+			if err := json.Unmarshal(byt, newEvent); err != nil {
+				mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
+				panic(step.ControlHijack{})
+			}
+			fnInput.FieldByName("Event").Set(reflect.ValueOf(newEvent).Elem())
+		}
+
+		// Apply events.
+		{
+			eventsType := reflect.SliceOf(eventType)
+			newEvents := reflect.MakeSlice(eventsType, 0, len(events))
+			for _, evt := range events {
+				// events := reflect.MakeSlice(eventsType, 0, len(mwInput.Events))
+				// for _, evt := range mwInput.Events {
+				byt, err := json.Marshal(evt)
+				if err != nil {
+					mgr.SetErr(fmt.Errorf("error marshalling event for function: %w", err))
+					panic(step.ControlHijack{})
+				}
+
+				// The same type as the event.
+				newEvent := reflect.New(eventType).Interface()
+				if err := json.Unmarshal(byt, newEvent); err != nil {
+					mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
+					panic(step.ControlHijack{})
+				}
+
+				newEvents = reflect.Append(newEvents, reflect.ValueOf(newEvent).Elem())
+			}
+			fnInput.FieldByName("Events").Set(newEvents)
+		}
+	} else {
+		// Apply event.
+		{
+			byt, err := json.Marshal(event)
+			if err != nil {
+				mgr.SetErr(fmt.Errorf("error marshalling event for function: %w", err))
+				panic(step.ControlHijack{})
+			}
+
+			newEvent := map[string]any{}
+			if err := json.Unmarshal(byt, &newEvent); err != nil {
+				mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
+				panic(step.ControlHijack{})
+			}
+			fnInput.FieldByName("Event").Set(reflect.ValueOf(newEvent))
+		}
+
+		// Apply events.
+		{
+			newEvents := make([]any, len(events))
+			for i, evt := range events {
+				byt, err := json.Marshal(evt)
+				if err != nil {
+					mgr.SetErr(fmt.Errorf("error marshalling event for function: %w", err))
+					panic(step.ControlHijack{})
+				}
+
+				var newEvent map[string]any
+				if err := json.Unmarshal(byt, &newEvent); err != nil {
+					mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
+					panic(step.ControlHijack{})
+				}
+
+				newEvents[i] = newEvent
+			}
+			fnInput.FieldByName("Events").Set(reflect.ValueOf(newEvents))
+		}
+	}
 }

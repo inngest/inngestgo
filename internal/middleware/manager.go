@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 
+	"github.com/inngest/inngestgo/internal/fn"
 	"github.com/inngest/inngestgo/internal/types"
 )
 
@@ -24,8 +25,10 @@ type MiddlewareManager struct {
 }
 
 // Add adds middleware to the manager.
-func (m *MiddlewareManager) Add(mw ...Middleware) *MiddlewareManager {
-	m.items = append(m.items, mw...)
+func (m *MiddlewareManager) Add(mw ...func() Middleware) *MiddlewareManager {
+	for _, mw := range mw {
+		m.items = append(m.items, mw())
+	}
 	return m
 }
 
@@ -35,9 +38,7 @@ func (m *MiddlewareManager) AfterExecution(ctx context.Context) {
 		// executed first.
 		mw := m.items[len(m.items)-1-i]
 
-		if mw.AfterExecution != nil {
-			mw.AfterExecution(ctx)
-		}
+		mw.AfterExecution(ctx)
 	}
 }
 
@@ -51,8 +52,15 @@ func (m *MiddlewareManager) BeforeExecution(ctx context.Context) {
 	m.idempotentHooks.Add(hook)
 
 	for _, mw := range m.items {
-		if mw.BeforeExecution != nil {
-			mw.BeforeExecution(ctx)
-		}
+		mw.BeforeExecution(ctx)
+	}
+}
+
+func (m *MiddlewareManager) TransformInput(
+	input *TransformableInput,
+	fn fn.ServableFunction,
+) {
+	for _, mw := range m.items {
+		mw.TransformInput(input, fn)
 	}
 }
