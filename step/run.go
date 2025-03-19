@@ -9,6 +9,7 @@ import (
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/execution/state"
 	"github.com/inngest/inngestgo/errors"
+	"github.com/inngest/inngestgo/internal"
 )
 
 type RunOpts struct {
@@ -32,10 +33,10 @@ func Run[T any](
 ) (T, error) {
 	targetID := getTargetStepID(ctx)
 	mgr := preflight(ctx)
-	op := mgr.NewOp(enums.OpcodeStep, id, nil)
+	op := mgr.NewOp(enums.OpcodeStepRun, id, nil)
 	hashedID := op.MustHash()
 
-	if val, ok := mgr.Step(op); ok {
+	if val, ok := mgr.Step(ctx, op); ok {
 		// Create a new empty type T in v
 		ft := reflect.TypeOf(f)
 		v := reflect.New(ft.Out(0)).Interface()
@@ -95,6 +96,15 @@ func Run[T any](
 	// We're calling a function, so always cancel the context afterwards so that no
 	// other tools run.
 	defer mgr.Cancel()
+
+	mw, ok := internal.MiddlewareManagerFromContext(ctx)
+	if !ok {
+		mgr.SetErr(fmt.Errorf("no middleware manager found in context"))
+		panic(ControlHijack{})
+	}
+
+	// We're about to run a step callback, which is "new code".
+	mw.BeforeExecution(ctx)
 
 	result, err := f(setWithinStep(ctx))
 	if err != nil {

@@ -19,6 +19,7 @@ import (
 	"github.com/inngest/inngest/pkg/inngest"
 	"github.com/inngest/inngest/pkg/sdk"
 	"github.com/inngest/inngest/pkg/syscode"
+	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/step"
 	"github.com/stretchr/testify/assert"
@@ -83,6 +84,8 @@ func TestRegister(t *testing.T) {
 // TestInvoke asserts that invoking a function with both the correct and incorrect type
 // works as expected.
 func TestInvoke(t *testing.T) {
+	mw := middleware.NewMiddlewareManager()
+
 	t.Run("With a struct value event type", func(t *testing.T) {
 		ctx := context.Background()
 		r := require.New(t)
@@ -111,7 +114,7 @@ func TestInvoke(t *testing.T) {
 		r.NoError(err)
 
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, c, a, testKey, createRequest(t, input), nil)
+			actual, op, err := invoke(ctx, c, mw, a, testKey, createRequest(t, input), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -146,7 +149,7 @@ func TestInvoke(t *testing.T) {
 		r.NoError(err)
 
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, c, a, testKey, createBatchRequest(t, input, 5), nil)
+			actual, op, err := invoke(ctx, c, mw, a, testKey, createBatchRequest(t, input, 5), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -182,7 +185,7 @@ func TestInvoke(t *testing.T) {
 		ctx := context.Background()
 
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, c, a, testKey, createRequest(t, input), nil)
+			actual, op, err := invoke(ctx, c, mw, a, testKey, createRequest(t, input), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -217,7 +220,7 @@ func TestInvoke(t *testing.T) {
 
 		ctx := context.Background()
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, c, a, testKey, createRequest(t, input), nil)
+			actual, op, err := invoke(ctx, c, mw, a, testKey, createRequest(t, input), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -255,7 +258,7 @@ func TestInvoke(t *testing.T) {
 
 		ctx := context.Background()
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, c, a, testKey, createRequest(t, input), nil)
+			actual, op, err := invoke(ctx, c, mw, a, testKey, createRequest(t, input), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -301,7 +304,7 @@ func TestInvoke(t *testing.T) {
 		r.NoError(err)
 
 		actual, op, err := invoke(
-			ctx, c, a, testKey,
+			ctx, c, mw, a, testKey,
 			createRequest(t, EventA{Name: "my-event"}),
 			nil,
 		)

@@ -24,6 +24,7 @@ import (
 	"github.com/inngest/inngest/pkg/syscode"
 	sdkerrors "github.com/inngest/inngestgo/errors"
 	"github.com/inngest/inngestgo/internal"
+	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/internal/types"
 	"github.com/inngest/inngestgo/step"
@@ -799,6 +800,12 @@ func createFunctionConfigs(
 // invoke handles incoming POST calls to invoke a function, delegating to invoke() after validating
 // the request.
 func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
+	cImpl, ok := h.client.(*apiClient)
+	if !ok {
+		return errors.New("invalid client type")
+	}
+	mw := middleware.NewMiddlewareManager().Add(cImpl.Middleware...)
+
 	var sig string
 	defer r.Body.Close()
 
@@ -887,6 +894,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	resp, ops, err := invoke(
 		r.Context(),
 		h.client,
+		mw,
 		fn,
 		h.GetSigningKey(),
 		request,
@@ -1221,6 +1229,7 @@ type StreamResponse struct {
 func invoke(
 	ctx context.Context,
 	client Client,
+	mw *middleware.MiddlewareManager,
 	sf ServableFunction,
 	signingKey string,
 	input *sdkrequest.Request,
@@ -1236,14 +1245,23 @@ func invoke(
 	// within a step.  This allows us to prevent any execution of future tools after a
 	// tool has run.
 	fCtx, cancel := context.WithCancel(
-		internal.ContextWithEventSender(ctx, client),
+		internal.ContextWithMiddlewareManager(
+			internal.ContextWithEventSender(ctx, client),
+			mw,
+		),
 	)
 	if stepID != nil {
 		fCtx = step.SetTargetStepID(fCtx, *stepID)
 	}
 
+	if len(input.Steps) == 0 {
+		// There are no memoized steps, so the start of the function is "new
+		// code".
+		mw.BeforeExecution(fCtx)
+	}
+
 	// This must be a pointer so that it can be mutated from within function tools.
-	mgr := sdkrequest.NewManager(cancel, input, signingKey)
+	mgr := sdkrequest.NewManager(mw, cancel, input, signingKey)
 	fCtx = sdkrequest.SetManager(fCtx, mgr)
 
 	// Create a new Input type.  We don't know ahead of time the type signature as
@@ -1322,6 +1340,8 @@ func invoke(
 				//
 				// XXX: I'm not very happy with using this;  it is dirty
 				if _, ok := r.(step.ControlHijack); ok {
+					// Step attempt ended (completed or errored).
+					mw.AfterExecution(ctx)
 					return
 				}
 				stack := string(debug.Stack())
@@ -1334,6 +1354,9 @@ func invoke(
 			reflect.ValueOf(fCtx),
 			inputVal,
 		})
+
+		// Function ended.
+		mw.AfterExecution(ctx)
 	}()
 
 	var err error

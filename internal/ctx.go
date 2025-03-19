@@ -1,6 +1,10 @@
 package internal
 
-import "context"
+import (
+	"context"
+
+	"github.com/inngest/inngestgo/internal/middleware"
+)
 
 type eventSenderCtxKeyType struct{}
 
@@ -18,4 +22,17 @@ func ContextWithEventSender(ctx context.Context, sender eventSender) context.Con
 func EventSenderFromContext(ctx context.Context) (eventSender, bool) {
 	sender, ok := ctx.Value(eventSenderCtxKey).(eventSender)
 	return sender, ok
+}
+
+type middlewareManagerCtxKeyType struct{}
+
+var middlewareManagerCtxKey = middlewareManagerCtxKeyType{}
+
+func ContextWithMiddlewareManager(ctx context.Context, mgr *middleware.MiddlewareManager) context.Context {
+	return context.WithValue(ctx, middlewareManagerCtxKey, mgr)
+}
+
+func MiddlewareManagerFromContext(ctx context.Context) (*middleware.MiddlewareManager, bool) {
+	mgr, ok := ctx.Value(middlewareManagerCtxKey).(*middleware.MiddlewareManager)
+	return mgr, ok
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/inngest/inngest/pkg/execution/state"
 	"github.com/inngest/inngest/pkg/publicerr"
 	"github.com/inngest/inngestgo/connect"
+	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 )
 
@@ -147,8 +148,21 @@ func (h *handler) InvokeFunction(ctx context.Context, slug string, stepId *strin
 		}
 	}
 
-	// Invoke function, always complete regardless of
-	resp, ops, err := invoke(context.Background(), h.client, fn, h.GetSigningKey(), &request, stepId)
+	cImpl, ok := h.client.(*apiClient)
+	if !ok {
+		return nil, nil, fmt.Errorf("invalid client")
+	}
+	mw := middleware.NewMiddlewareManager().Add(cImpl.Middleware...)
 
+	// Invoke function, always complete regardless of
+	resp, ops, err := invoke(
+		context.Background(),
+		h.client,
+		mw,
+		fn,
+		h.GetSigningKey(),
+		&request,
+		stepId,
+	)
 	return resp, ops, err
 }
