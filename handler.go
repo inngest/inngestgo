@@ -1368,7 +1368,7 @@ func invoke(
 		})
 
 		// Set the function response.
-		if res != nil && len(res) >= 1 {
+		if len(res) >= 1 {
 			fnResponse = res[0].Interface()
 		}
 
