@@ -45,7 +45,7 @@ type SleepUntilParam interface {
 // in one of the common RFC timestamps:
 //
 //	step.SleepUntil(ctx, "time.Time", time.Now().Add(time.Hour))
-//	step.SleepUntil(ctx, "time.Time", "2025-04-01T00:00:00Z07:00")
+//	step.SleepUntil(ctx, "time.Time", "2025-04-01T00:00:00+07:00")
 //	step.SleepUntil(ctx, "time.Time", "2025-04-01")
 //
 // Supported timestamp formats are as follows:
