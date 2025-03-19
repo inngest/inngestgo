@@ -58,12 +58,11 @@ func TestClientMiddleware(t *testing.T) {
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
 
-				step.Run(ctx, "step", func(ctx context.Context) (string, error) {
+				_, _ = step.Run(ctx, "step", func(ctx context.Context) (string, error) {
 					return "ok", nil
 				})
 
 				panic("nah")
-				return nil, nil
 			},
 		)
 		r.NoError(err)
@@ -121,7 +120,7 @@ func TestClientMiddleware(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				step.Run(ctx, "step", func(ctx context.Context) (string, error) {
+				_, _ = step.Run(ctx, "step", func(ctx context.Context) (string, error) {
 					return "ok", nil
 				})
 				return 1.1, nil
@@ -184,7 +183,7 @@ func TestClientMiddleware(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				step.Run(ctx, "step", func(ctx context.Context) (string, error) {
+				_, _ = step.Run(ctx, "step", func(ctx context.Context) (string, error) {
 					return "ok", fmt.Errorf("this is an error")
 				})
 				return 1.1, nil
