@@ -1256,7 +1256,7 @@ func invoke(
 	}
 
 	// This must be a pointer so that it can be mutated from within function tools.
-	mgr := sdkrequest.NewManager(mw, cancel, input, signingKey)
+	mgr := sdkrequest.NewManager(sf, mw, cancel, input, signingKey)
 	fCtx = sdkrequest.SetManager(fCtx, mgr)
 
 	// Create a new Input type.  We don't know ahead of time the type signature as
@@ -1284,23 +1284,30 @@ func invoke(
 	inputVal.FieldByName("InputCtx").Set(reflect.ValueOf(callCtx))
 
 	var (
-		res       []reflect.Value
-		panickErr error
+		res      []reflect.Value
+		panicErr error
 	)
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
+				callCtx := mgr.MiddlewareCallCtx()
+
 				// Was this us attepmting to prevent functions from continuing, using
 				// panic as a crappy control flow because go doesn't have generators?
 				//
 				// XXX: I'm not very happy with using this;  it is dirty
 				if _, ok := r.(step.ControlHijack); ok {
 					// Step attempt ended (completed or errored).
-					mw.AfterExecution(ctx)
+					// TODO: VALUE
+					mw.AfterExecution(ctx, callCtx, nil, nil)
 					return
 				}
-				stack := string(debug.Stack())
-				panickErr = fmt.Errorf("function panicked: %v.  stack:\n%s", r, stack)
+
+				panicStack := string(debug.Stack())
+				panicErr = fmt.Errorf("function panicked: %v.  stack:\n%s", r, panicStack)
+
+				mw.AfterExecution(ctx, callCtx, nil, nil)
+				mw.OnPanic(ctx, callCtx, r, panicStack)
 			}
 		}()
 
@@ -1343,7 +1350,7 @@ func invoke(
 		if len(input.Steps) == 0 {
 			// There are no memoized steps, so the start of the function is "new
 			// code".
-			mw.BeforeExecution(fCtx)
+			mw.BeforeExecution(fCtx, mgr.MiddlewareCallCtx())
 		}
 
 		// Call the defined function with the input data.
@@ -1353,12 +1360,13 @@ func invoke(
 		})
 
 		// Function ended.
-		mw.AfterExecution(ctx)
+		// TODO: TYPES
+		mw.AfterExecution(ctx, mgr.MiddlewareCallCtx(), nil, nil)
 	}()
 
 	var err error
-	if panickErr != nil {
-		err = panickErr
+	if panicErr != nil {
+		err = panicErr
 	} else if mgr.Err() != nil {
 		// This is higher precedence than a return error.
 		err = mgr.Err()

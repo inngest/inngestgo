@@ -7,6 +7,11 @@ import (
 	"github.com/inngest/inngestgo/internal/types"
 )
 
+// ensure that the MiddlewareManager implements Middleware at compile time.
+var _ Middleware = &MiddlewareManager{}
+
+// NewMiddlewareManager returns a new middleware manager which invokes
+// each registered middleware.
 func NewMiddlewareManager() *MiddlewareManager {
 	return &MiddlewareManager{
 		idempotentHooks: &types.Set[string]{},
@@ -32,17 +37,7 @@ func (m *MiddlewareManager) Add(mw ...func() Middleware) *MiddlewareManager {
 	return m
 }
 
-func (m *MiddlewareManager) AfterExecution(ctx context.Context) {
-	for i := range m.items {
-		// We iterate in reverse order so that the innermost middleware is
-		// executed first.
-		mw := m.items[len(m.items)-1-i]
-
-		mw.AfterExecution(ctx)
-	}
-}
-
-func (m *MiddlewareManager) BeforeExecution(ctx context.Context) {
+func (m *MiddlewareManager) BeforeExecution(ctx context.Context, call CallContext) {
 	// Only allow BeforeExecution to be called once. This simplifies code since
 	// execution can start at the function or step level.
 	hook := "BeforeExecution"
@@ -52,7 +47,17 @@ func (m *MiddlewareManager) BeforeExecution(ctx context.Context) {
 	m.idempotentHooks.Add(hook)
 
 	for _, mw := range m.items {
-		mw.BeforeExecution(ctx)
+		mw.BeforeExecution(ctx, call)
+	}
+}
+
+func (m *MiddlewareManager) AfterExecution(ctx context.Context, call CallContext, result any, err error) {
+	for i := range m.items {
+		// We iterate in reverse order so that the innermost middleware is
+		// executed first.
+		mw := m.items[len(m.items)-1-i]
+
+		mw.AfterExecution(ctx, call, result, err)
 	}
 }
 
@@ -62,5 +67,15 @@ func (m *MiddlewareManager) TransformInput(
 ) {
 	for _, mw := range m.items {
 		mw.TransformInput(input, fn)
+	}
+}
+
+func (m *MiddlewareManager) OnPanic(ctx context.Context, call CallContext, recovered any, stack string) {
+	for i := range m.items {
+		// We iterate in reverse order so that the innermost middleware is
+		// executed first.
+		mw := m.items[len(m.items)-1-i]
+
+		mw.OnPanic(ctx, call, recovered, stack)
 	}
 }

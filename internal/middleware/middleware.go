@@ -7,12 +7,34 @@ import (
 	"github.com/inngest/inngestgo/internal/fn"
 )
 
-type Middleware interface {
-	// AfterExecution is called after executing "new code".
-	AfterExecution(ctx context.Context)
+// CallContext is used in middleware, and represents information around the current
+// execution request.
+type CallContext struct {
+	FunctionOpts fn.FunctionOpts
+	// Env represents the environment that this run is executing within.
+	Env string
+	// RunID is the ULID run ID, as a string, for this run.
+	RunID string
+	// Attempt is the 0-indexed attempt for this request.
+	Attempt int
+}
 
+// Middleware is the middleware interface that each implementation must fulfil.
+// To avoid implementing each method as a noop, embed the BaseMiddleware struct
+// in your struct implementation.
+type Middleware interface {
 	// BeforeExecution is called before executing "new code".
-	BeforeExecution(ctx context.Context)
+	BeforeExecution(ctx context.Context, call CallContext)
+
+	// AfterExecution is called after executing "new code".  It is called with
+	// the result of any step (or the return value of the functon), plus any
+	// error from the step or function.
+	//
+	// If the step did not error, err will be nil.
+	AfterExecution(ctx context.Context, call CallContext, result any, err error)
+
+	// OnPanic is called if the function panics with the recovered value and stack.
+	OnPanic(ctx context.Context, call CallContext, recovered any, stack string)
 
 	// TransformInput is called before entering the Inngest function. It gives
 	// an opportunity to modify the input before it is sent to the function.
@@ -22,13 +44,23 @@ type Middleware interface {
 	)
 }
 
+// ensure that the MiddlewareManager implements Middleware at compile time.
+var _ Middleware = &BaseMiddleware{}
+
+// BaseMiddleware is a noop implementation that you can embed within custom
+// middelware to implement the middleware.Middleware interface, making every
+// unimplemented call in your struct a no-op.
 type BaseMiddleware struct{}
 
-func (m *BaseMiddleware) AfterExecution(ctx context.Context) {
+func (m *BaseMiddleware) BeforeExecution(ctx context.Context, call CallContext) {
 	// Noop.
 }
 
-func (m *BaseMiddleware) BeforeExecution(ctx context.Context) {
+func (m *BaseMiddleware) AfterExecution(ctx context.Context, call CallContext, result any, err error) {
+	// Noop.
+}
+
+func (m *BaseMiddleware) OnPanic(ctx context.Context, call CallContext, recovered any, stack string) {
 	// Noop.
 }
 
@@ -39,6 +71,9 @@ func (m *BaseMiddleware) TransformInput(
 	// Noop.
 }
 
+// TransformableInput is passed to the TransformInput middleware method as a
+// pointer, allowing events and input data to be modified before function execution
+// begins.  This allows you to eg. implement data offloading to an external service.
 type TransformableInput struct {
 	Event  *event.Event
 	Events []*event.Event

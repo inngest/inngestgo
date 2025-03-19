@@ -13,8 +13,7 @@ type logContextKeyType struct{}
 
 var logContextKey = logContextKeyType{}
 
-// LoggerFromContext returns the logger from the context. Returns an error if no
-// logger is present.
+// LoggerFromContext returns the logger from the context. Returns an error if no logger is present.
 func LoggerFromContext(ctx context.Context) (*slog.Logger, error) {
 	value := ctx.Value(logContextKey)
 	if value == nil {
@@ -43,7 +42,7 @@ type logMiddlewareRequest struct {
 	logger       *slog.Logger
 }
 
-func (l *logMiddlewareRequest) BeforeExecution(ctx context.Context) {
+func (l *logMiddlewareRequest) BeforeExecution(ctx context.Context, call CallContext) {
 	// We're encountering "new code", so enable the logger.
 	l.enableLogger()
 }

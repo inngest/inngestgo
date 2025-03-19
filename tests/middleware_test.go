@@ -19,6 +19,68 @@ import (
 func TestClientMiddleware(t *testing.T) {
 	devEnv(t)
 
+	t.Run("panic capturing for error handling", func(t *testing.T) {
+		r := require.New(t)
+		ctx := context.Background()
+
+		var (
+			recovery any
+			stack    string
+			hit      int32
+		)
+
+		newMW := func() experimental.Middleware {
+			return &inlineMiddleware{
+				onPanic: func(ctx context.Context, call experimental.CallContext, r any, s string) {
+					recovery = r
+					stack = s
+				},
+			}
+		}
+
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+			AppID:      randomSuffix("app"),
+			Middleware: []func() experimental.Middleware{newMW},
+			Logger:     slog.New(slog.DiscardHandler),
+		})
+		r.NoError(err)
+
+		eventName := randomSuffix("event")
+		_, err = inngestgo.CreateFunction(
+			c,
+			inngestgo.FunctionOpts{
+				ID:      "fn",
+				Retries: inngestgo.IntPtr(1),
+			},
+			inngestgo.EventTrigger(eventName, nil),
+			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+
+				step.Run(ctx, "step", func(ctx context.Context) (string, error) {
+					return "ok", nil
+				})
+
+				atomic.AddInt32(&hit, 1)
+				panic("nah")
+				return nil, nil
+			},
+		)
+		r.NoError(err)
+
+		server, sync := serve(t, c)
+		defer server.Close()
+		r.NoError(sync())
+
+		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
+		r.NoError(err)
+
+		r.EventuallyWithT(func(ct *assert.CollectT) {
+			a := assert.New(ct)
+			a.True(atomic.LoadInt32(&hit) >= 1)
+			a.Contains(recovery, "nah")
+			a.Contains(stack, "middleware_test.go:")
+		}, 5*time.Second, 10*time.Millisecond)
+	})
+
 	t.Run("no hooks", func(t *testing.T) {
 		// Nothing errors when 0 hooks are provided.
 
@@ -181,6 +243,7 @@ func TestClientMiddleware(t *testing.T) {
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID:      randomSuffix("app"),
 			Middleware: []func() experimental.Middleware{newMW},
+			Logger:     slog.New(slog.DiscardHandler),
 		})
 		r.NoError(err)
 
@@ -246,6 +309,7 @@ func TestClientMiddleware(t *testing.T) {
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID:      randomSuffix("app"),
 			Middleware: []func() experimental.Middleware{newMW},
+			Logger:     slog.New(slog.DiscardHandler),
 		})
 		r.NoError(err)
 
@@ -663,23 +727,34 @@ func TestLoggerMiddleware(t *testing.T) {
 // inlineMiddleware is allows for anonymous middleware to be created within
 // functions.
 type inlineMiddleware struct {
+	// automatically implement any new methods.
+	experimental.BaseMiddleware
+
 	beforeExecutionFn func(ctx context.Context)
 	afterExecutionFn  func(ctx context.Context)
 	transformInputFn  func(input *experimental.TransformableInput, fn inngestgo.ServableFunction)
+	onPanic           func(ctx context.Context, call experimental.CallContext, recovery any, stack string)
 }
 
-func (m *inlineMiddleware) AfterExecution(ctx context.Context) {
+func (m *inlineMiddleware) BeforeExecution(ctx context.Context, call experimental.CallContext) {
+	if m.beforeExecutionFn == nil {
+		return
+	}
+	m.beforeExecutionFn(ctx)
+}
+
+func (m *inlineMiddleware) AfterExecution(ctx context.Context, call experimental.CallContext, result any, err error) {
 	if m.afterExecutionFn == nil {
 		return
 	}
 	m.afterExecutionFn(ctx)
 }
 
-func (m *inlineMiddleware) BeforeExecution(ctx context.Context) {
-	if m.beforeExecutionFn == nil {
+func (m *inlineMiddleware) OnPanic(ctx context.Context, call experimental.CallContext, recovery any, stack string) {
+	if m.onPanic == nil {
 		return
 	}
-	m.beforeExecutionFn(ctx)
+	m.onPanic(ctx, call, recovery, stack)
 }
 
 func (m *inlineMiddleware) TransformInput(
