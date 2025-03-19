@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/inngest/inngestgo/experimental"
+	"github.com/inngest/inngestgo/internal/middleware"
 )
 
 const (
@@ -96,7 +96,7 @@ type ClientOpts struct {
 	Dev *bool
 
 	// Middleware is a list of middleware to apply to the client.
-	Middleware []func() *experimental.Middleware
+	Middleware []func() middleware.Middleware
 }
 
 func (c ClientOpts) validate() error {
@@ -117,6 +117,10 @@ func NewClient(opts ClientOpts) (Client, error) {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
+
+	// Add the default log middleware as the first middleware.
+	mw := []func() middleware.Middleware{middleware.LogMiddleware(opts.Logger)}
+	opts.Middleware = append(mw, opts.Middleware...)
 
 	c := &apiClient{
 		ClientOpts: opts,

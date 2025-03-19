@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -24,13 +25,13 @@ func TestClientMiddleware(t *testing.T) {
 		r := require.New(t)
 		ctx := context.Background()
 
-		newMW := func() *experimental.Middleware {
-			return &experimental.Middleware{}
+		newMW := func() experimental.Middleware {
+			return &experimental.BaseMiddleware{}
 		}
 
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID:      randomSuffix("app"),
-			Middleware: []func() *experimental.Middleware{newMW},
+			Middleware: []func() experimental.Middleware{newMW},
 		})
 		r.NoError(err)
 
@@ -72,15 +73,15 @@ func TestClientMiddleware(t *testing.T) {
 		ctx := context.Background()
 
 		logs := []string{}
-		newMW := func() *experimental.Middleware {
-			return &experimental.Middleware{
-				AfterExecution: func(ctx context.Context) {
+		newMW := func() experimental.Middleware {
+			return &inlineMiddleware{
+				afterExecutionFn: func(ctx context.Context) {
 					logs = append(logs, "mw: AfterExecution")
 				},
-				BeforeExecution: func(ctx context.Context) {
+				beforeExecutionFn: func(ctx context.Context) {
 					logs = append(logs, "mw: BeforeExecution")
 				},
-				TransformInput: func(
+				transformInputFn: func(
 					input *middleware.TransformableInput,
 					fn inngestgo.ServableFunction,
 				) {
@@ -91,7 +92,7 @@ func TestClientMiddleware(t *testing.T) {
 
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID:      randomSuffix("app"),
-			Middleware: []func() *experimental.Middleware{newMW},
+			Middleware: []func() middleware.Middleware{newMW},
 		})
 		r.NoError(err)
 
@@ -168,15 +169,15 @@ func TestClientMiddleware(t *testing.T) {
 		ctx := context.Background()
 
 		logs := []string{}
-		newMW := func() *experimental.Middleware {
-			return &experimental.Middleware{
-				AfterExecution: func(ctx context.Context) {
+		newMW := func() experimental.Middleware {
+			return &inlineMiddleware{
+				afterExecutionFn: func(ctx context.Context) {
 					logs = append(logs, "mw: AfterExecution")
 				},
-				BeforeExecution: func(ctx context.Context) {
+				beforeExecutionFn: func(ctx context.Context) {
 					logs = append(logs, "mw: BeforeExecution")
 				},
-				TransformInput: func(
+				transformInputFn: func(
 					input *middleware.TransformableInput,
 					fn inngestgo.ServableFunction,
 				) {
@@ -187,7 +188,7 @@ func TestClientMiddleware(t *testing.T) {
 
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID:      randomSuffix("app"),
-			Middleware: []func() *experimental.Middleware{newMW},
+			Middleware: []func() experimental.Middleware{newMW},
 		})
 		r.NoError(err)
 
@@ -243,16 +244,16 @@ func TestClientMiddleware(t *testing.T) {
 		r := require.New(t)
 		ctx := context.Background()
 
-		newMW := func() *experimental.Middleware {
-			return &experimental.Middleware{
-				AfterExecution:  func(ctx context.Context) {},
-				BeforeExecution: func(ctx context.Context) {},
+		newMW := func() experimental.Middleware {
+			return &inlineMiddleware{
+				afterExecutionFn:  func(ctx context.Context) {},
+				beforeExecutionFn: func(ctx context.Context) {},
 			}
 		}
 
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID:      randomSuffix("app"),
-			Middleware: []func() *experimental.Middleware{newMW},
+			Middleware: []func() experimental.Middleware{newMW},
 		})
 		r.NoError(err)
 
@@ -298,15 +299,15 @@ func TestClientMiddleware(t *testing.T) {
 
 		logs := []string{}
 
-		newMW1 := func() *experimental.Middleware {
-			return &experimental.Middleware{
-				AfterExecution: func(ctx context.Context) {
+		newMW1 := func() experimental.Middleware {
+			return &inlineMiddleware{
+				afterExecutionFn: func(ctx context.Context) {
 					logs = append(logs, "1: AfterExecution")
 				},
-				BeforeExecution: func(ctx context.Context) {
+				beforeExecutionFn: func(ctx context.Context) {
 					logs = append(logs, "1: BeforeExecution")
 				},
-				TransformInput: func(
+				transformInputFn: func(
 					input *middleware.TransformableInput,
 					fn inngestgo.ServableFunction,
 				) {
@@ -315,15 +316,15 @@ func TestClientMiddleware(t *testing.T) {
 			}
 		}
 
-		newMW2 := func() *experimental.Middleware {
-			return &experimental.Middleware{
-				AfterExecution: func(ctx context.Context) {
+		newMW2 := func() experimental.Middleware {
+			return &inlineMiddleware{
+				afterExecutionFn: func(ctx context.Context) {
 					logs = append(logs, "2: AfterExecution")
 				},
-				BeforeExecution: func(ctx context.Context) {
+				beforeExecutionFn: func(ctx context.Context) {
 					logs = append(logs, "2: BeforeExecution")
 				},
-				TransformInput: func(
+				transformInputFn: func(
 					input *middleware.TransformableInput,
 					fn inngestgo.ServableFunction,
 				) {
@@ -334,7 +335,7 @@ func TestClientMiddleware(t *testing.T) {
 
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID:      randomSuffix("app"),
-			Middleware: []func() *experimental.Middleware{newMW1, newMW2},
+			Middleware: []func() experimental.Middleware{newMW1, newMW2},
 		})
 		r.NoError(err)
 
@@ -379,9 +380,9 @@ func TestClientMiddleware(t *testing.T) {
 			r := require.New(t)
 			ctx := context.Background()
 
-			newMW := func() *experimental.Middleware {
-				return &experimental.Middleware{
-					TransformInput: func(
+			newMW := func() experimental.Middleware {
+				return &inlineMiddleware{
+					transformInputFn: func(
 						input *middleware.TransformableInput,
 						fn inngestgo.ServableFunction,
 					) {
@@ -396,7 +397,7 @@ func TestClientMiddleware(t *testing.T) {
 
 			c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 				AppID:      randomSuffix("app"),
-				Middleware: []func() *experimental.Middleware{newMW},
+				Middleware: []func() experimental.Middleware{newMW},
 			})
 			r.NoError(err)
 
@@ -459,9 +460,9 @@ func TestClientMiddleware(t *testing.T) {
 			r := require.New(t)
 			ctx := context.Background()
 
-			newMW := func() *experimental.Middleware {
-				return &experimental.Middleware{
-					TransformInput: func(
+			newMW := func() experimental.Middleware {
+				return &inlineMiddleware{
+					transformInputFn: func(
 						input *middleware.TransformableInput,
 						fn inngestgo.ServableFunction,
 					) {
@@ -476,7 +477,7 @@ func TestClientMiddleware(t *testing.T) {
 
 			c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 				AppID:      randomSuffix("app"),
-				Middleware: []func() *experimental.Middleware{newMW},
+				Middleware: []func() experimental.Middleware{newMW},
 			})
 			r.NoError(err)
 
@@ -545,9 +546,9 @@ func TestClientMiddleware(t *testing.T) {
 			type contextKeyType struct{}
 			contextKey := contextKeyType{}
 
-			newMW := func() *experimental.Middleware {
-				return &experimental.Middleware{
-					TransformInput: func(
+			newMW := func() experimental.Middleware {
+				return &inlineMiddleware{
+					transformInputFn: func(
 						input *middleware.TransformableInput,
 						fn inngestgo.ServableFunction,
 					) {
@@ -560,7 +561,7 @@ func TestClientMiddleware(t *testing.T) {
 
 			c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 				AppID:      randomSuffix("app"),
-				Middleware: []func() *experimental.Middleware{newMW},
+				Middleware: []func() experimental.Middleware{newMW},
 			})
 			r.NoError(err)
 
@@ -596,4 +597,136 @@ func TestClientMiddleware(t *testing.T) {
 			}, 5*time.Second, 10*time.Millisecond)
 		})
 	})
+}
+
+func TestLoggerMiddleware(t *testing.T) {
+	devEnv(t)
+	r := require.New(t)
+	ctx := context.Background()
+
+	// We need to use a fake level to let us filter out logs from stuff outside
+	// the Inngest function. Since the logger middleware uses the client logger,
+	// it'll capture unrelated logs like syncing the app.
+	fakeLevel := 999
+
+	logs := []string{}
+	logger := slog.New(mockLogHandler{
+		handle: func(ctx context.Context, record slog.Record) error {
+			if int(record.Level) != fakeLevel {
+				// Not a log from the Inngest function.
+				return nil
+			}
+			logs = append(logs, record.Message)
+			return nil
+		},
+	})
+
+	c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+		AppID:  randomSuffix("app"),
+		Logger: logger,
+	})
+	r.NoError(err)
+
+	eventName := randomSuffix("event")
+	_, err = inngestgo.CreateFunction(
+		c,
+		inngestgo.FunctionOpts{
+			ID:      "fn",
+			Retries: inngestgo.IntPtr(0),
+		},
+		inngestgo.EventTrigger(eventName, nil),
+		func(
+			ctx context.Context,
+			input inngestgo.Input[any],
+		) (any, error) {
+			l, err := experimental.LoggerFromContext(ctx)
+			if err != nil {
+				return nil, err
+			}
+
+			l.Log(ctx, slog.Level(fakeLevel), "fn start")
+
+			_, err = step.Run(ctx, "a", func(ctx context.Context) (any, error) {
+				l.Log(ctx, slog.Level(fakeLevel), "step a")
+				return nil, nil
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			_, err = step.Run(ctx, "b", func(ctx context.Context) (any, error) {
+				l.Log(ctx, slog.Level(fakeLevel), "step b")
+				return nil, nil
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			l.Log(ctx, slog.Level(fakeLevel), "fn end")
+			return nil, nil
+		},
+	)
+	r.NoError(err)
+
+	server, sync := serve(t, c)
+	defer server.Close()
+	r.NoError(sync())
+
+	_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
+	r.NoError(err)
+
+	r.EventuallyWithT(func(ct *assert.CollectT) {
+		a := assert.New(ct)
+		a.Equal([]string{
+			"fn start",
+			"step a",
+			"step b",
+			"fn end",
+		}, logs)
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+// inlineMiddleware is allows for anonymous middleware to be created within
+// functions.
+type inlineMiddleware struct {
+	beforeExecutionFn func(ctx context.Context)
+	afterExecutionFn  func(ctx context.Context)
+	transformInputFn  func(input *middleware.TransformableInput, fn inngestgo.ServableFunction)
+}
+
+func (m *inlineMiddleware) AfterExecution(ctx context.Context) {
+	m.afterExecutionFn(ctx)
+}
+
+func (m *inlineMiddleware) BeforeExecution(ctx context.Context) {
+	m.beforeExecutionFn(ctx)
+}
+
+func (m *inlineMiddleware) TransformInput(
+	input *middleware.TransformableInput,
+	fn inngestgo.ServableFunction,
+) {
+	m.transformInputFn(input, fn)
+}
+
+// mockLogHandler is a mock slog.Handler that can be used to test the
+// LogMiddleware.
+type mockLogHandler struct {
+	handle func(ctx context.Context, record slog.Record) error
+}
+
+func (h mockLogHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return true
+}
+
+func (h mockLogHandler) Handle(ctx context.Context, record slog.Record) error {
+	return h.handle(ctx, record)
+}
+
+func (h mockLogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return h
+}
+
+func (h mockLogHandler) WithGroup(name string) slog.Handler {
+	return h
 }

@@ -10,7 +10,7 @@ import (
 func NewMiddlewareManager() *MiddlewareManager {
 	return &MiddlewareManager{
 		idempotentHooks: &types.Set[string]{},
-		items:           []*Middleware{},
+		items:           []Middleware{},
 	}
 }
 
@@ -21,11 +21,11 @@ type MiddlewareManager struct {
 	// request.
 	idempotentHooks *types.Set[string]
 
-	items []*Middleware
+	items []Middleware
 }
 
 // Add adds middleware to the manager.
-func (m *MiddlewareManager) Add(mw ...func() *Middleware) *MiddlewareManager {
+func (m *MiddlewareManager) Add(mw ...func() Middleware) *MiddlewareManager {
 	for _, mw := range mw {
 		m.items = append(m.items, mw())
 	}
@@ -38,9 +38,7 @@ func (m *MiddlewareManager) AfterExecution(ctx context.Context) {
 		// executed first.
 		mw := m.items[len(m.items)-1-i]
 
-		if mw.AfterExecution != nil {
-			mw.AfterExecution(ctx)
-		}
+		mw.AfterExecution(ctx)
 	}
 }
 
@@ -54,9 +52,7 @@ func (m *MiddlewareManager) BeforeExecution(ctx context.Context) {
 	m.idempotentHooks.Add(hook)
 
 	for _, mw := range m.items {
-		if mw.BeforeExecution != nil {
-			mw.BeforeExecution(ctx)
-		}
+		mw.BeforeExecution(ctx)
 	}
 }
 
@@ -65,8 +61,6 @@ func (m *MiddlewareManager) TransformInput(
 	fn fn.ServableFunction,
 ) {
 	for _, mw := range m.items {
-		if mw.TransformInput != nil {
-			mw.TransformInput(input, fn)
-		}
+		mw.TransformInput(input, fn)
 	}
 }

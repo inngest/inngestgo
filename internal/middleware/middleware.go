@@ -7,19 +7,36 @@ import (
 	"github.com/inngest/inngestgo/internal/fn"
 )
 
-type Middleware struct {
+type Middleware interface {
 	// AfterExecution is called after executing "new code".
-	AfterExecution func(ctx context.Context)
+	AfterExecution(ctx context.Context)
 
 	// BeforeExecution is called before executing "new code".
-	BeforeExecution func(ctx context.Context)
+	BeforeExecution(ctx context.Context)
 
 	// TransformInput is called before entering the Inngest function. It gives
 	// an opportunity to modify the input before it is sent to the function.
-	TransformInput func(
+	TransformInput(
 		input *TransformableInput,
 		fn fn.ServableFunction,
 	)
+}
+
+type BaseMiddleware struct{}
+
+func (m *BaseMiddleware) AfterExecution(ctx context.Context) {
+	// Noop.
+}
+
+func (m *BaseMiddleware) BeforeExecution(ctx context.Context) {
+	// Noop.
+}
+
+func (m *BaseMiddleware) TransformInput(
+	input *TransformableInput,
+	fn fn.ServableFunction,
+) {
+	// Noop.
 }
 
 type TransformableInput struct {
