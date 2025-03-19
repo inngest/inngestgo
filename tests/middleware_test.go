@@ -695,10 +695,16 @@ type inlineMiddleware struct {
 }
 
 func (m *inlineMiddleware) AfterExecution(ctx context.Context) {
+	if m.afterExecutionFn == nil {
+		return
+	}
 	m.afterExecutionFn(ctx)
 }
 
 func (m *inlineMiddleware) BeforeExecution(ctx context.Context) {
+	if m.beforeExecutionFn == nil {
+		return
+	}
 	m.beforeExecutionFn(ctx)
 }
 
@@ -706,6 +712,9 @@ func (m *inlineMiddleware) TransformInput(
 	input *middleware.TransformableInput,
 	fn inngestgo.ServableFunction,
 ) {
+	if m.transformInputFn == nil {
+		return
+	}
 	m.transformInputFn(input, fn)
 }
 
