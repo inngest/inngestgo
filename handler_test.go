@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1004,12 +1005,12 @@ func TestConnectSync(t *testing.T) {
 		connectCtx, cancelConnectCtx := context.WithCancel(context.Background())
 		defer cancelConnectCtx()
 
-		headers := http.Header{}
+		headers := sync.Map{}
 		server := httptest.NewServer(http.HandlerFunc(
 			func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/v0/connect/start" {
 					for k, v := range r.Header {
-						headers.Add(k, v[0])
+						headers.Store(k, v[0])
 					}
 					cancelConnectCtx()
 					w.WriteHeader(http.StatusOK)
@@ -1046,7 +1047,7 @@ func TestConnectSync(t *testing.T) {
 
 		r.EventuallyWithT(func(t *assert.CollectT) {
 			a := assert.New(t)
-			a.NotEmpty(headers.Get("Authorization"))
+			a.NotEmpty(headers.Load("Authorization"))
 		}, 5*time.Second, 10*time.Millisecond)
 	})
 
@@ -1059,15 +1060,15 @@ func TestConnectSync(t *testing.T) {
 		connectCtx, cancelConnectCtx := context.WithCancel(context.Background())
 		defer cancelConnectCtx()
 
-		headers := http.Header{}
-		called := false
+		var called int32
+		headers := sync.Map{}
 		server := httptest.NewServer(http.HandlerFunc(
 			func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/v0/connect/start" {
 					for k, v := range r.Header {
-						headers.Add(k, v[0])
+						headers.Store(k, v[0])
 					}
-					called = true
+					atomic.StoreInt32(&called, 1)
 					cancelConnectCtx()
 					w.WriteHeader(http.StatusOK)
 					return
@@ -1102,8 +1103,8 @@ func TestConnectSync(t *testing.T) {
 
 		r.EventuallyWithT(func(t *assert.CollectT) {
 			a := assert.New(t)
-			a.Empty(headers.Get("Authorization"))
-			a.True(called)
+			a.Empty(headers.Load("Authorization"))
+			a.True(atomic.LoadInt32(&called) == 1)
 		}, 5*time.Second, 10*time.Millisecond)
 	})
 }
