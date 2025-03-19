@@ -38,6 +38,33 @@ type SleepUntilParam interface {
 	time.Time | string
 }
 
+// SleepUntil sleeps until a given time.  This halts function execution entirely,
+// and Inngest will resume the function after the given time from this step.
+//
+// This uses type constraints so that you can pass in a time.Time, or a string
+// in one of the common RFC timestamps:
+//
+//	step.SleepUntil(ctx, "time.Time", time.Now().Add(time.Hour))
+//	step.SleepUntil(ctx, "time.Time", "2025-04-01T00:00:00Z07:00")
+//	step.SleepUntil(ctx, "time.Time", "2025-04-01")
+//
+// Supported timestamp formats are as follows:
+//
+//	time.RFC3339,
+//	"2006-01-02T15:04:05",
+//	time.RFC1123,
+//	time.RFC822,
+//	time.RFC822Z,
+//	time.RFC850,
+//	time.RubyDate,
+//	time.UnixDate,
+//	time.ANSIC,
+//	time.Stamp,
+//	time.StampMilli,
+//	"2006-01-02",
+//
+// Strings or times without time zones will be parsed in the UTC timezone.  If
+// a string is unable to be parsed, SleepUntil will resume immediately.
 func SleepUntil[T SleepUntilParam](ctx context.Context, id string, until T) {
 	var duration time.Duration
 
@@ -45,7 +72,6 @@ func SleepUntil[T SleepUntilParam](ctx context.Context, id string, until T) {
 	case string:
 		// Parse the time using built-in standards.
 		t, _ := dateutil.Parse(until)
-		// XXX: Handle error.
 		duration = time.Until(t)
 	case time.Time:
 		duration = time.Until(v)
