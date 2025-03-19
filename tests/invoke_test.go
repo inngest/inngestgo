@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngestgo"
 	"github.com/inngest/inngestgo/step"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,14 +38,14 @@ func TestInvoke(t *testing.T) {
 			inngestgo.EventTrigger("never", nil),
 			func(
 				ctx context.Context,
-				input inngestgo.Input[inngestgo.GenericEvent[ChildEventData, any]],
+				input inngestgo.Input[ChildEventData],
 			) (any, error) {
 				return input.Event.Data.Message, nil
 			},
 		)
 		r.NoError(err)
 
-		var runID string
+		var runID atomic.Value
 		var invokeResult any
 		var invokeErr error
 		eventName := randomSuffix("my-event")
@@ -60,7 +58,7 @@ func TestInvoke(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				runID = input.InputCtx.RunID
+				runID.Store(input.InputCtx.RunID)
 				invokeResult, invokeErr = step.Invoke[any](ctx,
 					"invoke",
 					step.InvokeOpts{
@@ -82,18 +80,7 @@ func TestInvoke(t *testing.T) {
 			Data: map[string]any{"foo": "bar"}},
 		)
 		r.NoError(err)
-
-		var run *Run
-		r.EventuallyWithT(func(ct *assert.CollectT) {
-			a := assert.New(ct)
-
-			run, err = getRun(runID)
-			if !a.NoError(err) {
-				return
-			}
-
-			a.Equal(enums.RunStatusCompleted.String(), run.Status)
-		}, 5*time.Second, time.Second)
+		run := waitForRun(t, &runID, enums.RunStatusCompleted.String())
 
 		r.Equal("hello", invokeResult)
 		r.NoError(invokeErr)
@@ -125,7 +112,7 @@ func TestInvoke(t *testing.T) {
 			},
 		)
 		r.NoError(err)
-		var runID string
+		var runID atomic.Value
 		var invokeResult any
 		var invokeErr error
 		eventName := randomSuffix("my-event")
@@ -138,7 +125,7 @@ func TestInvoke(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				runID = input.InputCtx.RunID
+				runID.Store(input.InputCtx.RunID)
 				invokeResult, invokeErr = step.Invoke[any](ctx,
 					"invoke",
 					step.InvokeOpts{
@@ -159,18 +146,7 @@ func TestInvoke(t *testing.T) {
 			Data: map[string]any{"foo": "bar"}},
 		)
 		r.NoError(err)
-
-		var run *Run
-		r.EventuallyWithT(func(ct *assert.CollectT) {
-			a := assert.New(ct)
-
-			run, err = getRun(runID)
-			if !a.NoError(err) {
-				return
-			}
-
-			a.Equal(enums.RunStatusFailed.String(), run.Status)
-		}, 5*time.Second, time.Second)
+		run := waitForRun(t, &runID, enums.RunStatusFailed.String())
 
 		r.Nil(invokeResult)
 		r.Equal("oh no", invokeErr.Error())
@@ -190,7 +166,7 @@ func TestInvoke(t *testing.T) {
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
 		r.NoError(err)
 
-		var runID string
+		var runID atomic.Value
 		var invokeResult any
 		var invokeErr error
 		eventName := randomSuffix("my-event")
@@ -203,7 +179,7 @@ func TestInvoke(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				runID = input.InputCtx.RunID
+				runID.Store(input.InputCtx.RunID)
 				invokeResult, invokeErr = step.Invoke[any](ctx,
 					"invoke",
 					step.InvokeOpts{FunctionId: "some-non-existent-fn"},
@@ -222,18 +198,7 @@ func TestInvoke(t *testing.T) {
 			Data: map[string]any{"foo": "bar"}},
 		)
 		r.NoError(err)
-
-		var run *Run
-		r.EventuallyWithT(func(ct *assert.CollectT) {
-			a := assert.New(ct)
-
-			run, err = getRun(runID)
-			if !a.NoError(err) {
-				return
-			}
-
-			a.Equal(enums.RunStatusFailed.String(), run.Status)
-		}, 5*time.Second, time.Second)
+		run := waitForRun(t, &runID, enums.RunStatusFailed.String())
 
 		r.Equal(
 			map[string]any{
@@ -276,7 +241,7 @@ func TestInvoke(t *testing.T) {
 		)
 		r.NoError(err)
 
-		var runID string
+		var runID atomic.Value
 		var invokeErr error
 		eventName := randomSuffix("my-event")
 		_, err = inngestgo.CreateFunction(
@@ -288,7 +253,7 @@ func TestInvoke(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				runID = input.InputCtx.RunID
+				runID.Store(input.InputCtx.RunID)
 				_, invokeErr = step.Invoke[any](ctx,
 					"invoke",
 					step.InvokeOpts{
@@ -314,16 +279,7 @@ func TestInvoke(t *testing.T) {
 			Data: map[string]any{"foo": "bar"}},
 		)
 		r.NoError(err)
-
-		var run *Run
-		r.EventuallyWithT(func(ct *assert.CollectT) {
-			a := assert.New(ct)
-			run, err = getRun(runID)
-			if !a.NoError(err) {
-				return
-			}
-			a.Equal(enums.RunStatusCompleted.String(), run.Status)
-		}, 5*time.Second, time.Second)
+		waitForRun(t, &runID, enums.RunStatusCompleted.String())
 
 		r.Error(invokeErr)
 		r.Equal(int32(1), childCounter)
@@ -358,7 +314,7 @@ func TestInvoke(t *testing.T) {
 			},
 		)
 		r.NoError(err)
-		var runID string
+		var runID atomic.Value
 		var attempt int
 		eventName := randomSuffix("my-event")
 		_, err = inngestgo.CreateFunction(
@@ -373,7 +329,7 @@ func TestInvoke(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				runID = input.InputCtx.RunID
+				runID.Store(input.InputCtx.RunID)
 				attempt = input.InputCtx.Attempt
 				return step.Invoke[any](ctx,
 					"invoke",
@@ -394,16 +350,7 @@ func TestInvoke(t *testing.T) {
 			Data: map[string]any{"foo": "bar"}},
 		)
 		r.NoError(err)
-
-		var run *Run
-		r.EventuallyWithT(func(ct *assert.CollectT) {
-			a := assert.New(ct)
-			run, err = getRun(runID)
-			if !a.NoError(err) {
-				return
-			}
-			a.Equal(enums.RunStatusFailed.String(), run.Status)
-		}, 5*time.Second, time.Second)
+		waitForRun(t, &runID, enums.RunStatusFailed.String())
 
 		r.Equal(int32(1), childCounter)
 

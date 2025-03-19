@@ -17,7 +17,7 @@ const (
 )
 
 type Event = event.Event
-type GenericEvent[DATA any, USER any] = event.GenericEvent[DATA, USER]
+type GenericEvent[DATA any] = event.GenericEvent[DATA]
 
 // NowMillis returns a timestamp with millisecond precision used for the Event.Timestamp
 // field.

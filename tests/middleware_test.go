@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,7 +35,7 @@ func TestClientMiddleware(t *testing.T) {
 		})
 		r.NoError(err)
 
-		var runID string
+		var runID atomic.Value
 		eventName := randomSuffix("event")
 		_, err = inngestgo.CreateFunction(
 			c,
@@ -44,7 +45,7 @@ func TestClientMiddleware(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				runID = input.InputCtx.RunID
+				runID.Store(input.InputCtx.RunID)
 				return nil, nil
 			},
 		)
@@ -56,35 +57,27 @@ func TestClientMiddleware(t *testing.T) {
 
 		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
 		r.NoError(err)
-
-		r.EventuallyWithT(func(ct *assert.CollectT) {
-			a := assert.New(ct)
-			run, err := getRun(runID)
-			if !a.NoError(err) {
-				return
-			}
-			a.Equal(enums.RunStatusCompleted.String(), run.Status)
-		}, 5*time.Second, 10*time.Millisecond)
+		waitForRun(t, &runID, enums.RunStatusCompleted.String())
 	})
 
 	t.Run("2 steps", func(t *testing.T) {
 		r := require.New(t)
 		ctx := context.Background()
 
-		logs := []string{}
+		var logs SafeSlice[string]
 		newMW := func() experimental.Middleware {
 			return &inlineMiddleware{
 				afterExecutionFn: func(ctx context.Context) {
-					logs = append(logs, "mw: AfterExecution")
+					logs.Append("mw: AfterExecution")
 				},
 				beforeExecutionFn: func(ctx context.Context) {
-					logs = append(logs, "mw: BeforeExecution")
+					logs.Append("mw: BeforeExecution")
 				},
 				transformInputFn: func(
 					input *experimental.TransformableInput,
 					fn inngestgo.ServableFunction,
 				) {
-					logs = append(logs, "mw: TransformInput")
+					logs.Append("mw: TransformInput")
 				},
 			}
 		}
@@ -104,24 +97,24 @@ func TestClientMiddleware(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				logs = append(logs, "fn: top")
+				logs.Append("fn: top")
 
 				_, err := step.Run(ctx, "a", func(ctx context.Context) (any, error) {
-					logs = append(logs, "a: running")
+					logs.Append("a: running")
 					return nil, nil
 				})
 				if err != nil {
 					return nil, err
 				}
 
-				logs = append(logs, "fn: between steps")
+				logs.Append("fn: between steps")
 
 				_, err = step.Run(ctx, "b", func(ctx context.Context) (any, error) {
-					logs = append(logs, "b: running")
+					logs.Append("b: running")
 					return nil, nil
 				})
 
-				logs = append(logs, "fn: bottom")
+				logs.Append("fn: bottom")
 				return nil, err
 			},
 		)
@@ -159,7 +152,7 @@ func TestClientMiddleware(t *testing.T) {
 				"mw: BeforeExecution",
 				"fn: bottom",
 				"mw: AfterExecution",
-			}, logs)
+			}, logs.Load())
 		}, 5*time.Second, 10*time.Millisecond)
 	})
 
@@ -167,20 +160,20 @@ func TestClientMiddleware(t *testing.T) {
 		r := require.New(t)
 		ctx := context.Background()
 
-		logs := []string{}
+		var logs SafeSlice[string]
 		newMW := func() experimental.Middleware {
 			return &inlineMiddleware{
 				afterExecutionFn: func(ctx context.Context) {
-					logs = append(logs, "mw: AfterExecution")
+					logs.Append("mw: AfterExecution")
 				},
 				beforeExecutionFn: func(ctx context.Context) {
-					logs = append(logs, "mw: BeforeExecution")
+					logs.Append("mw: BeforeExecution")
 				},
 				transformInputFn: func(
 					input *experimental.TransformableInput,
 					fn inngestgo.ServableFunction,
 				) {
-					logs = append(logs, "mw: TransformInput")
+					logs.Append("mw: TransformInput")
 				},
 			}
 		}
@@ -200,14 +193,14 @@ func TestClientMiddleware(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				logs = append(logs, "fn: top")
+				logs.Append("fn: top")
 				if input.InputCtx.Attempt == 0 {
 					return nil, inngestgo.RetryAtError(
 						errors.New("oh no"),
 						time.Now().Add(time.Second),
 					)
 				}
-				logs = append(logs, "fn: bottom")
+				logs.Append("fn: bottom")
 				return nil, nil
 			},
 		)
@@ -235,7 +228,7 @@ func TestClientMiddleware(t *testing.T) {
 				"fn: top",
 				"fn: bottom",
 				"mw: AfterExecution",
-			}, logs)
+			}, logs.Load())
 		}, 5*time.Second, 10*time.Millisecond)
 	})
 
@@ -256,7 +249,7 @@ func TestClientMiddleware(t *testing.T) {
 		})
 		r.NoError(err)
 
-		var runID string
+		var runID atomic.Value
 		eventName := randomSuffix("event")
 		_, err = inngestgo.CreateFunction(
 			c,
@@ -266,7 +259,7 @@ func TestClientMiddleware(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				runID = input.InputCtx.RunID
+				runID.Store(input.InputCtx.RunID)
 				return nil, nil
 			},
 		)
@@ -281,36 +274,28 @@ func TestClientMiddleware(t *testing.T) {
 
 		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
 		r.NoError(err)
-
-		r.EventuallyWithT(func(ct *assert.CollectT) {
-			a := assert.New(ct)
-			run, err := getRun(runID)
-			if !a.NoError(err) {
-				return
-			}
-			a.Equal(enums.RunStatusCompleted.String(), run.Status)
-		}, 5*time.Second, 10*time.Millisecond)
+		waitForRun(t, &runID, enums.RunStatusCompleted.String())
 	})
 
 	t.Run("multiple", func(t *testing.T) {
 		r := require.New(t)
 		ctx := context.Background()
 
-		logs := []string{}
+		var logs SafeSlice[string]
 
 		newMW1 := func() experimental.Middleware {
 			return &inlineMiddleware{
 				afterExecutionFn: func(ctx context.Context) {
-					logs = append(logs, "1: AfterExecution")
+					logs.Append("1: AfterExecution")
 				},
 				beforeExecutionFn: func(ctx context.Context) {
-					logs = append(logs, "1: BeforeExecution")
+					logs.Append("1: BeforeExecution")
 				},
 				transformInputFn: func(
 					input *experimental.TransformableInput,
 					fn inngestgo.ServableFunction,
 				) {
-					logs = append(logs, "1: TransformInput")
+					logs.Append("1: TransformInput")
 				},
 			}
 		}
@@ -318,16 +303,16 @@ func TestClientMiddleware(t *testing.T) {
 		newMW2 := func() experimental.Middleware {
 			return &inlineMiddleware{
 				afterExecutionFn: func(ctx context.Context) {
-					logs = append(logs, "2: AfterExecution")
+					logs.Append("2: AfterExecution")
 				},
 				beforeExecutionFn: func(ctx context.Context) {
-					logs = append(logs, "2: BeforeExecution")
+					logs.Append("2: BeforeExecution")
 				},
 				transformInputFn: func(
 					input *experimental.TransformableInput,
 					fn inngestgo.ServableFunction,
 				) {
-					logs = append(logs, "2: TransformInput")
+					logs.Append("2: TransformInput")
 				},
 			}
 		}
@@ -368,7 +353,7 @@ func TestClientMiddleware(t *testing.T) {
 				"2: BeforeExecution",
 				"2: AfterExecution",
 				"1: AfterExecution",
-			}, logs)
+			}, logs.Load())
 		}, 5*time.Second, 10*time.Millisecond)
 	})
 
@@ -400,8 +385,9 @@ func TestClientMiddleware(t *testing.T) {
 			})
 			r.NoError(err)
 
-			var event *inngestgo.GenericEvent[map[string]any, any]
-			var events []inngestgo.GenericEvent[map[string]any, any]
+			var runID atomic.Value
+			var event *inngestgo.GenericEvent[map[string]any]
+			var events []inngestgo.GenericEvent[map[string]any]
 			eventName := randomSuffix("event")
 			_, err = inngestgo.CreateFunction(
 				c,
@@ -412,8 +398,9 @@ func TestClientMiddleware(t *testing.T) {
 				inngestgo.EventTrigger(eventName, nil),
 				func(
 					ctx context.Context,
-					input inngestgo.Input[inngestgo.GenericEvent[map[string]any, any]],
+					input inngestgo.Input[map[string]any],
 				) (any, error) {
+					runID.Store(input.InputCtx.RunID)
 					event = &input.Event
 					events = input.Events
 					return nil, nil
@@ -430,12 +417,7 @@ func TestClientMiddleware(t *testing.T) {
 				Name: eventName,
 			})
 			r.NoError(err)
-
-			r.EventuallyWithT(func(ct *assert.CollectT) {
-				a := assert.New(ct)
-				a.NotNil(event)
-				a.NotNil(events)
-			}, 5*time.Second, 10*time.Millisecond)
+			waitForRun(t, &runID, enums.RunStatusCompleted.String())
 
 			// Assert event.
 			r.Equal(eventName, event.Name)
@@ -480,8 +462,9 @@ func TestClientMiddleware(t *testing.T) {
 			})
 			r.NoError(err)
 
-			var event any
-			var events []any
+			var runID atomic.Value
+			var event *inngestgo.GenericEvent[any]
+			var events []inngestgo.GenericEvent[any]
 			eventName := randomSuffix("event")
 			_, err = inngestgo.CreateFunction(
 				c,
@@ -494,7 +477,8 @@ func TestClientMiddleware(t *testing.T) {
 					ctx context.Context,
 					input inngestgo.Input[any],
 				) (any, error) {
-					event = input.Event
+					runID.Store(input.InputCtx.RunID)
+					event = &input.Event
 					events = input.Events
 					return nil, nil
 				},
@@ -510,30 +494,22 @@ func TestClientMiddleware(t *testing.T) {
 				Name: eventName,
 			})
 			r.NoError(err)
-
-			r.EventuallyWithT(func(ct *assert.CollectT) {
-				a := assert.New(ct)
-				a.NotNil(event)
-			}, 5*time.Second, 10*time.Millisecond)
+			waitForRun(t, &runID, enums.RunStatusCompleted.String())
 
 			// Assert event.
-			v, ok := event.(map[string]any)
-			r.True(ok)
-			r.Equal(eventName, v["name"])
+			r.Equal(eventName, event.Name)
 			r.Equal(map[string]any{
 				"msg":         "hi",
 				"transformed": true,
-			}, v["data"])
+			}, event.Data)
 
 			// Assert events.
 			r.Len(events, 1)
-			v, ok = events[0].(map[string]any)
-			r.True(ok)
-			r.Equal(eventName, v["name"])
+			r.Equal(eventName, events[0].Name)
 			r.Equal(map[string]any{
 				"msg":         "hi",
 				"transformed": true,
-			}, v["data"])
+			}, events[0].Data)
 		})
 
 		t.Run("context", func(t *testing.T) {
@@ -564,6 +540,7 @@ func TestClientMiddleware(t *testing.T) {
 			})
 			r.NoError(err)
 
+			var runID atomic.Value
 			var value any
 			eventName := randomSuffix("event")
 			_, err = inngestgo.CreateFunction(
@@ -577,6 +554,7 @@ func TestClientMiddleware(t *testing.T) {
 					ctx context.Context,
 					input inngestgo.Input[any],
 				) (any, error) {
+					runID.Store(input.InputCtx.RunID)
 					value = ctx.Value(contextKey)
 					return nil, nil
 				},
@@ -589,11 +567,8 @@ func TestClientMiddleware(t *testing.T) {
 
 			_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
 			r.NoError(err)
-
-			r.EventuallyWithT(func(ct *assert.CollectT) {
-				a := assert.New(ct)
-				a.Equal("hello", value)
-			}, 5*time.Second, 10*time.Millisecond)
+			waitForRun(t, &runID, enums.RunStatusCompleted.String())
+			r.Equal("hello", value)
 		})
 	})
 }
@@ -608,14 +583,14 @@ func TestLoggerMiddleware(t *testing.T) {
 	// it'll capture unrelated logs like syncing the app.
 	fakeLevel := 999
 
-	logs := []string{}
+	var logs SafeSlice[string]
 	logger := slog.New(mockLogHandler{
 		handle: func(ctx context.Context, record slog.Record) error {
 			if int(record.Level) != fakeLevel {
 				// Not a log from the Inngest function.
 				return nil
 			}
-			logs = append(logs, record.Message)
+			logs.Append(record.Message)
 			return nil
 		},
 	})
@@ -681,7 +656,7 @@ func TestLoggerMiddleware(t *testing.T) {
 			"step a",
 			"step b",
 			"fn end",
-		}, logs)
+		}, logs.Load())
 	}, 5*time.Second, 10*time.Millisecond)
 }
 

@@ -101,9 +101,9 @@ func main() {
 	}
 }
 
-type TestRunEvent inngestgo.GenericEvent[any, any]
+type TestRunEvent inngestgo.GenericEvent[any]
 
-func testRun(ctx context.Context, input inngestgo.Input[TestRunEvent]) (any, error) {
+func testRun(ctx context.Context, input inngestgo.Input[any]) (any, error) {
 	fmt.Println("HELLO")
 
 	return "Connected!!", nil

@@ -46,6 +46,7 @@ func TestParallel(t *testing.T) {
 		)
 		r.NoError(err)
 
+		var runID atomic.Value
 		eventName := randomSuffix("my-event")
 		_, err = inngestgo.CreateFunction(
 			c,
@@ -55,6 +56,7 @@ func TestParallel(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+				runID.Store(input.InputCtx.RunID)
 				atomic.AddInt32(&requestCount, 1)
 
 				results = group.Parallel(
@@ -119,13 +121,12 @@ func TestParallel(t *testing.T) {
 
 		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
 		r.NoError(err)
+		waitForRun(t, &runID, enums.RunStatusCompleted.String())
 
-		r.Eventually(func() bool {
-			return stepAfterCounter == 1
-		}, 5*time.Second, 10*time.Millisecond)
 		r.Equal(1, invokedFnCounter)
 		r.Equal(1, step1ACounter)
 		r.Equal(1, step1BCounter)
+		r.Equal(1, stepAfterCounter)
 		r.Equal(results, group.Results{
 			{Value: "invoked output"},
 			{Value: 1},
@@ -133,7 +134,7 @@ func TestParallel(t *testing.T) {
 			{Value: nil},
 			{Error: step.ErrEventNotReceived},
 		})
-		r.Equal(int(requestCount), 6)
+		r.Equal(int(requestCount), 7)
 	})
 
 	t.Run("panic", func(t *testing.T) {
@@ -144,7 +145,7 @@ func TestParallel(t *testing.T) {
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
 		r.NoError(err)
 
-		var runID string
+		var runID atomic.Value
 		var results group.Results
 		eventName := randomSuffix("my-event")
 		_, err = inngestgo.CreateFunction(
@@ -156,7 +157,7 @@ func TestParallel(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				runID = input.InputCtx.RunID
+				runID.Store(input.InputCtx.RunID)
 
 				results = group.Parallel(
 					ctx,
@@ -199,7 +200,8 @@ func TestParallel(t *testing.T) {
 		})
 		r.NoError(err)
 
-		var logs []string
+		var runID atomic.Value
+		var logs SafeSlice[string]
 		var step1ACounter int
 		var step1BCounter int
 		var step2Counter int
@@ -212,11 +214,12 @@ func TestParallel(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+				runID.Store(input.InputCtx.RunID)
 				results := group.Parallel(
 					ctx,
 					func(ctx context.Context) (any, error) {
 						_, err := step.Run(ctx, "1a", func(ctx context.Context) (any, error) {
-							logs = append(logs, "1a")
+							logs.Append("1a")
 							step1ACounter++
 							return nil, nil
 						})
@@ -225,7 +228,7 @@ func TestParallel(t *testing.T) {
 						}
 
 						return step.Run(ctx, "1b", func(ctx context.Context) (any, error) {
-							logs = append(logs, "1b")
+							logs.Append("1b")
 							step1BCounter++
 							return nil, nil
 						})
@@ -235,7 +238,7 @@ func TestParallel(t *testing.T) {
 							// Sleep to better demonstrate how step 1b runs after step 2.
 							time.Sleep(time.Second)
 
-							logs = append(logs, "2")
+							logs.Append("2")
 							step2Counter++
 							return nil, nil
 						})
@@ -247,7 +250,7 @@ func TestParallel(t *testing.T) {
 				}
 
 				return step.Run(ctx, "after", func(ctx context.Context) (any, error) {
-					logs = append(logs, "after")
+					logs.Append("after")
 					stepAfterCounter++
 					return nil, nil
 				})
@@ -261,17 +264,16 @@ func TestParallel(t *testing.T) {
 
 		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
 		r.NoError(err)
+		waitForRun(t, &runID, enums.RunStatusCompleted.String())
 
-		r.Eventually(func() bool {
-			return stepAfterCounter == 1
-		}, 5*time.Second, 10*time.Millisecond)
 		r.Equal(1, step1ACounter)
 		r.Equal(1, step1BCounter)
 		r.Equal(1, step2Counter)
+		r.Equal(1, stepAfterCounter)
 
 		// Even though it looks like 1b would run before 2, it actually runs
 		// after. This is because of the way parallelism works with step
 		// discovery.
-		r.Equal(logs, []string{"1a", "2", "1b", "after"})
+		r.Equal([]string{"1a", "2", "1b", "after"}, logs.Load())
 	})
 }

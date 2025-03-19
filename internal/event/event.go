@@ -8,7 +8,7 @@ import (
 
 // GenericEvent represents a single event generated from your system to be sent to
 // Inngest.
-type GenericEvent[DATA any, USER any] struct {
+type GenericEvent[DATA any] struct {
 	// ID is an optional event ID used for deduplication.
 	ID *string `json:"id,omitempty"`
 	// Name represents the name of the event.  We recommend the following
@@ -23,16 +23,8 @@ type GenericEvent[DATA any, USER any] struct {
 	// the user's email, their plan information, the signup method, etc.
 	Data DATA `json:"data"`
 
-	// User is a struct or key-value map of data belonging to the user that authored the
-	// event.  This data will be upserted into the contact store.
-	//
-	// We match the user via one of two fields: "external_id" and "email", defined
-	// as consts within this package.
-	//
-	// If these fields are present in this map the attributes specified here
-	// will be updated within Inngest, and the event will be attributed to
-	// this contact.
-	User USER `json:"user,omitempty"`
+	// Deprecated
+	User map[string]any `json:"user,omitempty"`
 
 	// Timestamp is the time the event occured at *millisecond* (not nanosecond)
 	// precision.  This defaults to the time the event is received if left blank.
@@ -60,30 +52,27 @@ type GenericEvent[DATA any, USER any] struct {
 //
 // NOTE: This is a naive inefficient implementation and should not be used in performance
 // constrained systems.
-func (ge GenericEvent[D, U]) Event() Event {
+func (ge GenericEvent[D]) Event() Event {
 	byt, _ := json.Marshal(ge)
 	val := Event{}
 	_ = json.Unmarshal(byt, &val)
 	return val
 }
 
-func (ge GenericEvent[D, U]) Validate() error {
+func (ge GenericEvent[D]) Validate() error {
 	if ge.Name == "" {
 		return fmt.Errorf("event name must be present")
 	}
 
-	if !isValidEventData(ge.Data) {
-		return fmt.Errorf("data must be a map or struct")
-	}
-
-	if !isValidEventData(ge.User) {
-		return fmt.Errorf("user must be a map or struct")
+	err := ValidateEventDataType(ge.Data)
+	if err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func (ge GenericEvent[D, U]) Map() map[string]any {
+func (ge GenericEvent[D]) Map() map[string]any {
 	var data any = ge.Data
 	if reflect.TypeOf(data).Kind() == reflect.Ptr && reflect.ValueOf(data).IsNil() {
 		data = make(map[string]any)
@@ -109,37 +98,38 @@ func (ge GenericEvent[D, U]) Map() map[string]any {
 	return out
 }
 
-type Event = GenericEvent[map[string]any, map[string]any]
+type Event = GenericEvent[map[string]any]
 
-// isValidEventData checks if the given vaue is one of: nil, map, or struct.
-func isValidEventData(v any) bool {
+// ValidateEventDataType checks if the given type is one of: nil, map, or
+// struct.
+func ValidateEventDataType(v any) error {
 	if v == nil {
-		return true
+		return nil
 	}
 
 	isDataMap := reflect.TypeOf(v).Kind() == reflect.Map
 	if isDataMap {
-		return true
+		return nil
 	}
 
 	isDataStruct := reflect.TypeOf(v).Kind() == reflect.Struct
 	if isDataStruct {
-		return true
+		return nil
 	}
 
 	if reflect.TypeOf(v).Kind() == reflect.Ptr {
 		if reflect.ValueOf(v).IsNil() {
-			return false
+			return fmt.Errorf("event data must be a map or struct")
 		}
 
 		val := reflect.ValueOf(v).Elem()
 		if val.Kind() == reflect.Map {
-			return true
+			return nil
 		}
 		if val.Kind() == reflect.Struct {
-			return true
+			return nil
 		}
 	}
 
-	return false
+	return fmt.Errorf("event data must be a map or struct")
 }

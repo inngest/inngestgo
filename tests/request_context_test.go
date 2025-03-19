@@ -3,12 +3,11 @@ package tests
 import (
 	"context"
 	"net/http"
+	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngestgo"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,7 +37,7 @@ func TestRequestContext(t *testing.T) {
 	c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
 	r.NoError(err)
 
-	var runID string
+	var runID atomic.Value
 	var ctxValue string
 	eventName := randomSuffix("event")
 	_, err = inngestgo.CreateFunction(
@@ -49,7 +48,7 @@ func TestRequestContext(t *testing.T) {
 		},
 		inngestgo.EventTrigger(eventName, nil),
 		func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-			runID = input.InputCtx.RunID
+			runID.Store(input.InputCtx.RunID)
 			ctxValue, _ = ctx.Value(contextKey).(string)
 			return nil, nil
 		},
@@ -65,14 +64,6 @@ func TestRequestContext(t *testing.T) {
 	_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
 	r.NoError(err)
 
-	var run *Run
-	r.EventuallyWithT(func(ct *assert.CollectT) {
-		a := assert.New(ct)
-		run, err = getRun(runID)
-		if !a.NoError(err) {
-			return
-		}
-		a.Equal(enums.RunStatusCompleted.String(), run.Status)
-		a.Equal("hello", ctxValue)
-	}, 5*time.Second, time.Second)
+	waitForRun(t, &runID, enums.RunStatusCompleted.String())
+	r.Equal("hello", ctxValue)
 }

@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -47,7 +49,7 @@ func getRun(id string) (*Run, error) {
 	return &body.Data, nil
 }
 
-func waitForRun(t *testing.T, id *string, status string) *Run {
+func waitForRun(t *testing.T, id *atomic.Value, status string) *Run {
 	r := require.New(t)
 
 	var run *Run
@@ -58,8 +60,13 @@ func waitForRun(t *testing.T, id *string, status string) *Run {
 			return
 		}
 
+		idStr, ok := id.Load().(string)
+		if !a.True(ok, "run ID is not a string") {
+			return
+		}
+
 		var err error
-		run, err = getRun(*id)
+		run, err = getRun(idStr)
 		if !a.NoError(err) {
 			return
 		}
@@ -115,4 +122,21 @@ func serve(
 	}
 
 	return server, sync
+}
+
+type SafeSlice[T any] struct {
+	mu    sync.Mutex
+	slice []T
+}
+
+func (s *SafeSlice[T]) Append(v T) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.slice = append(s.slice, v)
+}
+
+func (s *SafeSlice[T]) Load() []T {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.slice
 }

@@ -2,13 +2,12 @@ package tests
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngestgo"
 	"github.com/inngest/inngestgo/step"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,7 +37,7 @@ func TestStepSend(t *testing.T) {
 			inngestgo.EventTrigger(childEventName, nil),
 			func(
 				ctx context.Context,
-				input inngestgo.Input[MyEvent],
+				input inngestgo.Input[map[string]any],
 			) (any, error) {
 				receivedEvent = &input.Event
 				return nil, nil
@@ -46,7 +45,7 @@ func TestStepSend(t *testing.T) {
 		)
 		r.NoError(err)
 
-		var runID string
+		var runID atomic.Value
 		var sentEventID string
 		var sendErr error
 		eventName := randomSuffix("event")
@@ -59,9 +58,9 @@ func TestStepSend(t *testing.T) {
 			inngestgo.EventTrigger(eventName, nil),
 			func(
 				ctx context.Context,
-				input inngestgo.Input[MyEvent],
+				input inngestgo.Input[any],
 			) (any, error) {
-				runID = input.InputCtx.RunID
+				runID.Store(input.InputCtx.RunID)
 				sentEventID, sendErr = step.Send(ctx,
 					"send",
 					MyEvent{
@@ -80,24 +79,11 @@ func TestStepSend(t *testing.T) {
 
 		_, err = c.Send(ctx, MyEvent{Name: eventName})
 		r.NoError(err)
-
-		var run *Run
-		r.EventuallyWithT(func(ct *assert.CollectT) {
-			a := assert.New(ct)
-
-			run, err = getRun(runID)
-			if !a.NoError(err) {
-				return
-			}
-
-			a.Equal(enums.RunStatusCompleted.String(), run.Status)
-			if !a.NotNil(receivedEvent) {
-				return
-			}
-			a.Equal(sentEventID, *receivedEvent.ID)
-			a.Equal(map[string]any{"msg": "hi"}, receivedEvent.Data)
-			a.NoError(sendErr)
-		}, 5*time.Second, time.Second)
+		waitForRun(t, &runID, enums.RunStatusCompleted.String())
+		r.NotNil(receivedEvent)
+		r.Equal(sentEventID, *receivedEvent.ID)
+		r.Equal(map[string]any{"msg": "hi"}, receivedEvent.Data)
+		r.NoError(sendErr)
 	})
 
 	t.Run("GenericEvent type", func(t *testing.T) {
@@ -109,7 +95,7 @@ func TestStepSend(t *testing.T) {
 		type MyEventData = struct {
 			Msg string
 		}
-		type MyEvent = inngestgo.GenericEvent[MyEventData, any]
+		type MyEvent = inngestgo.GenericEvent[MyEventData]
 
 		appName := randomSuffix("app")
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
@@ -126,7 +112,7 @@ func TestStepSend(t *testing.T) {
 			inngestgo.EventTrigger(childEventName, nil),
 			func(
 				ctx context.Context,
-				input inngestgo.Input[MyEvent],
+				input inngestgo.Input[MyEventData],
 			) (any, error) {
 				receivedEvent = &input.Event
 				return nil, nil
@@ -134,7 +120,7 @@ func TestStepSend(t *testing.T) {
 		)
 		r.NoError(err)
 
-		var runID string
+		var runID atomic.Value
 		var sentEventID string
 		var sendErr error
 		eventName := randomSuffix("event")
@@ -147,9 +133,9 @@ func TestStepSend(t *testing.T) {
 			inngestgo.EventTrigger(eventName, nil),
 			func(
 				ctx context.Context,
-				input inngestgo.Input[MyEvent],
+				input inngestgo.Input[MyEventData],
 			) (any, error) {
-				runID = input.InputCtx.RunID
+				runID.Store(input.InputCtx.RunID)
 				sentEventID, sendErr = step.Send(ctx,
 					"send",
 					MyEvent{
@@ -168,24 +154,11 @@ func TestStepSend(t *testing.T) {
 
 		_, err = c.Send(ctx, MyEvent{Name: eventName})
 		r.NoError(err)
-
-		var run *Run
-		r.EventuallyWithT(func(ct *assert.CollectT) {
-			a := assert.New(ct)
-
-			run, err = getRun(runID)
-			if !a.NoError(err) {
-				return
-			}
-
-			a.Equal(enums.RunStatusCompleted.String(), run.Status)
-			if !a.NotNil(receivedEvent) {
-				return
-			}
-			a.Equal(sentEventID, *receivedEvent.ID)
-			a.Equal(MyEventData{Msg: "hi"}, receivedEvent.Data)
-			a.NoError(sendErr)
-		}, 5*time.Second, time.Second)
+		waitForRun(t, &runID, enums.RunStatusCompleted.String())
+		r.NotNil(receivedEvent)
+		r.Equal(sentEventID, *receivedEvent.ID)
+		r.Equal(MyEventData{Msg: "hi"}, receivedEvent.Data)
+		r.NoError(sendErr)
 	})
 
 	t.Run("error due to internal event name", func(t *testing.T) {
@@ -196,7 +169,7 @@ func TestStepSend(t *testing.T) {
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
 		r.NoError(err)
 
-		var runID string
+		var runID atomic.Value
 		var sendErr error
 		eventName := randomSuffix("event")
 		_, err = inngestgo.CreateFunction(
@@ -207,7 +180,7 @@ func TestStepSend(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				runID = input.InputCtx.RunID
+				runID.Store(input.InputCtx.RunID)
 				_, sendErr = step.Send(ctx,
 					"send",
 					inngestgo.Event{Name: "inngest/foo"},
@@ -223,23 +196,12 @@ func TestStepSend(t *testing.T) {
 
 		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
 		r.NoError(err)
-
-		var run *Run
-		r.EventuallyWithT(func(ct *assert.CollectT) {
-			a := assert.New(ct)
-
-			run, err = getRun(runID)
-			if !a.NoError(err) {
-				return
-			}
-
-			a.Equal(enums.RunStatusFailed.String(), run.Status)
-			a.Error(sendErr)
-			a.Equal(
-				"bad request: event name is reserved for internal use: inngest/foo",
-				sendErr.Error(),
-			)
-		}, 5*time.Second, time.Second)
+		waitForRun(t, &runID, enums.RunStatusFailed.String())
+		r.Error(sendErr)
+		r.Equal(
+			"bad request: event name is reserved for internal use: inngest/foo",
+			sendErr.Error(),
+		)
 	})
 }
 
@@ -258,7 +220,7 @@ func TestStepSendMany(t *testing.T) {
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
 		r.NoError(err)
 
-		var runID string
+		var runID atomic.Value
 		var sentEventIDs []string
 		var sendErr error
 		eventName := randomSuffix("event")
@@ -271,9 +233,9 @@ func TestStepSendMany(t *testing.T) {
 			inngestgo.EventTrigger(eventName, nil),
 			func(
 				ctx context.Context,
-				input inngestgo.Input[MyEvent],
+				input inngestgo.Input[any],
 			) (any, error) {
-				runID = input.InputCtx.RunID
+				runID.Store(input.InputCtx.RunID)
 				sentEventIDs, sendErr = step.SendMany(ctx,
 					"send",
 					[]MyEvent{
@@ -292,20 +254,9 @@ func TestStepSendMany(t *testing.T) {
 
 		_, err = c.Send(ctx, MyEvent{Name: eventName})
 		r.NoError(err)
-
-		var run *Run
-		r.EventuallyWithT(func(ct *assert.CollectT) {
-			a := assert.New(ct)
-
-			run, err = getRun(runID)
-			if !a.NoError(err) {
-				return
-			}
-
-			a.Equal(enums.RunStatusCompleted.String(), run.Status)
-			a.Len(sentEventIDs, 2)
-			a.NoError(sendErr)
-		}, 5*time.Second, time.Second)
+		waitForRun(t, &runID, enums.RunStatusCompleted.String())
+		r.Len(sentEventIDs, 2)
+		r.NoError(sendErr)
 	})
 
 	t.Run("GenericEvent type", func(t *testing.T) {
@@ -317,13 +268,13 @@ func TestStepSendMany(t *testing.T) {
 		type MyEventData = struct {
 			Msg string
 		}
-		type MyEvent = inngestgo.GenericEvent[MyEventData, any]
+		type MyEvent = inngestgo.GenericEvent[MyEventData]
 
 		appName := randomSuffix("app")
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
 		r.NoError(err)
 
-		var runID string
+		var runID atomic.Value
 		var sentEventIDs []string
 		var sendErr error
 		eventName := randomSuffix("event")
@@ -336,9 +287,9 @@ func TestStepSendMany(t *testing.T) {
 			inngestgo.EventTrigger(eventName, nil),
 			func(
 				ctx context.Context,
-				input inngestgo.Input[MyEvent],
+				input inngestgo.Input[MyEventData],
 			) (any, error) {
-				runID = input.InputCtx.RunID
+				runID.Store(input.InputCtx.RunID)
 				sentEventIDs, sendErr = step.SendMany(ctx,
 					"send",
 					[]MyEvent{
@@ -357,20 +308,9 @@ func TestStepSendMany(t *testing.T) {
 
 		_, err = c.Send(ctx, MyEvent{Name: eventName})
 		r.NoError(err)
-
-		var run *Run
-		r.EventuallyWithT(func(ct *assert.CollectT) {
-			a := assert.New(ct)
-
-			run, err = getRun(runID)
-			if !a.NoError(err) {
-				return
-			}
-
-			a.Equal(enums.RunStatusCompleted.String(), run.Status)
-			a.Len(sentEventIDs, 2)
-			a.NoError(sendErr)
-		}, 5*time.Second, time.Second)
+		waitForRun(t, &runID, enums.RunStatusCompleted.String())
+		r.Len(sentEventIDs, 2)
+		r.NoError(sendErr)
 	})
 
 	t.Run("error due to internal event name", func(t *testing.T) {
@@ -381,7 +321,7 @@ func TestStepSendMany(t *testing.T) {
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
 		r.NoError(err)
 
-		var runID string
+		var runID atomic.Value
 		var sendErr error
 		eventName := randomSuffix("event")
 		_, err = inngestgo.CreateFunction(
@@ -392,7 +332,7 @@ func TestStepSendMany(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				runID = input.InputCtx.RunID
+				runID.Store(input.InputCtx.RunID)
 				_, sendErr = step.SendMany(ctx,
 					"send",
 					[]inngestgo.Event{
@@ -411,22 +351,11 @@ func TestStepSendMany(t *testing.T) {
 
 		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
 		r.NoError(err)
-
-		var run *Run
-		r.EventuallyWithT(func(ct *assert.CollectT) {
-			a := assert.New(ct)
-
-			run, err = getRun(runID)
-			if !a.NoError(err) {
-				return
-			}
-
-			a.Equal(enums.RunStatusFailed.String(), run.Status)
-			a.Error(sendErr)
-			a.Equal(
-				"bad request: event name is reserved for internal use: inngest/foo",
-				sendErr.Error(),
-			)
-		}, 5*time.Second, time.Second)
+		waitForRun(t, &runID, enums.RunStatusFailed.String())
+		r.Error(sendErr)
+		r.Equal(
+			"bad request: event name is reserved for internal use: inngest/foo",
+			sendErr.Error(),
+		)
 	})
 }

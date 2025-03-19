@@ -27,7 +27,7 @@ func TestClientSend(t *testing.T) {
 		r.NotEmpty(id)
 
 		// GenericEvent type with no data.
-		id, err = c.Send(ctx, inngestgo.GenericEvent[map[string]any, any]{
+		id, err = c.Send(ctx, inngestgo.GenericEvent[map[string]any]{
 			Name: "test",
 		})
 		r.NoError(err)
@@ -39,7 +39,7 @@ func TestClientSend(t *testing.T) {
 		r := require.New(t)
 
 		type MyEventData = struct{}
-		id, err := c.Send(ctx, inngestgo.GenericEvent[*MyEventData, any]{
+		id, err := c.Send(ctx, inngestgo.GenericEvent[*MyEventData]{
 			Name: "test",
 			Data: &MyEventData{},
 		})
@@ -53,7 +53,7 @@ func TestClientSend(t *testing.T) {
 			r := require.New(t)
 
 			type MyEventData = struct{}
-			_, err := c.Send(ctx, inngestgo.GenericEvent[*MyEventData, any]{
+			_, err := c.Send(ctx, inngestgo.GenericEvent[*MyEventData]{
 				Name: "test",
 			})
 			r.Error(err)
@@ -64,7 +64,7 @@ func TestClientSend(t *testing.T) {
 			ctx := context.Background()
 			r := require.New(t)
 
-			_, err = c.Send(ctx, inngestgo.GenericEvent[[]string, any]{
+			_, err = c.Send(ctx, inngestgo.GenericEvent[[]string]{
 				Data: []string{"foo", "bar"},
 				Name: "test",
 			})
@@ -76,7 +76,7 @@ func TestClientSend(t *testing.T) {
 			ctx := context.Background()
 			r := require.New(t)
 
-			_, err = c.Send(ctx, inngestgo.GenericEvent[bool, any]{
+			_, err = c.Send(ctx, inngestgo.GenericEvent[bool]{
 				Data: true,
 				Name: "test",
 			})
@@ -88,7 +88,7 @@ func TestClientSend(t *testing.T) {
 			ctx := context.Background()
 			r := require.New(t)
 
-			_, err = c.Send(ctx, inngestgo.GenericEvent[int, any]{
+			_, err = c.Send(ctx, inngestgo.GenericEvent[int]{
 				Data: 1,
 				Name: "test",
 			})
@@ -100,7 +100,7 @@ func TestClientSend(t *testing.T) {
 			ctx := context.Background()
 			r := require.New(t)
 
-			_, err = c.Send(ctx, inngestgo.GenericEvent[string, any]{
+			_, err = c.Send(ctx, inngestgo.GenericEvent[string]{
 				Data: "foo",
 				Name: "test",
 			})

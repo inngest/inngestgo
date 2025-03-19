@@ -2,12 +2,12 @@ package inngestgo
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reflect"
 
 	"github.com/gosimple/slug"
 	"github.com/inngest/inngest/pkg/inngest"
+	"github.com/inngest/inngestgo/internal/event"
 )
 
 // Slugify converts a string to a slug. This is only useful for replicating the
@@ -74,8 +74,10 @@ func CreateFunction[T any](
 	}
 
 	zt := sf.ZeroType()
-	if zt.Interface() == nil && zt.NumMethod() > 0 {
-		return nil, errors.New("You cannot use an interface type as the input within an Inngest function.")
+	eventDataField := zt.FieldByName("Data")
+	err = event.ValidateEventDataType(eventDataField.Interface())
+	if err != nil {
+		return nil, err
 	}
 
 	// TODO: This feels wrong but is necessary since there isn't a
