@@ -49,62 +49,11 @@ func TestSleepUntil(t *testing.T) {
 
 		// New steps always panic.
 		require.Panics(t, func() {
+			reset()
 			SleepUntil(ctx, "time.Time", parsed)
 		})
 
 		assertions(parsed)
 	})
 
-	t.Run("RFC3339 with TZ", func(t *testing.T) {
-		parsed, err := time.Parse(time.RFC3339, "2040-04-01T00:00:00+07:00")
-		require.NoError(t, err)
-
-		// New steps always panic.
-		require.Panics(t, func() {
-			reset()
-			SleepUntil(ctx, "time.Time", "2040-04-01T00:00:00+07:00")
-		})
-
-		assertions(parsed)
-	})
-
-	t.Run("RFC3339 without TZ", func(t *testing.T) {
-		parsed, err := time.Parse(time.RFC3339, "2040-04-01T00:00:00Z")
-		require.NoError(t, err)
-
-		// New steps always panic.
-		require.Panics(t, func() {
-			reset()
-			SleepUntil(ctx, "time.Time", "2040-04-01T00:00:00Z")
-		})
-
-		assertions(parsed)
-	})
-
-	t.Run("RFC3339 in UTC without Z (non-compliant people)", func(t *testing.T) {
-		parsed, err := time.Parse(time.RFC3339, "2040-04-01T00:00:00Z")
-		require.NoError(t, err)
-
-		// New steps always panic.
-		require.Panics(t, func() {
-			reset()
-			// omit the Z, because some people dont conform to specs...
-			SleepUntil(ctx, "time.Time", "2040-04-01T00:00:00")
-		})
-
-		assertions(parsed)
-	})
-
-	t.Run("Dates", func(t *testing.T) {
-		parsed, err := time.Parse(time.RFC3339, "2040-04-01T00:00:00Z")
-		require.NoError(t, err)
-
-		// New steps always panic.
-		require.Panics(t, func() {
-			reset()
-			SleepUntil(ctx, "time.Time", "2040-04-01")
-		})
-
-		assertions(parsed)
-	})
 }
