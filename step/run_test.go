@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/execution/state"
+	"github.com/inngest/inngestgo/internal"
 	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -184,6 +187,7 @@ func TestStep(t *testing.T) {
 			mw := middleware.NewMiddlewareManager()
 			mgr := sdkrequest.NewManager(mw, cancel, req, "")
 			ctx = sdkrequest.SetManager(ctx, mgr)
+			ctx = internal.ContextWithMiddlewareManager(ctx, mw)
 
 			func() {
 				defer func() {
@@ -203,6 +207,11 @@ func TestStep(t *testing.T) {
 				Op: enums.OpcodeStepRun,
 				ID: name,
 			}
+
+			require.EventuallyWithT(t, func(t *assert.CollectT) {
+				a := assert.New(t)
+				a.NotEmpty(mgr.Ops())
+			}, time.Second, 100*time.Millisecond)
 
 			require.NotEmpty(t, mgr.Ops())
 			require.Equal(t, 1, len(mgr.Ops()))

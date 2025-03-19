@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 
 	"github.com/inngest/inngest/pkg/enums"
@@ -23,7 +24,7 @@ func TestStepRun(t *testing.T) {
 		})
 		r.NoError(err)
 
-		var runID string
+		var runID atomic.Value
 		var stepError error
 		eventName := randomSuffix("my-event")
 		_, err = inngestgo.CreateFunction(
@@ -34,7 +35,7 @@ func TestStepRun(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				runID = input.InputCtx.RunID
+				runID.Store(input.InputCtx.RunID)
 				_, stepError = step.Run(ctx,
 					"a",
 					func(ctx context.Context) (any, error) {

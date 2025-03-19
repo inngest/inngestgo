@@ -5,13 +5,14 @@ import (
 	"errors"
 
 	"github.com/inngest/inngestgo/internal"
+	"github.com/inngest/inngestgo/internal/event"
 )
 
 // Send sends an event to Inngest.
 func Send[DATA any](
 	ctx context.Context,
 	id string,
-	event internal.GenericEvent[DATA],
+	event event.GenericEvent[DATA],
 ) (string, error) {
 	return Run(ctx, id, func(ctx context.Context) (string, error) {
 		sender, ok := internal.EventSenderFromContext(ctx)
@@ -27,7 +28,7 @@ func Send[DATA any](
 func SendMany[DATA any](
 	ctx context.Context,
 	id string,
-	events []internal.GenericEvent[DATA],
+	events []event.GenericEvent[DATA],
 ) ([]string, error) {
 	return Run(ctx, id, func(ctx context.Context) ([]string, error) {
 		sender, ok := internal.EventSenderFromContext(ctx)

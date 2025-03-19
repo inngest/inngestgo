@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ func TestStepWaitForEvent(t *testing.T) {
 		})
 		r.NoError(err)
 
-		var runID string
+		var runID atomic.Value
 		var stepResult map[string]any
 		var stepError error
 		eventName := randomSuffix("event")
@@ -37,7 +38,7 @@ func TestStepWaitForEvent(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				runID = input.InputCtx.RunID
+				runID.Store(input.InputCtx.RunID)
 				stepResult, stepError = step.WaitForEvent[map[string]any](ctx,
 					"a",
 					step.WaitForEventOpts{
@@ -60,7 +61,7 @@ func TestStepWaitForEvent(t *testing.T) {
 		// Wait for run to start.
 		r.EventuallyWithT(func(ct *assert.CollectT) {
 			a := assert.New(ct)
-			a.NotEmpty(runID)
+			a.NotEmpty(runID.Load())
 		}, 5*time.Second, time.Second)
 
 		_, err = c.Send(ctx, inngestgo.Event{
@@ -84,7 +85,7 @@ func TestStepWaitForEvent(t *testing.T) {
 		})
 		r.NoError(err)
 
-		var runID string
+		var runID atomic.Value
 		var stepResult map[string]any
 		var stepError error
 		eventName := randomSuffix("event")
@@ -96,7 +97,7 @@ func TestStepWaitForEvent(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				runID = input.InputCtx.RunID
+				runID.Store(input.InputCtx.RunID)
 				stepResult, stepError = step.WaitForEvent[map[string]any](ctx,
 					"a",
 					step.WaitForEventOpts{

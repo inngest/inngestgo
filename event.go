@@ -3,7 +3,7 @@ package inngestgo
 import (
 	"time"
 
-	"github.com/inngest/inngestgo/internal"
+	"github.com/inngest/inngestgo/internal/event"
 )
 
 const (
@@ -16,8 +16,8 @@ const (
 	Email = "email"
 )
 
-type Event = internal.Event
-type GenericEvent[DATA any] = internal.GenericEvent[DATA]
+type Event = event.Event
+type GenericEvent[DATA any] = event.GenericEvent[DATA]
 
 // NowMillis returns a timestamp with millisecond precision used for the Event.Timestamp
 // field.
