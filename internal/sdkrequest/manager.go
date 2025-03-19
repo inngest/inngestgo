@@ -155,8 +155,13 @@ func (r *requestCtxManager) Ops() []state.GeneratorOpcode {
 }
 
 func (r *requestCtxManager) MiddlewareCallCtx() middleware.CallContext {
+	opts := fn.FunctionOpts{}
+	if r.fn != nil {
+		opts = r.fn.Config()
+	}
+
 	return middleware.CallContext{
-		FunctionOpts: r.fn.Config(),
+		FunctionOpts: opts,
 		Env:          r.request.CallCtx.Env,
 		RunID:        r.request.CallCtx.RunID,
 		Attempt:      r.request.CallCtx.Attempt,
