@@ -3,7 +3,7 @@ package experimental
 import "github.com/inngest/inngestgo/internal/middleware"
 
 // BaseMiddleware is a noop implementation that you can embed within custom
-// middelware to implement the middleware.Middleware interface, making every
+// middleware to implement the middleware.Middleware interface, making every
 // unimplemented call in your struct a no-op.
 type BaseMiddleware = middleware.BaseMiddleware
 
