@@ -35,6 +35,8 @@ func TestClientMiddleware(t *testing.T) {
 				onPanic: func(ctx context.Context, call experimental.CallContext, r any, s string) {
 					recovery = r
 					stack = s
+
+					atomic.AddInt32(&hit, 1)
 				},
 			}
 		}
@@ -60,7 +62,6 @@ func TestClientMiddleware(t *testing.T) {
 					return "ok", nil
 				})
 
-				atomic.AddInt32(&hit, 1)
 				panic("nah")
 				return nil, nil
 			},
@@ -76,7 +77,11 @@ func TestClientMiddleware(t *testing.T) {
 
 		r.EventuallyWithT(func(ct *assert.CollectT) {
 			a := assert.New(ct)
+			val := atomic.LoadInt32(&hit)
 			a.True(atomic.LoadInt32(&hit) >= 1)
+			if val == 0 {
+				return
+			}
 			a.Contains(recovery, "nah")
 			a.Contains(stack, "middleware_test.go:")
 		}, 5*time.Second, 10*time.Millisecond)
