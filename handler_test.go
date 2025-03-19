@@ -1047,7 +1047,7 @@ func TestConnectSync(t *testing.T) {
 
 		r.EventuallyWithT(func(t *assert.CollectT) {
 			a := assert.New(t)
-			a.NotEmpty(headers.Get("Authorization"))
+			a.NotEmpty(headers.Load("Authorization"))
 		}, 5*time.Second, 10*time.Millisecond)
 	})
 
