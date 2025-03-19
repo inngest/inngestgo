@@ -10,7 +10,6 @@ import (
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngestgo"
 	"github.com/inngest/inngestgo/experimental"
-	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/step"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -82,7 +81,7 @@ func TestClientMiddleware(t *testing.T) {
 					logs = append(logs, "mw: BeforeExecution")
 				},
 				transformInputFn: func(
-					input *middleware.TransformableInput,
+					input *experimental.TransformableInput,
 					fn inngestgo.ServableFunction,
 				) {
 					logs = append(logs, "mw: TransformInput")
@@ -92,7 +91,7 @@ func TestClientMiddleware(t *testing.T) {
 
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID:      randomSuffix("app"),
-			Middleware: []func() middleware.Middleware{newMW},
+			Middleware: []func() experimental.Middleware{newMW},
 		})
 		r.NoError(err)
 
@@ -178,7 +177,7 @@ func TestClientMiddleware(t *testing.T) {
 					logs = append(logs, "mw: BeforeExecution")
 				},
 				transformInputFn: func(
-					input *middleware.TransformableInput,
+					input *experimental.TransformableInput,
 					fn inngestgo.ServableFunction,
 				) {
 					logs = append(logs, "mw: TransformInput")
@@ -308,7 +307,7 @@ func TestClientMiddleware(t *testing.T) {
 					logs = append(logs, "1: BeforeExecution")
 				},
 				transformInputFn: func(
-					input *middleware.TransformableInput,
+					input *experimental.TransformableInput,
 					fn inngestgo.ServableFunction,
 				) {
 					logs = append(logs, "1: TransformInput")
@@ -325,7 +324,7 @@ func TestClientMiddleware(t *testing.T) {
 					logs = append(logs, "2: BeforeExecution")
 				},
 				transformInputFn: func(
-					input *middleware.TransformableInput,
+					input *experimental.TransformableInput,
 					fn inngestgo.ServableFunction,
 				) {
 					logs = append(logs, "2: TransformInput")
@@ -383,7 +382,7 @@ func TestClientMiddleware(t *testing.T) {
 			newMW := func() experimental.Middleware {
 				return &inlineMiddleware{
 					transformInputFn: func(
-						input *middleware.TransformableInput,
+						input *experimental.TransformableInput,
 						fn inngestgo.ServableFunction,
 					) {
 						input.Event.Data["transformed"] = true
@@ -463,7 +462,7 @@ func TestClientMiddleware(t *testing.T) {
 			newMW := func() experimental.Middleware {
 				return &inlineMiddleware{
 					transformInputFn: func(
-						input *middleware.TransformableInput,
+						input *experimental.TransformableInput,
 						fn inngestgo.ServableFunction,
 					) {
 						input.Event.Data["transformed"] = true
@@ -549,7 +548,7 @@ func TestClientMiddleware(t *testing.T) {
 			newMW := func() experimental.Middleware {
 				return &inlineMiddleware{
 					transformInputFn: func(
-						input *middleware.TransformableInput,
+						input *experimental.TransformableInput,
 						fn inngestgo.ServableFunction,
 					) {
 						input.WithContext(context.WithValue(
@@ -691,7 +690,7 @@ func TestLoggerMiddleware(t *testing.T) {
 type inlineMiddleware struct {
 	beforeExecutionFn func(ctx context.Context)
 	afterExecutionFn  func(ctx context.Context)
-	transformInputFn  func(input *middleware.TransformableInput, fn inngestgo.ServableFunction)
+	transformInputFn  func(input *experimental.TransformableInput, fn inngestgo.ServableFunction)
 }
 
 func (m *inlineMiddleware) AfterExecution(ctx context.Context) {
@@ -709,7 +708,7 @@ func (m *inlineMiddleware) BeforeExecution(ctx context.Context) {
 }
 
 func (m *inlineMiddleware) TransformInput(
-	input *middleware.TransformableInput,
+	input *experimental.TransformableInput,
 	fn inngestgo.ServableFunction,
 ) {
 	if m.transformInputFn == nil {
