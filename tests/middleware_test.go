@@ -455,14 +455,24 @@ func TestClientMiddleware(t *testing.T) {
 		logs := []string{}
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID: randomSuffix("app"),
-			Middleware: []experimental.Middleware{
-				{
-					AfterExecution: func(ctx context.Context) {
-						logs = append(logs, "mw: AfterExecution")
-					},
-					BeforeExecution: func(ctx context.Context) {
-						logs = append(logs, "mw: BeforeExecution")
-					},
+			Middleware: []func() experimental.Middleware{
+				func() experimental.Middleware {
+					return &inlineMiddleware{
+						afterExecutionFn: func(
+							ctx context.Context,
+							call experimental.CallContext,
+							result any,
+							err error,
+						) {
+							logs = append(logs, "mw: AfterExecution")
+						},
+						beforeExecutionFn: func(
+							ctx context.Context,
+							call experimental.CallContext,
+						) {
+							logs = append(logs, "mw: BeforeExecution")
+						},
+					}
 				},
 			},
 		})
