@@ -452,17 +452,27 @@ func TestClientMiddleware(t *testing.T) {
 		r := require.New(t)
 		ctx := context.Background()
 
-		logs := []string{}
+		var logs SafeSlice[string]
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID: randomSuffix("app"),
-			Middleware: []experimental.Middleware{
-				{
-					AfterExecution: func(ctx context.Context) {
-						logs = append(logs, "mw: AfterExecution")
-					},
-					BeforeExecution: func(ctx context.Context) {
-						logs = append(logs, "mw: BeforeExecution")
-					},
+			Middleware: []func() experimental.Middleware{
+				func() experimental.Middleware {
+					return &inlineMiddleware{
+						afterExecutionFn: func(
+							ctx context.Context,
+							call experimental.CallContext,
+							result any,
+							err error,
+						) {
+							logs.Append("mw: AfterExecution")
+						},
+						beforeExecutionFn: func(
+							ctx context.Context,
+							call experimental.CallContext,
+						) {
+							logs.Append("mw: BeforeExecution")
+						},
+					}
 				},
 			},
 		})
@@ -477,11 +487,11 @@ func TestClientMiddleware(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				logs = append(logs, "fn: top")
+				logs.Append("fn: top")
 				step.Sleep(ctx, "a", time.Second)
-				logs = append(logs, "fn: between steps")
+				logs.Append("fn: between steps")
 				step.SleepUntil(ctx, "b", time.Now().Add(time.Second))
-				logs = append(logs, "fn: bottom")
+				logs.Append("fn: bottom")
 				return nil, err
 			},
 		)
@@ -514,7 +524,7 @@ func TestClientMiddleware(t *testing.T) {
 				"mw: BeforeExecution",
 				"fn: bottom",
 				"mw: AfterExecution",
-			}, logs)
+			}, logs.Load())
 		}, 5*time.Second, 10*time.Millisecond)
 	})
 

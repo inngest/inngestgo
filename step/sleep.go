@@ -30,8 +30,7 @@ func Sleep(ctx context.Context, id string, duration time.Duration) {
 		mgr.SetErr(fmt.Errorf("no middleware manager found in context"))
 		panic(ControlHijack{})
 	}
-	mw.BeforeExecution(ctx)
-
+	mw.BeforeExecution(ctx, mgr.MiddlewareCallCtx())
 	mgr.AppendOp(state.GeneratorOpcode{
 		ID:   op.MustHash(),
 		Op:   enums.OpcodeSleep,
