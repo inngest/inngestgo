@@ -22,6 +22,17 @@ type CallContext struct {
 // Middleware is the middleware interface that each implementation must fulfil.
 // To avoid implementing each method as a noop, embed the BaseMiddleware struct
 // in your struct implementation.
+//
+// The order of middleware execution is as follows:
+//
+//   - TransformInput
+//   - BeforeExecution
+//   - AfterExecution
+//   - TransformOutput
+//
+// Note that if your handlers have many middleware, TransformInput and BeforeExecution
+// are executed in the order that middleware is added.  AfterExecution and TransformOutput
+// are executed in reverse order.
 type Middleware interface {
 	// TransformInput is called before entering the Inngest function. It gives
 	// an opportunity to modify the input before it is sent to the function.
@@ -34,6 +45,13 @@ type Middleware interface {
 	// BeforeExecution is called before executing "new code".
 	BeforeExecution(ctx context.Context, call CallContext)
 
+	// AfterExecution is called after executing "new code".  It is called with
+	// the result of any step (or the return value of the functon), plus any
+	// error from the step or function.
+	//
+	// If the step did not error, err will be nil.
+	AfterExecution(ctx context.Context, call CallContext, result any, err error)
+
 	// TransformOutput is called after a step finishes execution or a function
 	// returns results.  It gives an opportunity to modify the output before it
 	// is stored in function state or logs.
@@ -43,14 +61,7 @@ type Middleware interface {
 		output *TransformableOutput,
 	)
 
-	// AfterExecution is called after executing "new code".  It is called with
-	// the result of any step (or the return value of the functon), plus any
-	// error from the step or function.
-	//
-	// If the step did not error, err will be nil.
-	AfterExecution(ctx context.Context, call CallContext, result any, err error)
-
-	// OnPanic is called if the function panics with the recovered value and stack.
+	// OnPanic is called if the function panics, with the recovered value and stack.
 	OnPanic(ctx context.Context, call CallContext, recovered any, stack string)
 }
 
