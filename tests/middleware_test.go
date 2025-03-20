@@ -361,6 +361,13 @@ func TestClientMiddleware(t *testing.T) {
 				) {
 					logs.Append("mw: TransformInput")
 				},
+				transformOutputFn: func(
+					ctx context.Context,
+					call experimental.CallContext,
+					output *experimental.TransformableOutput,
+				) {
+					logs.Append("mw: TransformOutput")
+				},
 			}
 		}
 
@@ -418,6 +425,7 @@ func TestClientMiddleware(t *testing.T) {
 				"fn: top",
 				"a: running",
 				"mw: AfterExecution",
+				"mw: TransformOutput",
 
 				// Second request.
 				"mw: TransformInput",
@@ -426,6 +434,7 @@ func TestClientMiddleware(t *testing.T) {
 				"fn: between steps",
 				"b: running",
 				"mw: AfterExecution",
+				"mw: TransformOutput",
 
 				// Third request.
 				"mw: TransformInput",
@@ -434,6 +443,7 @@ func TestClientMiddleware(t *testing.T) {
 				"mw: BeforeExecution",
 				"fn: bottom",
 				"mw: AfterExecution",
+				"mw: TransformOutput",
 			}, logs.Load())
 		}, 5*time.Second, 10*time.Millisecond)
 	})
@@ -583,6 +593,13 @@ func TestClientMiddleware(t *testing.T) {
 				) {
 					logs.Append("1: TransformInput")
 				},
+				transformOutputFn: func(
+					ctx context.Context,
+					call experimental.CallContext,
+					output *experimental.TransformableOutput,
+				) {
+					logs.Append("1: TransformOutput")
+				},
 			}
 		}
 
@@ -600,6 +617,13 @@ func TestClientMiddleware(t *testing.T) {
 					input *experimental.TransformableInput,
 				) {
 					logs.Append("2: TransformInput")
+				},
+				transformOutputFn: func(
+					ctx context.Context,
+					call experimental.CallContext,
+					output *experimental.TransformableOutput,
+				) {
+					logs.Append("2: TransformOutput")
 				},
 			}
 		}
@@ -640,6 +664,8 @@ func TestClientMiddleware(t *testing.T) {
 				"2: BeforeExecution",
 				"2: AfterExecution",
 				"1: AfterExecution",
+				"2: TransformOutput",
+				"1: TransformOutput",
 			}, logs.Load())
 		}, 5*time.Second, 10*time.Millisecond)
 	})
