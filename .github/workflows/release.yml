@@ -48,4 +48,5 @@ jobs:
           git config user.name "inngest-release-bot"
           git config user.email "126702797+inngest-release-bot@users.noreply.github.com"
 
-          echo "Creating tag ${{ steps.next.outputs.next_tag }}"
+          git tag ${{ steps.next.outputs.next_tag }}
+          git push origin ${{ steps.next.outputs.next_tag }}
