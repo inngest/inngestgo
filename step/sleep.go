@@ -31,7 +31,6 @@ func Sleep(ctx context.Context, id string, duration time.Duration) {
 		panic(ControlHijack{})
 	}
 	mw.BeforeExecution(ctx, mgr.MiddlewareCallCtx())
-
 	mgr.AppendOp(state.GeneratorOpcode{
 		ID:   op.MustHash(),
 		Op:   enums.OpcodeSleep,

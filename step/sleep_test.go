@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/inngest/inngest/pkg/enums"
+	"github.com/inngest/inngestgo/internal"
 	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/stretchr/testify/require"
@@ -16,17 +17,11 @@ import (
 func TestSleepUntil(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	mw := middleware.NewMiddlewareManager()
-	mgr := sdkrequest.NewManager(mw, cancel, &sdkrequest.Request{
+	mgr := sdkrequest.NewManager(nil, mw, cancel, &sdkrequest.Request{
 		Steps: map[string]json.RawMessage{},
 	}, "")
 	ctx = sdkrequest.SetManager(ctx, mgr)
-
-	reset := func() {
-		mgr = sdkrequest.NewManager(mw, cancel, &sdkrequest.Request{
-			Steps: map[string]json.RawMessage{},
-		}, "")
-		ctx = sdkrequest.SetManager(ctx, mgr)
-	}
+	ctx = internal.ContextWithMiddlewareManager(ctx, mw)
 
 	assertions := func(until time.Time) {
 		ops := mgr.Ops()
@@ -47,13 +42,15 @@ func TestSleepUntil(t *testing.T) {
 		parsed, err := time.Parse(time.RFC3339, "2040-04-01T00:00:00+07:00")
 		require.NoError(t, err)
 
-		// New steps always panic.
-		require.Panics(t, func() {
-			reset()
+		func() {
+			defer func() {
+				rcv := recover()
+				require.Equal(t, ControlHijack{}, rcv)
+			}()
+
+			require.False(t, IsWithinStep(ctx))
 			SleepUntil(ctx, "time.Time", parsed)
-		})
-
-		assertions(parsed)
+			assertions(parsed)
+		}()
 	})
-
 }
