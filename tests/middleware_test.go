@@ -448,6 +448,76 @@ func TestClientMiddleware(t *testing.T) {
 		}, 5*time.Second, 10*time.Millisecond)
 	})
 
+	t.Run("sleep", func(t *testing.T) {
+		r := require.New(t)
+		ctx := context.Background()
+
+		logs := []string{}
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+			AppID: randomSuffix("app"),
+			Middleware: []experimental.Middleware{
+				{
+					AfterExecution: func(ctx context.Context) {
+						logs = append(logs, "mw: AfterExecution")
+					},
+					BeforeExecution: func(ctx context.Context) {
+						logs = append(logs, "mw: BeforeExecution")
+					},
+				},
+			},
+		})
+		r.NoError(err)
+
+		eventName := randomSuffix("event")
+		_, err = inngestgo.CreateFunction(
+			c,
+			inngestgo.FunctionOpts{
+				ID:      "fn",
+				Retries: inngestgo.IntPtr(0),
+			},
+			inngestgo.EventTrigger(eventName, nil),
+			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+				logs = append(logs, "fn: top")
+				step.Sleep(ctx, "a", time.Second)
+				logs = append(logs, "fn: between steps")
+				step.SleepUntil(ctx, "b", time.Now().Add(time.Second))
+				logs = append(logs, "fn: bottom")
+				return nil, err
+			},
+		)
+		r.NoError(err)
+
+		server, sync := serve(t, c)
+		defer server.Close()
+		r.NoError(sync())
+
+		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
+		r.NoError(err)
+
+		r.EventuallyWithT(func(ct *assert.CollectT) {
+			a := assert.New(ct)
+			a.Equal([]string{
+				// First request.
+				"mw: BeforeExecution",
+				"fn: top",
+				"mw: AfterExecution",
+
+				// Second request.
+				"fn: top",
+				"mw: BeforeExecution",
+				"fn: between steps",
+				"mw: AfterExecution",
+
+				// Third request.
+				"fn: top",
+				"fn: between steps",
+				"mw: BeforeExecution",
+				"fn: bottom",
+				"mw: AfterExecution",
+			}, logs)
+		}, 5*time.Second, 10*time.Millisecond)
+	})
+
 	t.Run("retry", func(t *testing.T) {
 		r := require.New(t)
 		ctx := context.Background()
