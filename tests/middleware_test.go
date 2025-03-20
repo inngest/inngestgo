@@ -86,13 +86,16 @@ func TestClientMiddleware(t *testing.T) {
 		}, 5*time.Second, 10*time.Millisecond)
 	})
 
-	t.Run("step output, fn output", func(t *testing.T) {
+	t.Run("AfterExecution: step output, fn output", func(t *testing.T) {
 		r := require.New(t)
 		ctx := context.Background()
 
 		var (
-			results SafeSlice[any]
-			errors  SafeSlice[error]
+			results            SafeSlice[any]
+			errors             SafeSlice[error]
+			transformedResults SafeSlice[any]
+			transformedErrors  SafeSlice[error]
+			transforms         int32
 		)
 
 		newMW := func() experimental.Middleware {
@@ -101,12 +104,32 @@ func TestClientMiddleware(t *testing.T) {
 					results.Append(result)
 					errors.Append(err)
 				},
+				transformOutputFn: func(ctx context.Context, call experimental.CallContext, output *experimental.TransformableOutput) {
+					// Mutate output
+					switch atomic.AddInt32(&transforms, 1) {
+					case 1:
+						output.Result = "step transform"
+					case 2:
+						output.Result = "fn transform"
+					}
+
+				},
+			}
+		}
+
+		verifyTransformMw := func() experimental.Middleware {
+			return &inlineMiddleware{
+				transformOutputFn: func(ctx context.Context, call experimental.CallContext, output *experimental.TransformableOutput) {
+					transformedResults.Append(output.Result)
+					transformedErrors.Append(output.Error)
+				},
 			}
 		}
 
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
-			AppID:      randomSuffix("app"),
-			Middleware: []func() experimental.Middleware{newMW},
+			AppID: randomSuffix("app"),
+			// middleware runs in reverse order, so put verify first.
+			Middleware: []func() experimental.Middleware{verifyTransformMw, newMW},
 			Logger:     slog.New(slog.DiscardHandler),
 		})
 		r.NoError(err)
@@ -115,7 +138,7 @@ func TestClientMiddleware(t *testing.T) {
 		_, err = inngestgo.CreateFunction(
 			c,
 			inngestgo.FunctionOpts{
-				ID:      "fn",
+				ID:      "fn-transform-output",
 				Retries: inngestgo.IntPtr(1),
 			},
 			inngestgo.EventTrigger(eventName, nil),
@@ -137,8 +160,8 @@ func TestClientMiddleware(t *testing.T) {
 
 		r.EventuallyWithT(func(ct *assert.CollectT) {
 			a := assert.New(ct)
+			// Actual AfterExecution reports correctly.
 			a.Equal([]any{
-				// First request.
 				"ok",
 				1.1,
 			}, results.Load())
@@ -146,6 +169,16 @@ func TestClientMiddleware(t *testing.T) {
 				nil,
 				nil,
 			}, errors.Load(), "%#v", errors.Load())
+
+			// And the transform verification ran
+			a.Equal([]any{
+				"step transform",
+				"fn transform",
+			}, transformedResults.Load())
+			a.Equal([]error{
+				nil,
+				nil,
+			}, transformedErrors.Load())
 		}, 5*time.Second, 10*time.Millisecond)
 	})
 
@@ -926,6 +959,7 @@ type inlineMiddleware struct {
 	beforeExecutionFn func(ctx context.Context, call experimental.CallContext)
 	afterExecutionFn  func(ctx context.Context, call experimental.CallContext, result any, err error)
 	transformInputFn  func(ctx context.Context, call experimental.CallContext, input *experimental.TransformableInput)
+	transformOutputFn func(ctx context.Context, call experimental.CallContext, output *experimental.TransformableOutput)
 	onPanic           func(ctx context.Context, call experimental.CallContext, recovery any, stack string)
 }
 
@@ -959,6 +993,17 @@ func (m *inlineMiddleware) TransformInput(
 		return
 	}
 	m.transformInputFn(ctx, call, input)
+}
+
+func (m *inlineMiddleware) TransformOutput(
+	ctx context.Context,
+	call experimental.CallContext,
+	output *experimental.TransformableOutput,
+) {
+	if m.transformOutputFn == nil {
+		return
+	}
+	m.transformOutputFn(ctx, call, output)
 }
 
 // mockLogHandler is a mock slog.Handler that can be used to test the
