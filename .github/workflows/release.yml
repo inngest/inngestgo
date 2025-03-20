@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        default: patch
+        type: choice
+        description: "Version bump"
+        options: [patch, minor, major]
+        required: true
+
+jobs:
+  test:
+    uses: inngest/inngestgo/.github/workflows/go.yml@ktlo/release-ci
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get latest tag
+        id: get_tag
+        run: |
+          git fetch --tags
+          tag=$(git tag --sort=-v:refname | grep '^v' | head -n 1)
+          echo "latest_tag=$tag" >> $GITHUB_OUTPUT
+
+      - name: Sort next version
+        id: next
+        run: |
+          current="${{ steps.get_tag.outputs.latest_tag }}"
+          ver=${current#v}
+          IFS='.' read -r major minor patch <<< "$ver"
+
+          case "${{ github.event.inputs.bump }}" in
+            patch) patch=$((patch + 1));;
+            minor) minor=$((minor + 1)); patch=0;;
+            major) major=$((major + 1)); minor=0; patch=0;;
+          esac
+
+          next="v$major.$minor.$patch"
+          echo "next_tag=$next" >> $GITHUB_OUTPUT
+
+      - name: Create Git Tag
+        run: |
+          git config user.name "inngest-release-bot"
+          git config user.email "126702797+inngest-release-bot@users.noreply.github.com"
+
+          echo "Creating tag ${{ steps.next.outputs.next_tag }}"
