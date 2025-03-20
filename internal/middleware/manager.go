@@ -3,10 +3,14 @@ package middleware
 import (
 	"context"
 
-	"github.com/inngest/inngestgo/internal/fn"
 	"github.com/inngest/inngestgo/internal/types"
 )
 
+// ensure that the MiddlewareManager implements Middleware at compile time.
+var _ Middleware = &MiddlewareManager{}
+
+// NewMiddlewareManager returns a new middleware manager which invokes
+// each registered middleware.
 func NewMiddlewareManager() *MiddlewareManager {
 	return &MiddlewareManager{
 		idempotentHooks: &types.Set[string]{},
@@ -32,17 +36,7 @@ func (m *MiddlewareManager) Add(mw ...func() Middleware) *MiddlewareManager {
 	return m
 }
 
-func (m *MiddlewareManager) AfterExecution(ctx context.Context) {
-	for i := range m.items {
-		// We iterate in reverse order so that the innermost middleware is
-		// executed first.
-		mw := m.items[len(m.items)-1-i]
-
-		mw.AfterExecution(ctx)
-	}
-}
-
-func (m *MiddlewareManager) BeforeExecution(ctx context.Context) {
+func (m *MiddlewareManager) BeforeExecution(ctx context.Context, call CallContext) {
 	// Only allow BeforeExecution to be called once. This simplifies code since
 	// execution can start at the function or step level.
 	hook := "BeforeExecution"
@@ -52,15 +46,65 @@ func (m *MiddlewareManager) BeforeExecution(ctx context.Context) {
 	m.idempotentHooks.Add(hook)
 
 	for _, mw := range m.items {
-		mw.BeforeExecution(ctx)
+		mw.BeforeExecution(ctx, call)
+	}
+}
+
+func (m *MiddlewareManager) AfterExecution(ctx context.Context, call CallContext, result any, err error) {
+	// Only allow AftereExecution to be called once. This simplifies code since
+	// execution can start at the function or step level.
+	hook := "AfterExecution"
+	if m.idempotentHooks.Contains(hook) {
+		return
+	}
+	m.idempotentHooks.Add(hook)
+
+	for i := range m.items {
+		// We iterate in reverse order so that the innermost middleware is
+		// executed first.
+		mw := m.items[len(m.items)-1-i]
+
+		mw.AfterExecution(ctx, call, result, err)
+	}
+}
+
+func (m *MiddlewareManager) TransformOutput(
+	ctx context.Context,
+	call CallContext,
+	output *TransformableOutput,
+) {
+	// Only allow TransformOutput to be called once. This simplifies code since
+	// execution can start at the function or step level.
+	hook := "TransformOutput"
+	if m.idempotentHooks.Contains(hook) {
+		return
+	}
+	m.idempotentHooks.Add(hook)
+
+	for i := range m.items {
+		// We iterate in reverse order so that the innermost middleware is
+		// executed first.
+		mw := m.items[len(m.items)-1-i]
+		mw.TransformOutput(ctx, call, output)
 	}
 }
 
 func (m *MiddlewareManager) TransformInput(
+	ctx context.Context,
+	call CallContext,
 	input *TransformableInput,
-	fn fn.ServableFunction,
 ) {
 	for _, mw := range m.items {
-		mw.TransformInput(input, fn)
+		mw.TransformInput(ctx, call, input)
+	}
+}
+
+func (m *MiddlewareManager) OnPanic(ctx context.Context, call CallContext, recovered any, stack string) {
+	for i := range m.items {
+		// We iterate in reverse order so that the innermost middleware is
+		// executed first.
+		mw := m.items[len(m.items)-1-i]
+
+		mw.OnPanic(ctx, call, recovered, stack)
 	}
 }

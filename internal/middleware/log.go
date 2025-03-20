@@ -5,16 +5,13 @@ import (
 	"errors"
 	"log/slog"
 	"sync/atomic"
-
-	"github.com/inngest/inngestgo/internal/fn"
 )
 
 type logContextKeyType struct{}
 
 var logContextKey = logContextKeyType{}
 
-// LoggerFromContext returns the logger from the context. Returns an error if no
-// logger is present.
+// LoggerFromContext returns the logger from the context. Returns an error if no logger is present.
 func LoggerFromContext(ctx context.Context) (*slog.Logger, error) {
 	value := ctx.Value(logContextKey)
 	if value == nil {
@@ -43,14 +40,15 @@ type logMiddlewareRequest struct {
 	logger       *slog.Logger
 }
 
-func (l *logMiddlewareRequest) BeforeExecution(ctx context.Context) {
+func (l *logMiddlewareRequest) BeforeExecution(ctx context.Context, call CallContext) {
 	// We're encountering "new code", so enable the logger.
 	l.enableLogger()
 }
 
 func (l *logMiddlewareRequest) TransformInput(
+	ctx context.Context,
+	call CallContext,
 	input *TransformableInput,
-	fn fn.ServableFunction,
 ) {
 	// Add the logger to the context so that it can be used by the
 	// Inngest function.

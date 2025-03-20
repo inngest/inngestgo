@@ -1256,7 +1256,7 @@ func invoke(
 	}
 
 	// This must be a pointer so that it can be mutated from within function tools.
-	mgr := sdkrequest.NewManager(mw, cancel, input, signingKey)
+	mgr := sdkrequest.NewManager(sf, mw, cancel, input, signingKey)
 	fCtx = sdkrequest.SetManager(fCtx, mgr)
 
 	// Create a new Input type.  We don't know ahead of time the type signature as
@@ -1284,23 +1284,38 @@ func invoke(
 	inputVal.FieldByName("InputCtx").Set(reflect.ValueOf(callCtx))
 
 	var (
-		res       []reflect.Value
-		panickErr error
+		res      []reflect.Value
+		panicErr error
+
+		// fnResponse is the actual response from the fn
+		fnResponse any
+		// fnError is the actual error from the fn.
+		fnError error
 	)
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
+				callCtx := mgr.MiddlewareCallCtx()
+
 				// Was this us attepmting to prevent functions from continuing, using
 				// panic as a crappy control flow because go doesn't have generators?
 				//
 				// XXX: I'm not very happy with using this;  it is dirty
 				if _, ok := r.(step.ControlHijack); ok {
 					// Step attempt ended (completed or errored).
-					mw.AfterExecution(ctx)
+					//
+					// Note that if this is a step.Run, middleware has already been invoked
+					// via step.Run and this is skipped due to idempotency in the middleware manager.
+					// Because this isn't a step.Run, it's safe to call this with nil data and error.
+					mw.AfterExecution(ctx, callCtx, nil, nil)
 					return
 				}
-				stack := string(debug.Stack())
-				panickErr = fmt.Errorf("function panicked: %v.  stack:\n%s", r, stack)
+
+				panicStack := string(debug.Stack())
+				panicErr = fmt.Errorf("function panicked: %v.  stack:\n%s", r, panicStack)
+
+				mw.AfterExecution(ctx, callCtx, nil, nil)
+				mw.OnPanic(ctx, callCtx, r, panicStack)
 			}
 		}()
 
@@ -1325,7 +1340,7 @@ func invoke(
 			mwInput.WithContext(fCtx)
 
 			// Run hook.
-			mw.TransformInput(mwInput, sf)
+			mw.TransformInput(ctx, mgr.MiddlewareCallCtx(), mwInput)
 
 			// Update the context in case the hook changed it.
 			fCtx = mwInput.Context()
@@ -1343,7 +1358,7 @@ func invoke(
 		if len(input.Steps) == 0 {
 			// There are no memoized steps, so the start of the function is "new
 			// code".
-			mw.BeforeExecution(fCtx)
+			mw.BeforeExecution(fCtx, mgr.MiddlewareCallCtx())
 		}
 
 		// Call the defined function with the input data.
@@ -1352,29 +1367,40 @@ func invoke(
 			inputVal,
 		})
 
-		// Function ended.
-		mw.AfterExecution(ctx)
+		// Set the function response.
+		if len(res) >= 1 {
+			fnResponse = res[0].Interface()
+		}
+
+		// Function ended.  Get the types for the middleare call.
+		if len(res) >= 2 && !res[1].IsNil() {
+			fnError = res[1].Interface().(error)
+		}
+
+		mw.AfterExecution(ctx, mgr.MiddlewareCallCtx(), fnResponse, fnError)
+
+		{
+			// Transform output via MW
+			out := &middleware.TransformableOutput{
+				Result: fnResponse,
+				Error:  fnError,
+			}
+			mw.TransformOutput(ctx, mgr.MiddlewareCallCtx(), out)
+			// And update the vars
+			fnResponse = out.Result
+			fnError = out.Error
+		}
 	}()
 
-	var err error
-	if panickErr != nil {
-		err = panickErr
+	// Override errors here.
+	if panicErr != nil {
+		fnError = panicErr
 	} else if mgr.Err() != nil {
 		// This is higher precedence than a return error.
-		err = mgr.Err()
-	} else if res != nil && !res[1].IsNil() {
-		// The function returned an error.
-		err = res[1].Interface().(error)
+		fnError = mgr.Err()
 	}
 
-	var response any
-	if res != nil {
-		// Panicking in tools interferes with grabbing the response;  it's always
-		// an empty array if tools panic to hijack control flow.
-		response = res[0].Interface()
-	}
-
-	return response, mgr.Ops(), err
+	return fnResponse, mgr.Ops(), fnError
 }
 
 // updateInput applies the middleware input to the function input.

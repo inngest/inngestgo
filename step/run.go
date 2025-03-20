@@ -10,6 +10,7 @@ import (
 	"github.com/inngest/inngest/pkg/execution/state"
 	"github.com/inngest/inngestgo/errors"
 	"github.com/inngest/inngestgo/internal"
+	"github.com/inngest/inngestgo/internal/middleware"
 )
 
 type RunOpts struct {
@@ -104,9 +105,19 @@ func Run[T any](
 	}
 
 	// We're about to run a step callback, which is "new code".
-	mw.BeforeExecution(ctx)
-
+	mw.BeforeExecution(ctx, mgr.MiddlewareCallCtx())
 	result, err := f(setWithinStep(ctx))
+
+	mw.AfterExecution(ctx, mgr.MiddlewareCallCtx(), result, err)
+	out := &middleware.TransformableOutput{
+		Result: result,
+		Error:  err,
+	}
+	mw.TransformOutput(ctx, mgr.MiddlewareCallCtx(), out)
+
+	mutated := out.Result
+	err = out.Error
+
 	if err != nil {
 		// If tihs is a StepFailure already, fail fast.
 		if errors.IsStepError(err) {
@@ -114,7 +125,7 @@ func Run[T any](
 			panic(ControlHijack{})
 		}
 
-		result, _ := json.Marshal(result)
+		result, _ := json.Marshal(mutated)
 
 		// Implement per-step errors.
 		mgr.AppendOp(state.GeneratorOpcode{
@@ -131,7 +142,7 @@ func Run[T any](
 		panic(ControlHijack{})
 	}
 
-	byt, err := json.Marshal(result)
+	byt, err := json.Marshal(mutated)
 	if err != nil {
 		mgr.SetErr(fmt.Errorf("unable to marshal run respone for '%s': %w", id, err))
 	}

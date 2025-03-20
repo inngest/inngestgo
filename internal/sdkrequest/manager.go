@@ -10,6 +10,8 @@ import (
 
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/execution/state"
+	"github.com/inngest/inngestgo/experimental"
+	"github.com/inngest/inngestgo/internal/fn"
 	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/types"
 )
@@ -44,11 +46,14 @@ type InvocationManager interface {
 	// SigningKey returns the signing key used for this request.  This lets us
 	// retrieve creds for eg. publishing or API alls.
 	SigningKey() string
+	// MiddlewareCallCtx exposes the call context for middleware calls.
+	MiddlewareCallCtx() experimental.CallContext
 }
 
 // NewManager returns an InvocationManager to manage the incoming executor request.  This
 // is required for step tooling to process.
 func NewManager(
+	fn fn.ServableFunction,
 	mw *middleware.MiddlewareManager,
 	cancel context.CancelFunc,
 	request *Request,
@@ -60,6 +65,7 @@ func NewManager(
 	}
 
 	return &requestCtxManager{
+		fn:         fn,
 		cancel:     cancel,
 		request:    request,
 		indexes:    map[string]int{},
@@ -82,6 +88,7 @@ func Manager(ctx context.Context) (InvocationManager, bool) {
 }
 
 type requestCtxManager struct {
+	fn fn.ServableFunction
 	// key is the signing key
 	signingKey string
 	// cancel ends the context and prevents any other tools from running.
@@ -147,6 +154,20 @@ func (r *requestCtxManager) Ops() []state.GeneratorOpcode {
 	return r.ops
 }
 
+func (r *requestCtxManager) MiddlewareCallCtx() middleware.CallContext {
+	opts := fn.FunctionOpts{}
+	if r.fn != nil {
+		opts = r.fn.Config()
+	}
+
+	return middleware.CallContext{
+		FunctionOpts: opts,
+		Env:          r.request.CallCtx.Env,
+		RunID:        r.request.CallCtx.RunID,
+		Attempt:      r.request.CallCtx.Attempt,
+	}
+}
+
 func (r *requestCtxManager) Step(ctx context.Context, op UnhashedOp) (json.RawMessage, bool) {
 	hash := op.MustHash()
 	r.l.RLock()
@@ -156,7 +177,7 @@ func (r *requestCtxManager) Step(ctx context.Context, op UnhashedOp) (json.RawMe
 	if r.unseen.Len() == 0 {
 		// We exhausted all memoized steps, so we're about to run "new code"
 		// after a memoized step.
-		r.mw.BeforeExecution(ctx)
+		r.mw.BeforeExecution(ctx, r.MiddlewareCallCtx())
 	}
 
 	val, ok := r.request.Steps[hash]
