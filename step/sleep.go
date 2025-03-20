@@ -2,10 +2,12 @@ package step
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/execution/state"
+	"github.com/inngest/inngestgo/internal"
 	str2duration "github.com/xhit/go-str2duration/v2"
 )
 
@@ -22,6 +24,14 @@ func Sleep(ctx context.Context, id string, duration time.Duration) {
 		// We've already slept.
 		return
 	}
+
+	mw, ok := internal.MiddlewareManagerFromContext(ctx)
+	if !ok {
+		mgr.SetErr(fmt.Errorf("no middleware manager found in context"))
+		panic(ControlHijack{})
+	}
+	mw.BeforeExecution(ctx)
+
 	mgr.AppendOp(state.GeneratorOpcode{
 		ID:   op.MustHash(),
 		Op:   enums.OpcodeSleep,
@@ -30,6 +40,7 @@ func Sleep(ctx context.Context, id string, duration time.Duration) {
 			"duration": str2duration.String(duration),
 		},
 	})
+
 	panic(ControlHijack{})
 }
 
@@ -37,19 +48,5 @@ func Sleep(ctx context.Context, id string, duration time.Duration) {
 // and Inngest will resume the function after the given time from this step.
 func SleepUntil(ctx context.Context, id string, until time.Time) {
 	duration := time.Until(until)
-	mgr := preflight(ctx)
-	op := mgr.NewOp(enums.OpcodeSleep, id, nil)
-	if _, ok := mgr.Step(ctx, op); ok {
-		// We've already slept.
-		return
-	}
-	mgr.AppendOp(state.GeneratorOpcode{
-		ID:   op.MustHash(),
-		Op:   enums.OpcodeSleep,
-		Name: id,
-		Opts: map[string]any{
-			"duration": str2duration.String(duration),
-		},
-	})
-	panic(ControlHijack{})
+	Sleep(ctx, id, duration)
 }
