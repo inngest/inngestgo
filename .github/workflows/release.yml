@@ -12,7 +12,7 @@ on:
 
 jobs:
   test:
-    uses: inngest/inngestgo/.github/workflows/go.yml@ktlo/release-ci
+    uses: inngest/inngestgo/.github/workflows/go.yml@main
 
   release:
     needs: test
