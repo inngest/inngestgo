@@ -12,7 +12,7 @@ on:
 
 jobs:
   test:
-    uses: inngest/inngestgo/.github/workflows/go.yml@main
+    uses: inngest/inngestgo/.github/workflows/go.yml@ktlo/release-ci
 
   release:
     needs: test
@@ -46,7 +46,6 @@ jobs:
       - name: Create Git Tag
         run: |
           git config user.name "inngest-release-bot"
-          git config user.email "126702797+inngest-release-bot@users.noreply.github.com"
+          git config user.emai "126702797+inngest-release-bot@users.noreply.github.com"
 
-          git tag ${{ steps.next.outputs.next_tag }}
-          git push origin ${{ steps.next.outputs.next_tag }}
+          echo "Creating tag ${{ steps.next.outputs.next_tag }}"
