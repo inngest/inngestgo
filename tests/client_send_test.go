@@ -110,6 +110,24 @@ func TestClientSend(t *testing.T) {
 	})
 }
 
+func TestClientSendDevOption(t *testing.T) {
+	// Client can send events to Dev Server when using the Dev option instead of
+	// the INNGEST_DEV env var
+
+	r := require.New(t)
+	ctx := context.Background()
+
+	c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+		AppID: randomSuffix("app"),
+		Dev:   inngestgo.Ptr(true),
+	})
+	r.NoError(err)
+
+	ids, err := c.Send(ctx, inngestgo.Event{Name: "test"})
+	r.NoError(err)
+	r.NotEmpty(ids)
+}
+
 func TestClientSendMany(t *testing.T) {
 	devEnv(t)
 
