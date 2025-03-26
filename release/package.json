@@ -4,7 +4,7 @@
 	"version": "0.11.2",
 	"scripts": {
 		"changeset": "changeset",
-		"release:version": "changeset version && ./scripts/set_version.sh",
+		"release:version": "changeset version && ./set_version.sh && mv CHANGELOG.md ../",
 		"release:publish": "changeset tag"
 	},
 	"dependencies": {
