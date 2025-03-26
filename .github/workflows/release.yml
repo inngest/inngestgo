@@ -19,28 +19,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '1.24'
 
-      - name: Get latest tag
-        id: get_tag
-        run: |
-          git fetch --tags
-          tag=$(git tag --sort=-v:refname | grep '^v' | head -n 1)
-          echo "latest_tag=$tag" >> $GITHUB_OUTPUT
-
-      - name: Sort next version
+      - name: Get next tag
         id: next
         run: |
-          current="${{ steps.get_tag.outputs.latest_tag }}"
-          ver=${current#v}
-          IFS='.' read -r major minor patch <<< "$ver"
-
-          case "${{ github.event.inputs.bump }}" in
-            patch) patch=$((patch + 1));;
-            minor) minor=$((minor + 1)); patch=0;;
-            major) major=$((major + 1)); minor=0; patch=0;;
-          esac
-
-          next="v$major.$minor.$patch"
+          next="$(./scripts/next_version.sh ${{ github.event.inputs.bump }})"
           echo "next_tag=$next" >> $GITHUB_OUTPUT
 
       - name: Create Git Tag
