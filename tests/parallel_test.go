@@ -2,7 +2,6 @@ package tests
 
 import (
 	"context"
-	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -63,7 +62,7 @@ func TestParallel(t *testing.T) {
 					ctx,
 					func(ctx context.Context) (any, error) {
 						return step.Invoke[any](ctx, "invoke", step.InvokeOpts{
-							FunctionId: fmt.Sprintf("%s-%s", appName, fn1.Config().ID),
+							Function: fn1,
 						})
 					},
 					func(ctx context.Context) (any, error) {

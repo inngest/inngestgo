@@ -130,6 +130,10 @@ func (s servableFunc) Config() FunctionOpts {
 	return s.fc
 }
 
+func (s servableFunc) AppID() string {
+	return s.appID
+}
+
 func (s servableFunc) ID() string {
 	return s.fc.ID
 }
