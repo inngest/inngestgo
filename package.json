@@ -1,0 +1,12 @@
+{
+	"name": "inngestgo",
+	"private": true,
+	"version": "0.11.2",
+	"scripts": {
+		"changeset": "changeset",
+		"release:version": "changeset version && ./scripts/set_version.sh"
+	},
+	"dependencies": {
+		"@changesets/cli": "^2.28.1"
+	}
+}
