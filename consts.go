@@ -3,7 +3,6 @@ package inngestgo
 const (
 	SDKAuthor         = "inngest"
 	SDKLanguage       = "go"
-	SDKVersion        = "v0.11.3"
 	SyncKindInBand    = "in_band"
 	SyncKindOutOfBand = "out_of_band"
 )

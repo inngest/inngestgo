@@ -1,14 +1,8 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      bump:
-        default: patch
-        type: choice
-        description: "Version bump"
-        options: [patch, minor, major]
-        required: true
+  push:
+    branches: ["main"]
 
 jobs:
   test:
@@ -19,21 +13,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Go
-        uses: actions/setup-go@v2
+      - uses: actions/setup-go@v2
         with:
           go-version: '1.24'
-
-      - name: Get next tag
-        id: next
-        run: |
-          next="$(./scripts/next_version.sh ${{ github.event.inputs.bump }})"
-          echo "next_tag=$next" >> $GITHUB_OUTPUT
 
       - name: Create Git Tag
         run: |
           git config user.name "inngest-release-bot"
           git config user.email "126702797+inngest-release-bot@users.noreply.github.com"
 
-          git tag ${{ steps.next.outputs.next_tag }}
-          git push origin ${{ steps.next.outputs.next_tag }}
+          VERSION="$(go run scripts/get_version/main.go)"
+          git tag "v${VERSION}"
+          git push origin "v${VERSION}"
