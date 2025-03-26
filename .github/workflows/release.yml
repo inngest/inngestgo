@@ -31,6 +31,6 @@ jobs:
       - uses: changesets/action@v1
         with:
           version: npm run release:version
-          title: ${{ github.ref_name == 'main' && 'Release @latest' || format('Release {0}', github.ref_name) }}
+          publish: npm run release:publish
         env:
           GITHUB_TOKEN: ${{ secrets.CHANGESET_GITHUB_TOKEN }}
