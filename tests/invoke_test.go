@@ -413,12 +413,12 @@ func TestInvokeByID(t *testing.T) {
 
 		r.Equal(
 			map[string]any{
-				"message": "could not find function with ID: some-non-existent-fn",
+				"message": "could not find function with ID: app-some-non-existent-fn",
 			},
 			run.Output,
 		)
 
 		r.Nil(invokeResult)
-		r.Equal("could not find function with ID: some-non-existent-fn", invokeErr.Error())
+		r.Equal("could not find function with ID: app-some-non-existent-fn", invokeErr.Error())
 	})
 }
