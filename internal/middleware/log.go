@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"sync/atomic"
 )
@@ -12,20 +11,20 @@ type logContextKeyType struct{}
 var logContextKey = logContextKeyType{}
 
 // LoggerFromContext returns the logger from the context. Returns an error if no logger is present.
-func LoggerFromContext(ctx context.Context) (*slog.Logger, error) {
+func LoggerFromContext(ctx context.Context) *slog.Logger {
 	value := ctx.Value(logContextKey)
 	if value == nil {
 		// Unreachable if the middleware is used correctly.
-		return nil, errors.New("no logger in context")
+		panic("no logger in context")
 	}
 
 	l, ok := value.(*slog.Logger)
 	if !ok {
 		// Unreachable if the middleware is used correctly.
-		return nil, errors.New("logger in context is not a *slog.Logger")
+		panic("logger in context is not a *slog.Logger")
 	}
 
-	return l, nil
+	return l
 }
 
 // withLogger adds the logger to the context.
