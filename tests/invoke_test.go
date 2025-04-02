@@ -27,12 +27,10 @@ func TestInvoke(t *testing.T) {
 			Message string `json:"message"`
 		}
 
-		childFnName := "my-child-fn"
 		childFn, err := inngestgo.CreateFunction(
 			c,
 			inngestgo.FunctionOpts{
-				ID:      childFnName,
-				Name:    childFnName,
+				ID:      "my-child-fn",
 				Retries: inngestgo.IntPtr(0),
 			},
 			inngestgo.EventTrigger("never", nil),
@@ -53,7 +51,6 @@ func TestInvoke(t *testing.T) {
 			c,
 			inngestgo.FunctionOpts{
 				ID:      "my-parent-fn",
-				Name:    "my-parent-fn",
 				Retries: inngestgo.IntPtr(0),
 			},
 			inngestgo.EventTrigger(eventName, nil),
@@ -62,8 +59,8 @@ func TestInvoke(t *testing.T) {
 				invokeResult, invokeErr = step.Invoke[any](ctx,
 					"invoke",
 					step.InvokeOpts{
-						Data:       map[string]any{"message": "hello"},
-						FunctionId: childFn.FullyQualifiedID(),
+						Data:     map[string]any{"message": "hello"},
+						Function: childFn,
 					},
 				)
 				return invokeResult, invokeErr
@@ -95,12 +92,10 @@ func TestInvoke(t *testing.T) {
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
 		r.NoError(err)
 
-		childFnName := "my-child-fn"
 		childFn, err := inngestgo.CreateFunction(
 			c,
 			inngestgo.FunctionOpts{
-				ID:      childFnName,
-				Name:    childFnName,
+				ID:      "my-child-fn",
 				Retries: inngestgo.IntPtr(0),
 			},
 			inngestgo.EventTrigger("never", nil),
@@ -128,9 +123,7 @@ func TestInvoke(t *testing.T) {
 				runID.Store(input.InputCtx.RunID)
 				invokeResult, invokeErr = step.Invoke[any](ctx,
 					"invoke",
-					step.InvokeOpts{
-						FunctionId: childFn.FullyQualifiedID(),
-					},
+					step.InvokeOpts{Function: childFn},
 				)
 				return invokeResult, invokeErr
 			},
@@ -158,59 +151,6 @@ func TestInvoke(t *testing.T) {
 		)
 	})
 
-	t.Run("non-existent function", func(t *testing.T) {
-		ctx := context.Background()
-		r := require.New(t)
-
-		appName := randomSuffix("my-app")
-		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
-		r.NoError(err)
-
-		var runID atomic.Value
-		var invokeResult any
-		var invokeErr error
-		eventName := randomSuffix("my-event")
-		_, err = inngestgo.CreateFunction(
-			c,
-			inngestgo.FunctionOpts{
-				ID:      "my-fn",
-				Name:    "my-fn",
-				Retries: inngestgo.IntPtr(0),
-			},
-			inngestgo.EventTrigger(eventName, nil),
-			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				runID.Store(input.InputCtx.RunID)
-				invokeResult, invokeErr = step.Invoke[any](ctx,
-					"invoke",
-					step.InvokeOpts{FunctionId: "some-non-existent-fn"},
-				)
-				return invokeResult, invokeErr
-			},
-		)
-		r.NoError(err)
-
-		server, sync := serve(t, c)
-		defer server.Close()
-		r.NoError(sync())
-
-		_, err = c.Send(ctx, inngestgo.Event{
-			Name: eventName,
-			Data: map[string]any{"foo": "bar"}},
-		)
-		r.NoError(err)
-		run := waitForRun(t, &runID, enums.RunStatusFailed.String())
-
-		r.Equal(
-			map[string]any{
-				"message": "could not find function with ID: some-non-existent-fn",
-			},
-			run.Output,
-		)
-
-		r.Nil(invokeResult)
-		r.Equal("could not find function with ID: some-non-existent-fn", invokeErr.Error())
-	})
-
 	t.Run("swallowed error does cause invoke retry", func(t *testing.T) {
 		// If we swallow the step.Invoke error and continue, we do not retry the
 		// invoke.
@@ -222,12 +162,10 @@ func TestInvoke(t *testing.T) {
 		r.NoError(err)
 
 		var childCounter int32
-		childFnName := "my-child-fn"
-		_, err = inngestgo.CreateFunction(
+		childFn, err := inngestgo.CreateFunction(
 			c,
 			inngestgo.FunctionOpts{
-				ID:      childFnName,
-				Name:    childFnName,
+				ID:      "my-child-fn",
 				Retries: inngestgo.IntPtr(0),
 			},
 			inngestgo.EventTrigger("never", nil),
@@ -256,9 +194,7 @@ func TestInvoke(t *testing.T) {
 				runID.Store(input.InputCtx.RunID)
 				_, invokeErr = step.Invoke[any](ctx,
 					"invoke",
-					step.InvokeOpts{
-						FunctionId: fmt.Sprintf("%s-%s", appName, childFnName),
-					},
+					step.InvokeOpts{Function: childFn},
 				)
 
 				_, _ = step.Run(ctx, "a", func(ctx context.Context) (any, error) {
@@ -296,12 +232,10 @@ func TestInvoke(t *testing.T) {
 		r.NoError(err)
 
 		var childCounter int32
-		childFnName := "my-child-fn"
-		_, err = inngestgo.CreateFunction(
+		childFn, err := inngestgo.CreateFunction(
 			c,
 			inngestgo.FunctionOpts{
-				ID:      childFnName,
-				Name:    childFnName,
+				ID:      "my-child-fn",
 				Retries: inngestgo.IntPtr(0),
 			},
 			inngestgo.EventTrigger("never", nil),
@@ -320,8 +254,7 @@ func TestInvoke(t *testing.T) {
 		_, err = inngestgo.CreateFunction(
 			c,
 			inngestgo.FunctionOpts{
-				ID:   "my-parent-fn",
-				Name: "my-parent-fn",
+				ID: "my-parent-fn",
 
 				// Allow a retry because we need to assert that a retry does not
 				// happen.
@@ -333,9 +266,7 @@ func TestInvoke(t *testing.T) {
 				attempt = input.InputCtx.Attempt
 				return step.Invoke[any](ctx,
 					"invoke",
-					step.InvokeOpts{
-						FunctionId: fmt.Sprintf("%s-%s", appName, childFnName),
-					},
+					step.InvokeOpts{Function: childFn},
 				)
 			},
 		)
@@ -356,5 +287,138 @@ func TestInvoke(t *testing.T) {
 
 		// A retry never happened because we returned the step.Invoke error.
 		r.Equal(0, attempt)
+	})
+}
+
+func TestInvokeByID(t *testing.T) {
+	devEnv(t)
+
+	t.Run("success", func(t *testing.T) {
+		ctx := context.Background()
+		r := require.New(t)
+
+		appName := randomSuffix("my-app")
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
+		r.NoError(err)
+
+		type ChildEventData struct {
+			Message string `json:"message"`
+		}
+
+		childFnName := "my-child-fn"
+		childFn, err := inngestgo.CreateFunction(
+			c,
+			inngestgo.FunctionOpts{
+				ID:      childFnName,
+				Name:    childFnName,
+				Retries: inngestgo.IntPtr(0),
+			},
+			inngestgo.EventTrigger("never", nil),
+			func(
+				ctx context.Context,
+				input inngestgo.Input[ChildEventData],
+			) (any, error) {
+				return input.Event.Data.Message, nil
+			},
+		)
+		r.NoError(err)
+
+		var runID atomic.Value
+		var invokeResult any
+		var invokeErr error
+		eventName := randomSuffix("my-event")
+		_, err = inngestgo.CreateFunction(
+			c,
+			inngestgo.FunctionOpts{
+				ID:      "my-parent-fn",
+				Name:    "my-parent-fn",
+				Retries: inngestgo.IntPtr(0),
+			},
+			inngestgo.EventTrigger(eventName, nil),
+			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+				runID.Store(input.InputCtx.RunID)
+				invokeResult, invokeErr = step.InvokeByID[any](ctx,
+					"invoke",
+					step.InvokeByIDOpts{
+						AppID:      childFn.AppID(),
+						Data:       map[string]any{"message": "hello"},
+						FunctionID: childFn.ID(),
+					},
+				)
+				return invokeResult, invokeErr
+			},
+		)
+		r.NoError(err)
+
+		server, sync := serve(t, c)
+		defer server.Close()
+		r.NoError(sync())
+
+		_, err = c.Send(ctx, inngestgo.Event{
+			Name: eventName,
+			Data: map[string]any{"foo": "bar"}},
+		)
+		r.NoError(err)
+		run := waitForRun(t, &runID, enums.RunStatusCompleted.String())
+
+		r.Equal("hello", invokeResult)
+		r.NoError(invokeErr)
+		r.Equal("hello", run.Output)
+	})
+
+	t.Run("non-existent function", func(t *testing.T) {
+		ctx := context.Background()
+		r := require.New(t)
+
+		appName := randomSuffix("my-app")
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{AppID: appName})
+		r.NoError(err)
+
+		var runID atomic.Value
+		var invokeResult any
+		var invokeErr error
+		eventName := randomSuffix("my-event")
+		_, err = inngestgo.CreateFunction(
+			c,
+			inngestgo.FunctionOpts{
+				ID:      "my-fn",
+				Name:    "my-fn",
+				Retries: inngestgo.IntPtr(0),
+			},
+			inngestgo.EventTrigger(eventName, nil),
+			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+				runID.Store(input.InputCtx.RunID)
+				invokeResult, invokeErr = step.InvokeByID[any](ctx,
+					"invoke",
+					step.InvokeByIDOpts{
+						AppID:      "app",
+						FunctionID: "some-non-existent-fn",
+					},
+				)
+				return invokeResult, invokeErr
+			},
+		)
+		r.NoError(err)
+
+		server, sync := serve(t, c)
+		defer server.Close()
+		r.NoError(sync())
+
+		_, err = c.Send(ctx, inngestgo.Event{
+			Name: eventName,
+			Data: map[string]any{"foo": "bar"}},
+		)
+		r.NoError(err)
+		run := waitForRun(t, &runID, enums.RunStatusFailed.String())
+
+		r.Equal(
+			map[string]any{
+				"message": "could not find function with ID: app-some-non-existent-fn",
+			},
+			run.Output,
+		)
+
+		r.Nil(invokeResult)
+		r.Equal("could not find function with ID: app-some-non-existent-fn", invokeErr.Error())
 	})
 }

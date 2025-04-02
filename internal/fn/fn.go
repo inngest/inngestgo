@@ -11,6 +11,8 @@ import (
 //
 // This is created via CreateFunction in this package.
 type ServableFunction interface {
+	AppID() string
+
 	FullyQualifiedID() string
 
 	ID() string
