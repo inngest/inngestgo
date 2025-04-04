@@ -3,19 +3,26 @@ package inngestgo
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
+	mathrand "math/rand"
 	"net/http"
 	"net/url"
 	"os"
+	"time"
 
 	"github.com/inngest/inngestgo/internal/middleware"
 )
 
 const (
 	defaultEndpoint = "https://inn.gs"
+	retryAttempts   = 5
+	retryBaseDelay  = 100 * time.Millisecond
 )
 
 // Client represents a client used to send events to Inngest.
@@ -277,7 +284,35 @@ func (a apiClient) SendMany(ctx context.Context, e []any) ([]string, error) {
 		req.Header.Add(HeaderKeyEnv, a.GetEnv())
 	}
 
-	resp, err := a.HTTPClient.Post(url, "application/json", bytes.NewBuffer(byt))
+	// Create and set the idempotency key header. This is used to seed a
+	// deterministic event ID in the Inngest Server.
+	millis := time.Now().UnixMilli()
+	entropy := make([]byte, 10)
+	_, err = rand.Read(entropy)
+	if err != nil {
+		return nil, fmt.Errorf("error creating event ID seed: %w", err)
+	}
+	entropyBase64 := base64.StdEncoding.EncodeToString(entropy)
+	req.Header.Set(
+		HeaderKeyEventIDSeed,
+		fmt.Sprintf("%d,%s", millis, entropyBase64),
+	)
+
+	var resp *http.Response
+	for attempt := 0; attempt < retryAttempts; attempt++ {
+		resp, err = a.HTTPClient.Do(req)
+		if err == nil && resp.StatusCode < 300 {
+			break
+		}
+
+		// Jitter between 0 and the base delay.
+		jitter := time.Duration(mathrand.Float64() * float64(retryBaseDelay))
+
+		// Exponential backoff with jitter.
+		delay := retryBaseDelay*time.Duration(math.Pow(2, float64(attempt))) + jitter
+
+		time.Sleep(delay)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("error sending event request: %w", err)
 	}
