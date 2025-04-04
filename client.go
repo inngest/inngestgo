@@ -301,7 +301,11 @@ func (a apiClient) SendMany(ctx context.Context, e []any) ([]string, error) {
 	var resp *http.Response
 	for attempt := 0; attempt < retryAttempts; attempt++ {
 		resp, err = a.HTTPClient.Do(req)
-		if err == nil && resp.StatusCode < 300 {
+
+		// Don't retry if the request was successful or if there was a 4xx
+		// status code. We don't want to retry on 4xx because the request is
+		// malformed and retrying will just fail again.
+		if err == nil && resp.StatusCode < 500 {
 			break
 		}
 
