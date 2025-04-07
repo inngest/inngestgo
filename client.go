@@ -309,6 +309,9 @@ func (a apiClient) SendMany(ctx context.Context, e []any) ([]string, error) {
 			break
 		}
 
+		// Close since we're gonna retry and we don't want to leak resources.
+		_ = resp.Body.Close()
+
 		// Jitter between 0 and the base delay.
 		jitter := time.Duration(mathrand.Float64() * float64(retryBaseDelay))
 
