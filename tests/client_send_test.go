@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -175,14 +176,18 @@ func TestClientSendRetry(t *testing.T) {
 	// Server's event processing logic properly handles the idempotency key
 	// header.
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("proxy request")
 		atomic.AddInt32(&proxyCounter, 1)
+
+		byt, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		fmt.Println(string(byt))
 
 		// Always forward requests.
 		req, _ := http.NewRequest(
 			r.Method,
 			fmt.Sprintf("http://0.0.0.0:8288%s", r.URL.Path),
-			r.Body,
+			// r.Body,
+			bytes.NewReader(byt),
 		)
 		req.Header = r.Header
 		resp, _ := http.DefaultClient.Do(req)
