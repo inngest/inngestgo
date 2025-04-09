@@ -23,10 +23,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-const (
-	WorkerHeartbeatInterval = 10 * time.Second
-)
-
 type ConnectionState string
 
 const (
