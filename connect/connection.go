@@ -106,7 +106,7 @@ type connection struct {
 	extendLeaseInterval time.Duration
 }
 
-func (h *connectHandler) prepareConnection(ctx context.Context, data connectionEstablishData, excludeGateways []string) (connection, error) {
+func (h *connectHandler) prepareConnection(ctx context.Context, data connectionEstablishData, excludeGateways []string) (*connection, error) {
 	connectTimeout, cancelConnectTimeout := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelConnectTimeout()
 
@@ -116,20 +116,20 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 		ExcludeGateways: excludeGateways,
 	}, h.logger)
 	if err != nil {
-		return connection{}, newReconnectErr(fmt.Errorf("could not start connection: %w", err))
+		return nil, newReconnectErr(fmt.Errorf("could not start connection: %w", err))
 	}
 
 	h.logger.Debug("handshake successful", "gateway_endpoint", startRes.GetGatewayEndpoint(), "gateway_group", startRes.GetGatewayGroup())
 
 	gatewayHost, err := url.Parse(startRes.GetGatewayEndpoint())
 	if err != nil {
-		return connection{}, newReconnectErr(fmt.Errorf("received invalid start gateway host: %w", err))
+		return nil, newReconnectErr(fmt.Errorf("received invalid start gateway host: %w", err))
 	}
 
 	if h.opts.RewriteGatewayEndpoint != nil {
 		newGatewayHost, err := h.opts.RewriteGatewayEndpoint(*gatewayHost)
 		if err != nil {
-			return connection{}, newReconnectErr(fmt.Errorf("rewriting gateway host failed: %w", err))
+			return nil, newReconnectErr(fmt.Errorf("rewriting gateway host failed: %w", err))
 		}
 		gatewayHost = &newGatewayHost
 	}
@@ -141,7 +141,7 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 		},
 	})
 	if err != nil {
-		return connection{}, newReconnectErr(fmt.Errorf("could not connect to gateway: %w", err))
+		return nil, newReconnectErr(fmt.Errorf("could not connect to gateway: %w", err))
 	}
 
 	// Connection ID is unique per connection, reconnections should get a new ID
@@ -151,20 +151,20 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 
 	readyPayload, err := h.performConnectHandshake(ctx, connectionId.String(), ws, startRes, data, startTime)
 	if err != nil {
-		return connection{}, newReconnectErr(fmt.Errorf("could not perform connect handshake: %w", err))
+		return nil, newReconnectErr(fmt.Errorf("could not perform connect handshake: %w", err))
 	}
 
 	heartbeatInterval, err := time.ParseDuration(readyPayload.GetHeartbeatInterval())
 	if err != nil {
-		return connection{}, newReconnectErr(fmt.Errorf("could not parse heartbeat interval: %w", err))
+		return nil, newReconnectErr(fmt.Errorf("could not parse heartbeat interval: %w", err))
 	}
 
 	extendLeaseInterval, err := time.ParseDuration(readyPayload.GetExtendLeaseInterval())
 	if err != nil {
-		return connection{}, newReconnectErr(fmt.Errorf("could not parse extend lease interval: %w", err))
+		return nil, newReconnectErr(fmt.Errorf("could not parse extend lease interval: %w", err))
 	}
 
-	return connection{
+	return &connection{
 		ws:                  ws,
 		gatewayGroupName:    startRes.GetGatewayGroup(),
 		connectionId:        connectionId.String(),
@@ -173,7 +173,7 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 	}, nil
 }
 
-func (h *connectHandler) handleConnection(ctx context.Context, data connectionEstablishData, preparedConn connection) error {
+func (h *connectHandler) handleConnection(ctx context.Context, data connectionEstablishData, preparedConn *connection) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -262,8 +262,8 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 			case connectproto.GatewayMessageType_GATEWAY_EXECUTOR_REQUEST:
 				// Handle invoke in a non-blocking way to allow for other messages to be processed
 				h.workerPool.Add(workerPoolMsg{
-					msg: &msg,
-					ws:  preparedConn.ws,
+					msg:          &msg,
+					preparedConn: preparedConn,
 				})
 			case connectproto.GatewayMessageType_GATEWAY_HEARTBEAT:
 				lastGatewayHeartbeatReceived = time.Now()
@@ -271,6 +271,21 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 				if err := h.handleMessageReplyAck(&msg); err != nil {
 					h.logger.Error("could not handle message reply ack", "err", err)
 					continue
+				}
+			case connectproto.GatewayMessageType_WORKER_REQUEST_EXTEND_LEASE_ACK:
+				{
+					var payload connectproto.WorkerRequestExtendLeaseAckData
+					if err := proto.Unmarshal(msg.Payload, &payload); err != nil {
+						h.logger.Error("could not parse extend lease ack", "err", err)
+						continue
+					}
+
+					if payload.NewLeaseId != nil {
+						h.workerPool.inProgressLeases[payload.RequestId] = *payload.NewLeaseId
+					} else {
+						// remove local request lease to stop extending
+						delete(h.workerPool.inProgressLeases, payload.RequestId)
+					}
 				}
 			default:
 				h.logger.Error("got unknown gateway request", "err", err)
