@@ -180,7 +180,6 @@ func TestClientSendRetry(t *testing.T) {
 
 		byt, _ := io.ReadAll(r.Body)
 		r.Body.Close()
-		fmt.Println(string(byt))
 
 		// Always forward requests.
 		req, _ := http.NewRequest(

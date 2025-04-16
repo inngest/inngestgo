@@ -274,17 +274,8 @@ func (a apiClient) SendMany(ctx context.Context, e []any) ([]string, error) {
 	}
 
 	url := fmt.Sprintf("%s/e/%s", ep, a.GetEventKey())
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(byt))
-	if err != nil {
-		return nil, fmt.Errorf("error creating event request: %w", err)
-	}
-	SetBasicRequestHeaders(req)
 
-	if a.GetEnv() != "" {
-		req.Header.Add(HeaderKeyEnv, a.GetEnv())
-	}
-
-	// Create and set the idempotency key header. This is used to seed a
+	// Create the event ID seed header value. This is used to seed a
 	// deterministic event ID in the Inngest Server.
 	millis := time.Now().UnixMilli()
 	entropy := make([]byte, 10)
@@ -293,13 +284,21 @@ func (a apiClient) SendMany(ctx context.Context, e []any) ([]string, error) {
 		return nil, fmt.Errorf("error creating event ID seed: %w", err)
 	}
 	entropyBase64 := base64.StdEncoding.EncodeToString(entropy)
-	req.Header.Set(
-		HeaderKeyEventIDSeed,
-		fmt.Sprintf("%d,%s", millis, entropyBase64),
-	)
+	eventIDSeed := fmt.Sprintf("%d,%s", millis, entropyBase64)
 
 	var resp *http.Response
 	for attempt := 0; attempt < retryAttempts; attempt++ {
+		req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(byt))
+		if err != nil {
+			return nil, fmt.Errorf("error creating event request: %w", err)
+		}
+		SetBasicRequestHeaders(req)
+		req.Header.Set(HeaderKeyEventIDSeed, eventIDSeed)
+
+		if a.GetEnv() != "" {
+			req.Header.Add(HeaderKeyEnv, a.GetEnv())
+		}
+
 		resp, err = a.HTTPClient.Do(req)
 
 		// Don't retry if the request was successful or if there was a 4xx
