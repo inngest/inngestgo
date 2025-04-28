@@ -10,18 +10,18 @@ type logContextKeyType struct{}
 
 var logContextKey = logContextKeyType{}
 
-// LoggerFromContext returns the logger from the context. Returns an error if no logger is present.
+// LoggerFromContext returns the logger from the context.
 func LoggerFromContext(ctx context.Context) *slog.Logger {
 	value := ctx.Value(logContextKey)
 	if value == nil {
 		// Unreachable if the middleware is used correctly.
-		panic("no logger in context")
+		return slog.Default()
 	}
 
 	l, ok := value.(*slog.Logger)
 	if !ok {
 		// Unreachable if the middleware is used correctly.
-		panic("logger in context is not a *slog.Logger")
+		return slog.Default()
 	}
 
 	return l
