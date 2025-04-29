@@ -144,7 +144,7 @@ func (h *connectHandler) connectInvoke(ctx context.Context, preparedConn *connec
 
 	extendLeaseCtx, cancelExtendLeaseCtx := context.WithCancel(ctx)
 	defer cancelExtendLeaseCtx()
-	
+
 	go func() {
 		for {
 			select {
