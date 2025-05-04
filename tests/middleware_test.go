@@ -1009,11 +1009,7 @@ func TestLoggerMiddleware(t *testing.T) {
 			ctx context.Context,
 			input inngestgo.Input[any],
 		) (any, error) {
-			l, err := experimental.LoggerFromContext(ctx)
-			if err != nil {
-				return nil, err
-			}
-
+			l := experimental.LoggerFromContext(ctx)
 			l.Log(ctx, slog.Level(fakeLevel), "fn start")
 
 			_, err = step.Run(ctx, "a", func(ctx context.Context) (any, error) {
