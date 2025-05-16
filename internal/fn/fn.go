@@ -4,7 +4,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/inngest/inngest/pkg/inngest"
+	"github.com/inngest/inngest/pkg/enums"
 )
 
 // ServableFunction defines a function which can be called by a handler's Serve method.
@@ -21,7 +21,7 @@ type ServableFunction interface {
 	Config() FunctionOpts
 
 	// Trigger returns the event name or schedule that triggers the function.
-	Trigger() inngest.Trigger
+	Trigger() Trigger
 
 	// ZeroEvent returns the zero event type to marshal the event into, given an
 	// event name.
@@ -40,11 +40,11 @@ type FunctionOpts struct {
 	// Name represents a human-readable function name.
 	Name string
 
-	Priority    *inngest.Priority
-	Concurrency []inngest.Concurrency
+	Priority    *Priority
+	Concurrency []Concurrency
 	Idempotency *string
 	Retries     *int
-	Cancel      []inngest.Cancel
+	Cancel      []Cancel
 	Debounce    *Debounce
 	// Timeouts represents timeouts for a function.
 	Timeouts *Timeouts
@@ -57,7 +57,7 @@ type FunctionOpts struct {
 	// will never run.
 	RateLimit *RateLimit
 	// BatchEvents represents batching
-	BatchEvents *inngest.EventBatchConfig
+	BatchEvents *EventBatchConfig
 }
 
 func (f FunctionOpts) Validate() error {
@@ -68,22 +68,70 @@ func (f FunctionOpts) Validate() error {
 	return err
 }
 
-// GetRateLimit returns the inngest.RateLimit for function configuration.  The
-// SDK's RateLimit type is incompatible with the inngest.RateLimit type signature
-// for ease of definition.
-func (f FunctionOpts) GetRateLimit() *inngest.RateLimit {
-	if f.RateLimit == nil {
-		return nil
-	}
-	return f.RateLimit.Convert()
+// This file copies and exports types from github.com/inngest/inngest/pkg/inngest,
+// such that we don't have a bunch of unnecessary vendor imports from using this
+// package.
+
+// Trigger represents either an event trigger or a cron trigger.  Only one is valid;  when
+// defining a function within Cue we enforce that only an event or cron field can be specified.
+type Trigger struct {
+	*EventTrigger
+	*CronTrigger
 }
 
-// GetTimeouts returns the inngest.Timeouts in a compatible type signature.
-func (f FunctionOpts) GetTimeouts() *inngest.Timeouts {
-	if f.Timeouts == nil {
-		return nil
-	}
-	return f.Timeouts.Convert()
+// EventTrigger is a trigger which invokes the function each time a specific event is received.
+type EventTrigger struct {
+	// Event is the event name which triggers the function.
+	Event string `json:"event"`
+
+	// Expression is an optional expression which must evaluate to true for the function
+	// to run.
+	Expression *string `json:"expression,omitempty"`
+}
+
+// CronTrigger is a trigger which invokes the function on a CRON schedule.
+type CronTrigger struct {
+	Cron string `json:"cron"`
+}
+
+type Priority struct {
+	Run *string `json:"run"`
+}
+
+// Concurrency represents a single concurrency limit for a function.
+type Concurrency struct {
+	Limit int                    `json:"limit"`
+	Key   *string                `json:"key,omitempty"`
+	Scope enums.ConcurrencyScope `json:"scope"`
+	Hash  string                 `json:"hash"`
+}
+
+// Cancel represents a cancellation signal for a function.  When specified, this
+// will set up pauses which automatically cancel the function based off of matching
+// events and expressions.
+type Cancel struct {
+	Event   string  `json:"event"`
+	Timeout *string `json:"timeout,omitempty"`
+	If      *string `json:"if,omitempty"`
+}
+
+// EventBatchConfig represents how a function would expect
+// a list of events to look like for consumption
+//
+// A batch of events will be invoked if one of the following
+// is fulfilled
+// - The batch is full
+// - The time to wait is up
+type EventBatchConfig struct {
+	Key *string `json:"key,omitempty"`
+
+	// MaxSize is the maximum number of events that can be
+	// included in a batch
+	MaxSize int `json:"maxSize"`
+
+	// Timeout is the maximum number of time the batch will
+	// wait before being consumed.
+	Timeout string `json:"timeout"`
 }
 
 // Debounce represents debounce configuration used when creating a new function within
@@ -134,15 +182,6 @@ type RateLimit struct {
 	Key *string `json:"key,omitempty"`
 }
 
-// Convert converts a RateLimit to an inngest.RateLimit
-func (r RateLimit) Convert() *inngest.RateLimit {
-	return &inngest.RateLimit{
-		Limit:  r.Limit,
-		Period: r.Period.String(),
-		Key:    r.Key,
-	}
-}
-
 // Timeouts represents timeouts for the function. If any of the timeouts are hit, the function
 // will be marked as cancelled with a cancellation reason.
 type Timeouts struct {
@@ -161,20 +200,4 @@ type Timeouts struct {
 	// Note that if the final request to a function begins before this timeout, and completes
 	// after this timeout, the function will succeed.
 	Finish *time.Duration `json:"finish,omitempty"`
-}
-
-func (t Timeouts) Convert() *inngest.Timeouts {
-	var start, finish *string
-	if t.Start != nil {
-		s := t.Start.String()
-		start = &s
-	}
-	if t.Finish != nil {
-		f := t.Finish.String()
-		finish = &f
-	}
-	return &inngest.Timeouts{
-		Start:  start,
-		Finish: finish,
-	}
 }
