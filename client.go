@@ -260,45 +260,28 @@ func (a apiClient) SendMany(ctx context.Context, e []any) ([]string, error) {
 		}
 	}
 
+	seed, err := seed()
+	if err != nil {
+		return nil, err
+	}
+
 	byt, err := json.Marshal(e)
 	if err != nil {
 		return nil, fmt.Errorf("error marshalling event to json: %w", err)
 	}
 
-	ep := defaultEndpoint
-	if a.IsDev() {
-		ep = DevServerURL()
-	}
-	if a.EventURL != nil {
-		ep = *a.EventURL
-	}
-
-	url := fmt.Sprintf("%s/e/%s", ep, a.GetEventKey())
-
-	// Create the event ID seed header value. This is used to seed a
-	// deterministic event ID in the Inngest Server.
-	millis := time.Now().UnixMilli()
-	entropy := make([]byte, 10)
-	_, err = rand.Read(entropy)
-	if err != nil {
-		return nil, fmt.Errorf("error creating event ID seed: %w", err)
-	}
-	entropyBase64 := base64.StdEncoding.EncodeToString(entropy)
-	eventIDSeed := fmt.Sprintf("%d,%s", millis, entropyBase64)
-
 	var resp *http.Response
 	for attempt := 0; attempt < retryAttempts; attempt++ {
-		req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(byt))
+		req, err := http.NewRequest(http.MethodPost, a.endpoint(), bytes.NewBuffer(byt))
 		if err != nil {
 			return nil, fmt.Errorf("error creating event request: %w", err)
 		}
 		SetBasicRequestHeaders(req)
-		req.Header.Set(HeaderKeyEventIDSeed, eventIDSeed)
+		req.Header.Set(HeaderKeyEventIDSeed, seed)
 
 		if a.GetEnv() != "" {
 			req.Header.Add(HeaderKeyEnv, a.GetEnv())
 		}
-
 		resp, err = a.HTTPClient.Do(req)
 
 		// Don't retry if the request was successful or if there was a 4xx
@@ -321,9 +304,6 @@ func (a apiClient) SendMany(ctx context.Context, e []any) ([]string, error) {
 
 		time.Sleep(delay)
 	}
-	if err != nil {
-		return nil, fmt.Errorf("error sending event request: %w", err)
-	}
 
 	// There is no body to read;  the ingest API responds with status codes representing
 	// each error.  We don't necessarily care about the error behind this close.
@@ -332,42 +312,54 @@ func (a apiClient) SendMany(ctx context.Context, e []any) ([]string, error) {
 	var respBody eventAPIResponse
 	_ = json.NewDecoder(resp.Body).Decode(&respBody)
 
-	switch resp.StatusCode {
-	case 200, 201:
-		return respBody.IDs, nil
-	case 400:
-		var msg string
-		if respBody.Error != "" {
-			msg = respBody.Error
-		} else {
-			msg = "unknown error"
-		}
+	return handleEventResponse(respBody, resp.StatusCode)
+}
 
+func (a apiClient) endpoint() string {
+	ep := defaultEndpoint
+	if a.IsDev() {
+		ep = DevServerURL()
+	}
+	if a.EventURL != nil {
+		ep = *a.EventURL
+	}
+	return fmt.Sprintf("%s/e/%s", ep, a.GetEventKey())
+}
+
+func handleEventResponse(r eventAPIResponse, status int) ([]string, error) {
+	msg := "unknown error"
+	if r.Error != "" {
+		msg = r.Error
+	}
+
+	switch status {
+	case 200, 201:
+		return r.IDs, nil
+	case 400:
 		// E.g. the event is invalid.
 		return nil, fmt.Errorf("bad request: %s", msg)
 	case 401:
-		var msg string
-		if respBody.Error != "" {
-			msg = respBody.Error
-		} else {
-			msg = "unknown error"
-		}
-
 		// E.g. the event key is invalid.
 		return nil, fmt.Errorf("unauthorized: %s", msg)
 	case 403:
-		var msg string
-		if respBody.Error != "" {
-			msg = respBody.Error
-		} else {
-			msg = "unknown error"
-		}
-
 		// E.g. the ingest key has an IP or event type allow/denylist.
 		return nil, fmt.Errorf("forbidden: %s", msg)
 	}
 
-	return nil, fmt.Errorf("unknown status code sending event: %d", resp.StatusCode)
+	return nil, fmt.Errorf("unknown status code sending event: %d", status)
+}
+
+func seed() (string, error) {
+	// Create the event ID seed header value. This is used to seed a
+	// deterministic event ID in the Inngest Server.
+	millis := time.Now().UnixMilli()
+	entropy := make([]byte, 10)
+	_, err := rand.Read(entropy)
+	if err != nil {
+		return "", fmt.Errorf("error creating event ID seed: %w", err)
+	}
+	entropyBase64 := base64.StdEncoding.EncodeToString(entropy)
+	return fmt.Sprintf("%d,%s", millis, entropyBase64), nil
 }
 
 // eventAPIResponse is the API response sent when responding to incoming events.
