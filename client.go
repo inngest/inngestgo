@@ -3,19 +3,26 @@ package inngestgo
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
+	mathrand "math/rand"
 	"net/http"
 	"net/url"
 	"os"
+	"time"
 
 	"github.com/inngest/inngestgo/internal/middleware"
 )
 
 const (
 	defaultEndpoint = "https://inn.gs"
+	retryAttempts   = 5
+	retryBaseDelay  = 100 * time.Millisecond
 )
 
 // Client represents a client used to send events to Inngest.
@@ -253,33 +260,49 @@ func (a apiClient) SendMany(ctx context.Context, e []any) ([]string, error) {
 		}
 	}
 
+	seed, err := seed()
+	if err != nil {
+		return nil, err
+	}
+
 	byt, err := json.Marshal(e)
 	if err != nil {
 		return nil, fmt.Errorf("error marshalling event to json: %w", err)
 	}
 
-	ep := defaultEndpoint
-	if a.IsDev() {
-		ep = DevServerURL()
-	}
-	if a.EventURL != nil {
-		ep = *a.EventURL
-	}
+	var resp *http.Response
+	for attempt := 0; attempt < retryAttempts; attempt++ {
+		req, err := http.NewRequest(http.MethodPost, a.endpoint(), bytes.NewBuffer(byt))
+		if err != nil {
+			return nil, fmt.Errorf("error creating event request: %w", err)
+		}
+		SetBasicRequestHeaders(req)
+		req.Header.Set(HeaderKeyEventIDSeed, seed)
 
-	url := fmt.Sprintf("%s/e/%s", ep, a.GetEventKey())
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(byt))
-	if err != nil {
-		return nil, fmt.Errorf("error creating event request: %w", err)
-	}
-	SetBasicRequestHeaders(req)
+		if a.GetEnv() != "" {
+			req.Header.Add(HeaderKeyEnv, a.GetEnv())
+		}
+		resp, err = a.HTTPClient.Do(req)
 
-	if a.GetEnv() != "" {
-		req.Header.Add(HeaderKeyEnv, a.GetEnv())
-	}
+		// Don't retry if the request was successful or if there was a 4xx
+		// status code. We don't want to retry on 4xx because the request is
+		// malformed and retrying will just fail again.
+		if err == nil && resp.StatusCode < 500 {
+			break
+		}
 
-	resp, err := a.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("error sending event request: %w", err)
+		if err != nil {
+			// Close since we're gonna retry and we don't want to leak resources.
+			_ = resp.Body.Close()
+		}
+
+		// Jitter between 0 and the base delay.
+		jitter := time.Duration(mathrand.Float64() * float64(retryBaseDelay))
+
+		// Exponential backoff with jitter.
+		delay := retryBaseDelay*time.Duration(math.Pow(2, float64(attempt))) + jitter
+
+		time.Sleep(delay)
 	}
 
 	// There is no body to read;  the ingest API responds with status codes representing
@@ -289,42 +312,54 @@ func (a apiClient) SendMany(ctx context.Context, e []any) ([]string, error) {
 	var respBody eventAPIResponse
 	_ = json.NewDecoder(resp.Body).Decode(&respBody)
 
-	switch resp.StatusCode {
-	case 200, 201:
-		return respBody.IDs, nil
-	case 400:
-		var msg string
-		if respBody.Error != "" {
-			msg = respBody.Error
-		} else {
-			msg = "unknown error"
-		}
+	return handleEventResponse(respBody, resp.StatusCode)
+}
 
+func (a apiClient) endpoint() string {
+	ep := defaultEndpoint
+	if a.IsDev() {
+		ep = DevServerURL()
+	}
+	if a.EventURL != nil {
+		ep = *a.EventURL
+	}
+	return fmt.Sprintf("%s/e/%s", ep, a.GetEventKey())
+}
+
+func handleEventResponse(r eventAPIResponse, status int) ([]string, error) {
+	msg := "unknown error"
+	if r.Error != "" {
+		msg = r.Error
+	}
+
+	switch status {
+	case 200, 201:
+		return r.IDs, nil
+	case 400:
 		// E.g. the event is invalid.
 		return nil, fmt.Errorf("bad request: %s", msg)
 	case 401:
-		var msg string
-		if respBody.Error != "" {
-			msg = respBody.Error
-		} else {
-			msg = "unknown error"
-		}
-
 		// E.g. the event key is invalid.
 		return nil, fmt.Errorf("unauthorized: %s", msg)
 	case 403:
-		var msg string
-		if respBody.Error != "" {
-			msg = respBody.Error
-		} else {
-			msg = "unknown error"
-		}
-
 		// E.g. the ingest key has an IP or event type allow/denylist.
 		return nil, fmt.Errorf("forbidden: %s", msg)
 	}
 
-	return nil, fmt.Errorf("unknown status code sending event: %d", resp.StatusCode)
+	return nil, fmt.Errorf("unknown status code sending event: %d", status)
+}
+
+func seed() (string, error) {
+	// Create the event ID seed header value. This is used to seed a
+	// deterministic event ID in the Inngest Server.
+	millis := time.Now().UnixMilli()
+	entropy := make([]byte, 10)
+	_, err := rand.Read(entropy)
+	if err != nil {
+		return "", fmt.Errorf("error creating event ID seed: %w", err)
+	}
+	entropyBase64 := base64.StdEncoding.EncodeToString(entropy)
+	return fmt.Sprintf("%d,%s", millis, entropyBase64), nil
 }
 
 // eventAPIResponse is the API response sent when responding to incoming events.
