@@ -49,7 +49,7 @@ type (
 	// 		event.data.account_id
 	//
 	// Concurrency is then limited for each unique account_id field in parent events.
-	FnConcurrecy = fn.Concurrency
+	FnConcurrency = fn.Concurrency
 
 	// FnCancel represents a cancellation signal for a function.  When specified, this
 	// will set up pauses which automatically cancel the function based off of matching
