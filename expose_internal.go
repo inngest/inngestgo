@@ -10,6 +10,9 @@ type (
 	// ServableFunction defines a function which can be called by a handler's Serve method.
 	ServableFunction = fn.ServableFunction
 
+	// Trigger represents a function trigger - either an EventTrigger or a CronTrigger
+	Trigger = fn.Trigger
+
 	// FunctionOpts represents the options available to configure functions.  This includes
 	// concurrency, retry, and flow control configuration.
 	FunctionOpts = fn.FunctionOpts
