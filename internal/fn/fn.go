@@ -1,10 +1,13 @@
 package fn
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
+	"github.com/fatih/structs"
 	"github.com/inngest/inngest/pkg/enums"
+	"github.com/xhit/go-str2duration/v2"
 )
 
 // ServableFunction defines a function which can be called by a handler's Serve method.
@@ -204,6 +207,15 @@ type Throttle struct {
 	// ID in an event you can use the following key: "event.user.id".  This ensures
 	// that we throttle functions for each user independently.
 	Key *string `json:"key,omitempty"`
+}
+
+func (t Throttle) MarshalJSON() ([]byte, error) {
+	s := structs.New(t)
+	s.TagName = "json"
+	val := s.Map()
+	// convert period to a string.
+	val["period"] = str2duration.String(t.Period)
+	return json.Marshal(val)
 }
 
 // RateLimit rate limits a function to a maximum number of runs over a given period.

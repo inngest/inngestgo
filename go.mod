@@ -4,6 +4,7 @@ go 1.24
 
 require (
 	github.com/coder/websocket v1.8.12
+	github.com/fatih/structs v1.1.0
 	github.com/google/uuid v1.6.0
 	github.com/gosimple/slug v1.12.0
 	github.com/gowebpki/jcs v1.0.0
