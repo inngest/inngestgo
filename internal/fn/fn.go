@@ -3,6 +3,7 @@ package fn
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/fatih/structs"
@@ -165,7 +166,11 @@ type EventBatchConfig struct {
 
 	// Timeout is the maximum number of time the batch will
 	// wait before being consumed.
-	Timeout string `json:"timeout"`
+	Timeout time.Duration `json:"timeout"`
+}
+
+func (t EventBatchConfig) MarshalJSON() ([]byte, error) {
+	return encodeJSONWithDuration(t, "timeout")
 }
 
 // Debounce represents debounce configuration used when creating a new function within
@@ -181,6 +186,10 @@ type Debounce struct {
 	// Timeout specifies the optional max lifetime of a debounce, ensuring that functions
 	// run after the given duration when a debounce is rescheduled indefinitely.
 	Timeout *time.Duration `json:"timeout,omitempty"`
+}
+
+func (t Debounce) MarshalJSON() ([]byte, error) {
+	return encodeJSONWithDuration(t, "timeout", "period")
 }
 
 // FnThrottle represents concurrency over time.  This limits the maximum number of new
@@ -209,13 +218,10 @@ type Throttle struct {
 	Key *string `json:"key,omitempty"`
 }
 
+// MarshalJSON marshals Throttle to the expected JSON format.  Note that time.Duration
+// is marshalled as a string value.
 func (t Throttle) MarshalJSON() ([]byte, error) {
-	s := structs.New(t)
-	s.TagName = "json"
-	val := s.Map()
-	// convert period to a string.
-	val["period"] = str2duration.String(t.Period)
-	return json.Marshal(val)
+	return encodeJSONWithDuration(t, "period")
 }
 
 // RateLimit rate limits a function to a maximum number of runs over a given period.
@@ -230,6 +236,12 @@ type RateLimit struct {
 	// ID in an event you can use the following key: "event.user.id".  This ensures
 	// that we rate limit functions for each user independently.
 	Key *string `json:"key,omitempty"`
+}
+
+// MarshalJSON marshals Throttle to the expected JSON format.  Note that time.Duration
+// is marshalled as a string value.
+func (r RateLimit) MarshalJSON() ([]byte, error) {
+	return encodeJSONWithDuration(r, "period")
 }
 
 // Timeouts represents timeouts for the function. If any of the timeouts are hit, the function
@@ -250,4 +262,38 @@ type Timeouts struct {
 	// Note that if the final request to a function begins before this timeout, and completes
 	// after this timeout, the function will succeed.
 	Finish *time.Duration `json:"finish,omitempty"`
+}
+
+func (t Timeouts) MarshalJSON() ([]byte, error) {
+	return encodeJSONWithDuration(t, "start", "finish")
+}
+
+func encodeJSONWithDuration(input any, fields ...string) (out []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("unable to encode config with duration: %v", r)
+		}
+	}()
+
+	s := structs.New(input)
+	s.TagName = "json"
+	val := s.Map()
+
+	for _, field := range fields {
+		v, ok := val[field]
+		if !ok {
+			continue
+		}
+
+		switch t := v.(type) {
+		case *time.Duration:
+			if t != nil {
+				val[field] = str2duration.String(*t)
+			}
+		case time.Duration:
+			val[field] = str2duration.String(t)
+		}
+	}
+
+	return json.Marshal(val)
 }
