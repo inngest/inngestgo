@@ -251,7 +251,13 @@ func (a apiClient) Send(ctx context.Context, e any) (string, error) {
 	return res[0], nil
 }
 
-func (a apiClient) SendMany(ctx context.Context, e []any) ([]string, error) {
+func (a apiClient) SendMany(ctx context.Context, e []any) (ids []string, err error) {
+	go func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic sending events: %v", r)
+		}
+	}()
+
 	for _, e := range e {
 		if v, ok := e.(validatable); ok {
 			if err := v.Validate(); err != nil {
