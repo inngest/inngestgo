@@ -291,7 +291,7 @@ func (a apiClient) SendMany(ctx context.Context, e []any) ([]string, error) {
 			break
 		}
 
-		if err != nil {
+		if err != nil && resp != nil && resp.Body != nil {
 			// Close since we're gonna retry and we don't want to leak resources.
 			_ = resp.Body.Close()
 		}
