@@ -5,18 +5,11 @@ import "net/url"
 func GetFnSyncConfig(fn ServableFunction) *SyncConfig {
 	config := fn.Config()
 
-	var cl *ConcurrencyLimits
-	if len(config.Concurrency) > 0 {
-		cl = &ConcurrencyLimits{
-			Limits: config.Concurrency,
-		}
-	}
-
 	return &SyncConfig{
 		Name:        fn.Name(),
 		Slug:        fn.FullyQualifiedID(),
 		Triggers:    []Trigger{fn.Trigger()},
-		Concurrency: cl,
+		Concurrency: config.Concurrency,
 		Priority:    config.Priority,
 		EventBatch:  config.BatchEvents,
 		Idempotency: config.Idempotency,
@@ -44,7 +37,7 @@ type SyncConfig struct {
 	// by an individual concurrency key.
 	//
 	// This may be an int OR a struct, for backwards compatibility.
-	Concurrency *ConcurrencyLimits `json:"concurrency,omitempty"`
+	Concurrency []Concurrency `json:"concurrency,omitempty"`
 
 	// Priority represents the priority information for this function.
 	Priority *Priority `json:"priority,omitempty"`
@@ -107,14 +100,6 @@ func (c *SyncConfig) UpdateSteps(endpoint url.URL) {
 			},
 		},
 	}
-}
-
-// ConcurrencyLimits represents concurrency limits specified for a function.
-//
-// This is a separate struct, allowing us to handle unmarshalling single concurrency
-// objects or an array of objects in one codepath for backwards compatibility.
-type ConcurrencyLimits struct {
-	Limits []Concurrency
 }
 
 // SDKStep represents the SDK's definition of a step;  a step is a node in a DAG of steps

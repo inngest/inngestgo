@@ -73,7 +73,7 @@ func TestRegister(t *testing.T) {
 
 	_, err = CreateFunction(
 		c,
-		FunctionOpts{ID: "batch-func", BatchEvents: &ifn.EventBatchConfig{MaxSize: 20, Timeout: "10s"}},
+		FunctionOpts{ID: "batch-func", BatchEvents: &ifn.EventBatchConfig{MaxSize: 20, Timeout: 10 * time.Second}},
 		EventTrigger("test/batch.a", nil),
 		func(ctx context.Context, input Input[map[string]any]) (any, error) {
 			return nil, nil
@@ -139,7 +139,7 @@ func TestInvoke(t *testing.T) {
 		}
 		a, err := CreateFunction(
 			c,
-			FunctionOpts{ID: "my-func-name", BatchEvents: &ifn.EventBatchConfig{MaxSize: 5, Timeout: "10s"}},
+			FunctionOpts{ID: "my-func-name", BatchEvents: &ifn.EventBatchConfig{MaxSize: 5, Timeout: 10 * time.Second}},
 			EventTrigger("test/event.a", nil),
 			func(ctx context.Context, event Input[EventAData]) (any, error) {
 				require.EqualValues(t, event.Event, input)
