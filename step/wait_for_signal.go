@@ -30,7 +30,18 @@ type WaitForSignalOpts struct {
 	Timeout time.Duration
 }
 
-func WaitForSignal[T any](ctx context.Context, stepID string, opts WaitForSignalOpts) (T, error) {
+// rawSignalResult is the raw result stored in step state.  We always embed step output
+// within a Data field, allowing us to store metadata for steps in the future.
+type rawSignalResult[T any] struct {
+	Data SignalResult[T] `json:"data"`
+}
+
+type SignalResult[T any] struct {
+	Signal string `json:"signal"`
+	Data   T      `json:"data"`
+}
+
+func WaitForSignal[T any](ctx context.Context, stepID string, opts WaitForSignalOpts) (SignalResult[T], error) {
 	mgr := preflight(ctx)
 
 	args := map[string]any{
@@ -45,15 +56,15 @@ func WaitForSignal[T any](ctx context.Context, stepID string, opts WaitForSignal
 
 	// Check if this exists already.
 	if val, ok := mgr.Step(ctx, op); ok {
-		var output T
+		var output rawSignalResult[T]
 		if val == nil || bytes.Equal(val, []byte{0x6e, 0x75, 0x6c, 0x6c}) {
-			return output, ErrSignalNotReceived
+			return output.Data, ErrSignalNotReceived
 		}
 		if err := json.Unmarshal(val, &output); err != nil {
 			mgr.SetErr(fmt.Errorf("error unmarshalling wait for signal value in '%s': %w", opts.Signal, err))
 			panic(ControlHijack{})
 		}
-		return output, nil
+		return output.Data, nil
 	}
 
 	mgr.AppendOp(sdkrequest.GeneratorOpcode{
