@@ -12,7 +12,7 @@
 #   ./scripts/next_version.sh minor
 #   ./scripts/next_version.sh patch
 
-SCRIPTS_DIR=$(dirname "$0")
+ROOT_DIR=$(dirname "$0")
 
 print() {
     # Print to stderr so that the caller doesn't capture it.
@@ -20,7 +20,7 @@ print() {
 }
 
 # Get NEXT_VERSION from ../package.json
-NEXT_VERSION=$(grep -o '"version": "[^"]*"' "$SCRIPTS_DIR/package.json" | cut -d'"' -f4)
+NEXT_VERSION=$(grep -o '"version": "[^"]*"' "$ROOT_DIR/../package.json" | cut -d'"' -f4)
 
 if [ -z "$NEXT_VERSION" ]; then
     print "Error: Could not extract version from package.json"
@@ -30,7 +30,7 @@ fi
 print "Using version $NEXT_VERSION from package.json"
 
 # Validate the next version.
-echo -e "package inngestgo\n\nconst SDKVersion = \"$NEXT_VERSION\"" > ../version.go
+echo -e "package inngestgo\n\nconst SDKVersion = \"$NEXT_VERSION\"" > ./version.go
 
 # Output the next version, allowing the caller to capture it.
 echo "${NEXT_VERSION}"

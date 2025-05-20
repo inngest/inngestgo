@@ -1,5 +1,5 @@
 ---
-"@fake-scope/fake-pkg": patch
+"inngestgo": patch
 ---
 
 Clean up request leases properly

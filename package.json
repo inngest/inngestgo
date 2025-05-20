@@ -1,10 +1,10 @@
 {
 	"name": "inngestgo",
 	"private": true,
-	"version": "0.11.2",
+	"version": "0.13.0",
 	"scripts": {
 		"changeset": "changeset",
-		"release:version": "changeset version && ./set_version.sh && mv CHANGELOG.md ../",
+		"release:version": "changeset version && ./release/set_version.sh",
 		"release:publish": "changeset tag"
 	},
 	"dependencies": {
