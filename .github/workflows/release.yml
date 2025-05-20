@@ -35,6 +35,5 @@ jobs:
         with:
           version: npm run release:version
           publish: npm run release:publish
-          cwd: release
         env:
           GITHUB_TOKEN: ${{ secrets.CHANGESET_GITHUB_TOKEN }}

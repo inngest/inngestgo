@@ -1,5 +1,5 @@
 ---
-"@fake-scope/fake-pkg": minor
+"inngestgo": minor
 ---
 
 Connect: Reliability improvements
