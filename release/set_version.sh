@@ -30,7 +30,7 @@ fi
 print "Using version $NEXT_VERSION from package.json"
 
 # Validate the next version.
-echo -e "package inngestgo\n\nconst SDKVersion = \"$NEXT_VERSION\"" > ./version.go
+printf "package inngestgo\n\nconst SDKVersion = \"%s\"\n" "$NEXT_VERSION" > ./version.go
 
 # Output the next version, allowing the caller to capture it.
 echo "${NEXT_VERSION}"
