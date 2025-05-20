@@ -276,7 +276,10 @@ func (a apiClient) SendMany(ctx context.Context, e []any) (ids []string, err err
 		return nil, fmt.Errorf("error marshalling event to json: %w", err)
 	}
 
-	var resp *http.Response
+	var (
+		resp    *http.Response
+		respErr error
+	)
 	for attempt := 0; attempt < retryAttempts; attempt++ {
 		req, err := http.NewRequest(http.MethodPost, a.endpoint(), bytes.NewBuffer(byt))
 		if err != nil {
@@ -288,16 +291,16 @@ func (a apiClient) SendMany(ctx context.Context, e []any) (ids []string, err err
 		if a.GetEnv() != "" {
 			req.Header.Add(HeaderKeyEnv, a.GetEnv())
 		}
-		resp, err = a.HTTPClient.Do(req)
+		resp, respErr = a.HTTPClient.Do(req)
 
 		// Don't retry if the request was successful or if there was a 4xx
 		// status code. We don't want to retry on 4xx because the request is
 		// malformed and retrying will just fail again.
-		if err == nil && resp.StatusCode < 500 {
+		if respErr == nil && resp.StatusCode < 500 {
 			break
 		}
 
-		if err != nil && resp != nil && resp.Body != nil {
+		if respErr != nil && resp != nil && resp.Body != nil {
 			// Close since we're gonna retry and we don't want to leak resources.
 			_ = resp.Body.Close()
 		}
@@ -309,6 +312,20 @@ func (a apiClient) SendMany(ctx context.Context, e []any) (ids []string, err err
 		delay := retryBaseDelay*time.Duration(math.Pow(2, float64(attempt))) + jitter
 
 		time.Sleep(delay)
+	}
+
+	if respErr != nil {
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		return nil, respErr
+	}
+
+	if resp == nil {
+		// NOTE: We'd expect respErr to be non-nil and caught above in every case.  It's typically
+		// impossible that the response is nil AND respErr is nil.  For safety, though, we must check
+		// both cases.
+		return nil, fmt.Errorf("unable to send events:  no http response")
 	}
 
 	// There is no body to read;  the ingest API responds with status codes representing
