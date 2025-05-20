@@ -48,9 +48,13 @@ type ClientOpts struct {
 	// EventKey is your Inngest event key for sending events.  This defaults to the
 	// `INNGEST_EVENT_KEY` environment variable if nil.
 	EventKey *string
+
 	// EventURL is the URL of the event API to send events to.  This defaults to
 	// https://inn.gs if nil.
+	//
+	// Deprecated: Use EventAPIBaseURL instead.
 	EventURL *string
+
 	// Env is the branch environment to deploy to.  If nil, this uses
 	// os.Getenv("INNGEST_ENV").  This only deploys to branches if the
 	// signing key is a branch signing key.
@@ -119,6 +123,10 @@ func NewClient(opts ClientOpts) (Client, error) {
 	err := opts.validate()
 	if err != nil {
 		return nil, err
+	}
+
+	if opts.EventURL != nil {
+		opts.EventAPIBaseURL = opts.EventURL
 	}
 
 	if opts.Logger == nil {
@@ -281,7 +289,11 @@ func (a apiClient) SendMany(ctx context.Context, e []any) (ids []string, err err
 		respErr error
 	)
 	for attempt := 0; attempt < retryAttempts; attempt++ {
-		req, err := http.NewRequest(http.MethodPost, a.endpoint(), bytes.NewBuffer(byt))
+		req, err := http.NewRequest(
+			http.MethodPost,
+			fmt.Sprintf("%s/e/%s", a.eventAPIBaseURL(), a.GetEventKey()),
+			bytes.NewBuffer(byt),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("error creating event request: %w", err)
 		}
@@ -338,15 +350,26 @@ func (a apiClient) SendMany(ctx context.Context, e []any) (ids []string, err err
 	return handleEventResponse(respBody, resp.StatusCode)
 }
 
-func (a apiClient) endpoint() string {
-	ep := defaultEndpoint
+func (a apiClient) eventAPIBaseURL() string {
+	if a.EventAPIBaseURL != nil {
+		return *a.EventAPIBaseURL
+	}
+
+	origin := os.Getenv("INNGEST_EVENT_API_BASE_URL")
+	if origin != "" {
+		return origin
+	}
+
+	origin = os.Getenv("INNGEST_BASE_URL")
+	if origin != "" {
+		return origin
+	}
+
 	if a.IsDev() {
-		ep = DevServerURL()
+		return DevServerURL()
 	}
-	if a.EventURL != nil {
-		ep = *a.EventURL
-	}
-	return fmt.Sprintf("%s/e/%s", ep, a.GetEventKey())
+
+	return defaultEventAPIOrigin
 }
 
 func handleEventResponse(r eventAPIResponse, status int) ([]string, error) {

@@ -136,37 +136,48 @@ func (h handlerOpts) GetSigningKeyFallback() string {
 
 // GetAPIOrigin returns the host to use for sending API requests
 func (h handlerOpts) GetAPIBaseURL() string {
-	if h.APIBaseURL == nil {
-		base := os.Getenv("INNGEST_API_BASE_URL")
-		if base != "" {
-			return base
-		}
-
-		if h.isDev() {
-			return DevServerURL()
-		}
-
-		return defaultAPIOrigin
+	if h.APIBaseURL != nil {
+		return *h.APIBaseURL
 	}
 
-	return *h.APIBaseURL
-}
+	base := os.Getenv("INNGEST_API_BASE_URL")
+	if base != "" {
+		return base
+	}
 
-// GetEventAPIOrigin returns the host to use for sending events
-func (h handlerOpts) GetEventAPIBaseURL() string {
+	base = os.Getenv("INNGEST_BASE_URL")
+	if base != "" {
+		return base
+	}
+
 	if h.isDev() {
 		return DevServerURL()
 	}
 
-	if h.EventAPIBaseURL == nil {
-		origin := os.Getenv("INNGEST_EVENT_API_BASE_URL")
-		if origin != "" {
-			return origin
-		}
-		return defaultEventAPIOrigin
+	return defaultAPIOrigin
+}
+
+// GetEventAPIOrigin returns the host to use for sending events
+func (h handlerOpts) GetEventAPIBaseURL() string {
+	if h.EventAPIBaseURL != nil {
+		return *h.EventAPIBaseURL
 	}
 
-	return *h.EventAPIBaseURL
+	origin := os.Getenv("INNGEST_EVENT_API_BASE_URL")
+	if origin != "" {
+		return origin
+	}
+
+	origin = os.Getenv("INNGEST_BASE_URL")
+	if origin != "" {
+		return origin
+	}
+
+	if h.isDev() {
+		return DevServerURL()
+	}
+
+	return defaultEventAPIOrigin
 }
 
 // GetServeOrigin returns the host used for HTTP based executions
@@ -617,11 +628,7 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 	}
 	config.Functions = fns
 
-	registerURL := fmt.Sprintf("%s/fn/register", defaultAPIOrigin)
-	if h.isDev() {
-		// TODO: Check if dev server is up.  If not, error.  We can't deploy to production.
-		registerURL = fmt.Sprintf("%s/fn/register", DevServerURL())
-	}
+	registerURL := fmt.Sprintf("%s/fn/register", h.GetAPIBaseURL())
 	if h.RegisterURL != nil {
 		registerURL = *h.RegisterURL
 	}
