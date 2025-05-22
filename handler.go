@@ -13,6 +13,7 @@ import (
 	"os"
 	"reflect"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -138,20 +139,25 @@ func (h handlerOpts) GetSigningKeyFallback() string {
 
 // GetAPIOrigin returns the host to use for sending API requests
 func (h handlerOpts) GetAPIBaseURL() string {
-	if h.APIBaseURL == nil {
-		base := os.Getenv("INNGEST_API_BASE_URL")
-		if base != "" {
-			return base
-		}
-
-		if h.isDev() {
-			return DevServerURL()
-		}
-
-		return defaultAPIOrigin
+	if h.APIBaseURL != nil {
+		return *h.APIBaseURL
 	}
 
-	return *h.APIBaseURL
+	base := os.Getenv("INNGEST_API_BASE_URL")
+	if base != "" {
+		return base
+	}
+
+	base = os.Getenv("INNGEST_BASE_URL")
+	if base != "" {
+		return base
+	}
+
+	if h.isDev() {
+		return DevServerURL()
+	}
+
+	return defaultAPIOrigin
 }
 
 // GetEventAPIOrigin returns the host to use for sending events
@@ -582,7 +588,23 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 	if r.TLS != nil {
 		scheme = "https"
 	}
+
 	host := r.Host
+	if h.handlerOpts.ServeOrigin != nil {
+		host = *h.handlerOpts.ServeOrigin
+	} else if v := os.Getenv("INNGEST_SERVE_HOST"); v != "" {
+		host = v
+	}
+
+	// Handle the scheme if specified.
+	if strings.Contains(host, "://") {
+		parsed, err := url.Parse(host)
+		if err != nil {
+			return fmt.Errorf("error parsing serve origin: %w", err)
+		}
+		host = parsed.Host
+		scheme = parsed.Scheme
+	}
 
 	// Get the sync ID from the URL and then remove it, since we don't want the
 	// sync ID to show in the function URLs (that would affect the checksum and
@@ -590,17 +612,27 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 	qp := r.URL.Query()
 	syncID := qp.Get("deployId")
 	qp.Del("deployId")
-	r.URL.RawQuery = qp.Encode()
+	params := qp.Encode()
 
-	pathAndParams := r.URL.String()
+	path := r.URL.Path
+	if h.handlerOpts.ServePath != nil {
+		path = *h.handlerOpts.ServePath
+	} else if v := os.Getenv("INNGEST_SERVE_PATH"); v != "" {
+		path = v
+	}
 
 	appVersion := ""
 	if h.AppVersion != nil {
 		appVersion = *h.AppVersion
 	}
 
+	url := fmt.Sprintf("%s://%s%s", scheme, host, path)
+	if params != "" {
+		url += "?" + params
+	}
+
 	config := sdk.RegisterRequest{
-		URL:        fmt.Sprintf("%s://%s%s", scheme, host, pathAndParams),
+		URL:        url,
 		V:          "1",
 		DeployType: sdk.DeployTypePing,
 		SDK:        HeaderValueSDK,
@@ -619,11 +651,7 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 	}
 	config.Functions = fns
 
-	registerURL := fmt.Sprintf("%s/fn/register", defaultAPIOrigin)
-	if h.isDev() {
-		// TODO: Check if dev server is up.  If not, error.  We can't deploy to production.
-		registerURL = fmt.Sprintf("%s/fn/register", DevServerURL())
-	}
+	registerURL := fmt.Sprintf("%s/fn/register", h.GetAPIBaseURL())
 	if h.RegisterURL != nil {
 		registerURL = *h.RegisterURL
 	}
