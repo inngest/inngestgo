@@ -1,11 +1,13 @@
 package tests
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -41,6 +43,15 @@ func TestOriginAndPathOverrides(t *testing.T) {
 			Dev:        inngestgo.BoolPtr(true),
 		})
 		r.NoError(err)
+		fn, err := inngestgo.CreateFunction(
+			ic,
+			inngestgo.FunctionOpts{ID: "my-fn"},
+			inngestgo.EventTrigger("event", nil),
+			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+				return nil, nil
+			},
+		)
+		r.NoError(err)
 		server := httptest.NewServer(ic.Serve())
 		defer server.Close()
 
@@ -57,7 +68,26 @@ func TestOriginAndPathOverrides(t *testing.T) {
 			a.NotNil(body)
 		}, 5*time.Second, 10*time.Millisecond)
 
-		r.Equal("http://foo.bar.baz/qux/quux?msg=hi", body.URL)
+		expectedURL, err := url.Parse("http://foo.bar.baz/qux/quux?msg=hi")
+		r.NoError(err)
+		r.Equal(expectedURL.String(), body.URL)
+
+		r.Len(body.Functions, 1)
+		for _, f := range body.Functions {
+			r.Len(f.Steps, 1)
+			for _, step := range f.Steps {
+				parsedURL, err := url.Parse(step.Runtime["url"].(string))
+				r.NoError(err)
+				r.Equal(expectedURL.Scheme, parsedURL.Scheme)
+				r.Equal(expectedURL.Host, parsedURL.Host)
+				r.Equal(expectedURL.Path, parsedURL.Path)
+
+				qp := parsedURL.Query()
+				r.Equal("hi", qp.Get("msg"))
+				r.Equal("step", qp.Get("step"))
+				r.Equal(fn.FullyQualifiedID(), qp.Get("fnId"))
+			}
+		}
 	})
 
 	t.Run("fields", func(t *testing.T) {

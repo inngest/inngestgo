@@ -626,13 +626,17 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 		appVersion = *h.AppVersion
 	}
 
-	url := fmt.Sprintf("%s://%s%s", scheme, host, path)
+	urlStr := fmt.Sprintf("%s://%s%s", scheme, host, path)
 	if params != "" {
-		url += "?" + params
+		urlStr += "?" + params
+	}
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return fmt.Errorf("error parsing URL: %w", err)
 	}
 
 	config := sdk.RegisterRequest{
-		URL:        url,
+		URL:        parsedURL.String(),
 		V:          "1",
 		DeployType: sdk.DeployTypePing,
 		SDK:        HeaderValueSDK,
@@ -645,7 +649,7 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 		AppVersion:   appVersion,
 	}
 
-	fns, err := createFunctionConfigs(h.appName, h.funcs, *h.url(r), false)
+	fns, err := createFunctionConfigs(h.appName, h.funcs, *parsedURL, false)
 	if err != nil {
 		return fmt.Errorf("error creating function configs: %w", err)
 	}
@@ -710,20 +714,6 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Add(HeaderKeySyncKind, SyncKindOutOfBand)
 
 	return nil
-}
-
-func (h *handler) url(r *http.Request) *url.URL {
-	if h.URL != nil {
-		return h.URL
-	}
-
-	// Get the current URL.
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	u, _ := url.Parse(fmt.Sprintf("%s://%s%s", scheme, r.Host, r.RequestURI))
-	return u
 }
 
 func createFunctionConfigs(

@@ -18,5 +18,5 @@ const (
 )
 
 var (
-	SDKVersion = "0.11.3"
+	SDKVersion = "0.11.4"
 )
