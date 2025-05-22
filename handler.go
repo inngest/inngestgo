@@ -716,20 +716,6 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func (h *handler) url(r *http.Request) *url.URL {
-	if h.URL != nil {
-		return h.URL
-	}
-
-	// Get the current URL.
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	u, _ := url.Parse(fmt.Sprintf("%s://%s%s", scheme, r.Host, r.RequestURI))
-	return u
-}
-
 func createFunctionConfigs(
 	appName string,
 	fns []ServableFunction,
