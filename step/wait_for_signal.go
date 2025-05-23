@@ -66,7 +66,7 @@ func WaitForSignal[T any](ctx context.Context, stepID string, opts WaitForSignal
 		opts.Name = stepID
 	}
 	if opts.OnConflict != "" {
-		args["onConflict"] = opts.OnConflict
+		args["conflict"] = opts.OnConflict
 	}
 
 	op := mgr.NewOp(enums.OpcodeWaitForSignal, stepID, args)
