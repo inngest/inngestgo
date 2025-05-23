@@ -60,7 +60,7 @@ func WaitForSignal[T any](ctx context.Context, stepID string, opts WaitForSignal
 	args := map[string]any{
 		"signal":     opts.Signal,
 		"timeout":    str2duration.String(opts.Timeout),
-		"onConflict": SignalConflictFail,
+		"conflict": SignalConflictFail,
 	}
 	if opts.Name == "" {
 		opts.Name = stepID
