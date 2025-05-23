@@ -16,18 +16,31 @@ import (
 // matching signal was not received before the timeout.
 var ErrSignalNotReceived = fmt.Errorf("signal not received")
 
+type SignalConfict string
+
+const (
+	// SignalConflictFail fails the run if another signal currently exists.  This is the default behaviour.
+	SignalConflictFail SignalConfict = "fail"
+	// SignalConflictReplace replaces an existing signal if the signal currently exists.  Any run
+	// waiting for the previous signal will fail.
+	SignalConflictReplace SignalConfict = "replace"
+)
+
 type WaitForSignalOpts struct {
 	// Name represents the optional step name.
-	Name string
+	Name string `json:"name"`
 	// Signal is the signal to wait for.  This is a string unique to your environment
 	// which will resume this particular function run.  If this signal already exists,
 	// the step will error.
 	//
 	// For resuming multiple runs from a signal, use WaitForEvent.  Generally speaking,
 	// WaitForEvent fulfils WaitForSignal with fan out and an improved DX.
-	Signal string
+	Signal string `json:"signal"`
 	// Timeout is how long to wait.  We must always timebound event lsiteners.
-	Timeout time.Duration
+	Timeout time.Duration `json:"timeout"`
+
+	// OnConflict
+	OnConflict SignalConfict `json:"onConflict"`
 }
 
 // rawSignalResult is the raw result stored in step state.  We always embed step output
@@ -45,11 +58,15 @@ func WaitForSignal[T any](ctx context.Context, stepID string, opts WaitForSignal
 	mgr := preflight(ctx)
 
 	args := map[string]any{
-		"signal":  opts.Signal,
-		"timeout": str2duration.String(opts.Timeout),
+		"signal":     opts.Signal,
+		"timeout":    str2duration.String(opts.Timeout),
+		"onConflict": SignalConflictFail,
 	}
 	if opts.Name == "" {
 		opts.Name = stepID
+	}
+	if opts.OnConflict != "" {
+		args["onConflict"] = opts.OnConflict
 	}
 
 	op := mgr.NewOp(enums.OpcodeWaitForSignal, stepID, args)
