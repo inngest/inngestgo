@@ -13,6 +13,7 @@ import (
 	"os"
 	"reflect"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -93,10 +94,6 @@ type handlerOpts struct {
 
 	// MaxBodySize is the max body size to read for incoming invoke requests
 	MaxBodySize int
-
-	// URL that the function is served at.  If not supplied this is taken from
-	// the incoming request's data.
-	URL *url.URL
 
 	// UseStreaming enables streaming - continued writes to the HTTP writer.  This
 	// differs from true streaming in that we don't support server-sent events.
@@ -527,8 +524,11 @@ func (h *handler) inBandSync(
 			Status: 400,
 		}
 	}
-	if h.URL != nil {
-		appURL = h.URL
+	if h.handlerOpts.ServeOrigin != nil {
+		appURL.Host = *h.handlerOpts.ServeOrigin
+	}
+	if h.handlerOpts.ServePath != nil {
+		appURL.Path = *h.handlerOpts.ServePath
 	}
 
 	fns, err := createFunctionConfigs(h.appName, h.funcs, *appURL, false)
@@ -591,7 +591,23 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 	if r.TLS != nil {
 		scheme = "https"
 	}
+
 	host := r.Host
+	if h.handlerOpts.ServeOrigin != nil {
+		host = *h.handlerOpts.ServeOrigin
+	} else if v := os.Getenv("INNGEST_SERVE_HOST"); v != "" {
+		host = v
+	}
+
+	// Handle the scheme if specified.
+	if strings.Contains(host, "://") {
+		parsed, err := url.Parse(host)
+		if err != nil {
+			return fmt.Errorf("error parsing serve origin: %w", err)
+		}
+		host = parsed.Host
+		scheme = parsed.Scheme
+	}
 
 	// Get the sync ID from the URL and then remove it, since we don't want the
 	// sync ID to show in the function URLs (that would affect the checksum and
@@ -599,17 +615,31 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 	qp := r.URL.Query()
 	syncID := qp.Get("deployId")
 	qp.Del("deployId")
-	r.URL.RawQuery = qp.Encode()
+	params := qp.Encode()
 
-	pathAndParams := r.URL.String()
+	path := r.URL.Path
+	if h.handlerOpts.ServePath != nil {
+		path = *h.handlerOpts.ServePath
+	} else if v := os.Getenv("INNGEST_SERVE_PATH"); v != "" {
+		path = v
+	}
 
 	appVersion := ""
 	if h.AppVersion != nil {
 		appVersion = *h.AppVersion
 	}
 
+	urlStr := fmt.Sprintf("%s://%s%s", scheme, host, path)
+	if params != "" {
+		urlStr += "?" + params
+	}
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return fmt.Errorf("error parsing URL: %w", err)
+	}
+
 	config := types.RegisterRequest{
-		URL:        fmt.Sprintf("%s://%s%s", scheme, host, pathAndParams),
+		URL:        parsedURL.String(),
 		V:          "1",
 		DeployType: types.DeployTypePing,
 		SDK:        HeaderValueSDK,
@@ -622,7 +652,7 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 		AppVersion:   appVersion,
 	}
 
-	fns, err := createFunctionConfigs(h.appName, h.funcs, *h.url(r), false)
+	fns, err := createFunctionConfigs(h.appName, h.funcs, *parsedURL, false)
 	if err != nil {
 		return fmt.Errorf("error creating function configs: %w", err)
 	}
@@ -687,20 +717,6 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Add(HeaderKeySyncKind, SyncKindOutOfBand)
 
 	return nil
-}
-
-func (h *handler) url(r *http.Request) *url.URL {
-	if h.URL != nil {
-		return h.URL
-	}
-
-	// Get the current URL.
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	u, _ := url.Parse(fmt.Sprintf("%s://%s%s", scheme, r.Host, r.RequestURI))
-	return u
 }
 
 func createFunctionConfigs(
@@ -995,14 +1011,6 @@ func (h *handler) createSecureInspection() (*secureInspection, error) {
 		env = &val
 	}
 
-	var serveOrigin, servePath *string
-	if h.URL != nil {
-		serveOriginStr := h.URL.Scheme + "://" + h.URL.Host
-		serveOrigin = &serveOriginStr
-
-		servePath = &h.URL.Path
-	}
-
 	authenticationSucceeded = true
 	insecureInspection, err := h.createInsecureInspection(&authenticationSucceeded)
 	if err != nil {
@@ -1021,8 +1029,8 @@ func (h *handler) createSecureInspection() (*secureInspection, error) {
 		SDKVersion:             SDKVersion,
 		SigningKeyFallbackHash: signingKeyFallbackHash,
 		SigningKeyHash:         signingKeyHash,
-		ServeOrigin:            serveOrigin,
-		ServePath:              servePath,
+		ServeOrigin:            h.handlerOpts.ServeOrigin,
+		ServePath:              h.handlerOpts.ServePath,
 	}, nil
 }
 
