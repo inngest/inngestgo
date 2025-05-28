@@ -72,6 +72,14 @@ type (
 	// Inngest will execute your function as soon as MaxSize is reached or the Timeout is
 	// reached.
 	FnBatchEvents = fn.EventBatchConfig
+
+	// FnSingleton configures a function to run as a singleton, ensuring that only one
+	// instance of the function is active at a time for a given key. This is useful for
+	// deduplicating runs or enforcing exclusive execution.
+	//
+	// If a new run is triggered while another instance with the same key is active,
+	// it will either be skipped or replace the existing instance depending on the mode.
+	FnSingleton = fn.Singleton
 )
 
 type (
