@@ -315,6 +315,6 @@ type Singleton struct {
 	Key *string `json:"key,omitempty"`
 
 	// Mode determines how to handle a new run when another singleton instance is already active.
-	// Use Ignore to skip the new run, or Cancel to stop the current instance and run the new one.
+	// Use `skip` to skip the new run, or `cancel` to stop the current instance and run the new one.
 	Mode enums.SingletonMode `json:"mode"`
 }
