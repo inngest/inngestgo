@@ -342,7 +342,9 @@ func (a apiClient) SendMany(ctx context.Context, e []any) (ids []string, err err
 
 	// There is no body to read;  the ingest API responds with status codes representing
 	// each error.  We don't necessarily care about the error behind this close.
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	var respBody eventAPIResponse
 	_ = json.NewDecoder(resp.Body).Decode(&respBody)

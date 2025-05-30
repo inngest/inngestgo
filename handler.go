@@ -450,7 +450,9 @@ func (h *handler) inBandSync(
 	r *http.Request,
 ) error {
 	ctx := r.Context()
-	defer r.Body.Close()
+	defer func() {
+		_ = r.Body.Close()
+	}()
 
 	var sig string
 	if !h.isDev() {
@@ -737,7 +739,9 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	mw := middleware.NewMiddlewareManager().Add(cImpl.Middleware...)
 
 	var sig string
-	defer r.Body.Close()
+	defer func() {
+		_ = r.Body.Close()
+	}()
 
 	if !h.isDev() {
 		if sig = r.Header.Get(HeaderKeySignature); sig == "" {
@@ -1027,7 +1031,9 @@ func (h *handler) createSecureInspection() (*secureInspection, error) {
 }
 
 func (h *handler) inspect(w http.ResponseWriter, r *http.Request) error {
-	defer r.Body.Close()
+	defer func() {
+		_ = r.Body.Close()
+	}()
 
 	sig := r.Header.Get(HeaderKeySignature)
 	if sig != "" {
