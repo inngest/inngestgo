@@ -120,7 +120,7 @@ func Run[T any](
 	if err != nil {
 		// If tihs is a StepFailure already, fail fast.
 		if errors.IsStepError(err) {
-			mgr.SetErr(fmt.Errorf("Unhandled step error: %s", err))
+			mgr.SetErr(fmt.Errorf("unhandled step error: %s", err))
 			panic(ControlHijack{})
 		}
 

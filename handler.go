@@ -467,7 +467,7 @@ func (h *handler) inBandSync(
 		}
 	}
 
-	max := h.handlerOpts.MaxBodySize
+	max := h.MaxBodySize
 	if max == 0 {
 		max = DefaultMaxBodySize
 	}
@@ -683,7 +683,7 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 		if err := json.Unmarshal(byt, &body); err != nil {
 			return fmt.Errorf("error reading register response: %w\n\n%s", err, byt)
 		}
-		return fmt.Errorf("Error registering functions: %s", body["error"])
+		return fmt.Errorf("error registering functions: %s", body["error"])
 	}
 
 	w.Header().Add(HeaderKeySyncKind, SyncKindOutOfBand)
@@ -749,7 +749,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
-	max := h.handlerOpts.MaxBodySize
+	max := h.MaxBodySize
 	if max == 0 {
 		max = DefaultMaxBodySize
 	}
@@ -858,7 +858,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	// 	     return err
 	// 	}
 	if sdkerrors.IsStepError(err) {
-		err = fmt.Errorf("Unhandled step error: %s", err)
+		err = fmt.Errorf("unhandled step error: %s", err)
 		noRetry = true
 	}
 
@@ -1094,7 +1094,7 @@ func (h *handler) trust(
 		}
 	}
 
-	max := h.handlerOpts.MaxBodySize
+	max := h.MaxBodySize
 	if max == 0 {
 		max = DefaultMaxBodySize
 	}
