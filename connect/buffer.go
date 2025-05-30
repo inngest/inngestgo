@@ -82,20 +82,19 @@ func (m *messageBuffer) addPending(ctx context.Context, resp *connectproto.SDKRe
 	m.pendingAck[resp.RequestId] = resp
 
 	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(timeout):
-				m.lock.Lock()
-				defer m.lock.Unlock()
-				// If message is still in outgoing messages, it wasn't acknowledged. Add to buffer.
-				if _, ok := m.pendingAck[resp.RequestId]; ok {
-					m.buffered[resp.RequestId] = resp
-					delete(m.pendingAck, resp.RequestId)
-				}
-				return
-			}
+		select {
+		case <-ctx.Done():
+			break
+		case <-time.After(timeout):
+			break
+		}
+
+		m.lock.Lock()
+		defer m.lock.Unlock()
+		// If message is still in outgoing messages, it wasn't acknowledged. Add to buffer.
+		if _, ok := m.pendingAck[resp.RequestId]; ok {
+			m.buffered[resp.RequestId] = resp
+			delete(m.pendingAck, resp.RequestId)
 		}
 	}()
 }
