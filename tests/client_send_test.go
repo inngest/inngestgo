@@ -179,7 +179,7 @@ func TestClientSendRetry(t *testing.T) {
 		atomic.AddInt32(&proxyCounter, 1)
 
 		byt, _ := io.ReadAll(r.Body)
-		r.Body.Close()
+		_ = r.Body.Close()
 
 		// Always forward requests.
 		req, _ := http.NewRequest(
@@ -201,7 +201,7 @@ func TestClientSendRetry(t *testing.T) {
 			}
 			w.WriteHeader(resp.StatusCode)
 			_, _ = io.Copy(w, resp.Body)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 	}))
 	defer proxy.Close()
@@ -291,7 +291,9 @@ func getEvents(ctx context.Context, name string) ([]inngestgo.Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("status code %d", resp.StatusCode)
 	}

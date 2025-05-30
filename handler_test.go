@@ -368,7 +368,9 @@ func TestServe(t *testing.T) {
 		url := fmt.Sprintf("%s?%s", server.URL, queryParams.Encode())
 		resp := handlerPost(t, url, createRequest(t, event))
 
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 		require.Equal(t, int32(1), atomic.LoadInt32(&called), "http function was not called")
 
 		// Assert that the output is correct.
@@ -387,7 +389,9 @@ func TestServe(t *testing.T) {
 		resp := handlerPost(t, url, createRequest(t, event))
 
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 		require.Equal(t, 410, resp.StatusCode)
 	})
 }
@@ -444,7 +448,9 @@ func TestSteps(t *testing.T) {
 
 	t.Run("It invokes the first step and returns an opcode", func(t *testing.T) {
 		resp := handlerPost(t, url, createRequest(t, event))
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 
 		// This should return an opcode indicating that the first step ran as expected.
 		byt, _ := io.ReadAll(resp.Body)
@@ -484,7 +490,9 @@ func TestSteps(t *testing.T) {
 				opcode.ID: opcode.Data,
 			}
 			resp := handlerPost(t, url, req)
-			defer resp.Body.Close()
+			defer func() {
+				_ = resp.Body.Close()
+			}()
 
 			// The response should be a new opcode.
 			opcodes := []sdkrequest.GeneratorOpcode{}

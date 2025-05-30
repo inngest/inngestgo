@@ -142,8 +142,8 @@ func NewClient(opts ClientOpts) (Client, error) {
 	}
 	c.h = newHandler(c, clientOptsToHandlerOpts(opts))
 
-	if c.ClientOpts.HTTPClient == nil {
-		c.ClientOpts.HTTPClient = http.DefaultClient
+	if c.HTTPClient == nil {
+		c.HTTPClient = http.DefaultClient
 	}
 
 	return c, nil
@@ -226,8 +226,8 @@ func (a apiClient) Serve() http.Handler {
 }
 
 func (a apiClient) ServeWithOpts(opts ServeOpts) http.Handler {
-	a.h.handlerOpts.ServeOrigin = opts.Origin
-	a.h.handlerOpts.ServePath = opts.Path
+	a.h.ServeOrigin = opts.Origin
+	a.h.ServePath = opts.Path
 	return a.h
 }
 
@@ -243,7 +243,7 @@ func (a *apiClient) SetOptions(opts ClientOpts) error {
 }
 
 func (a *apiClient) SetURL(u *url.URL) {
-	a.ClientOpts.URL = u
+	a.URL = u
 	a.h.SetOptions(clientOptsToHandlerOpts(a.ClientOpts))
 }
 
@@ -342,7 +342,9 @@ func (a apiClient) SendMany(ctx context.Context, e []any) (ids []string, err err
 
 	// There is no body to read;  the ingest API responds with status codes representing
 	// each error.  We don't necessarily care about the error behind this close.
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	var respBody eventAPIResponse
 	_ = json.NewDecoder(resp.Body).Decode(&respBody)

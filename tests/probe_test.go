@@ -131,7 +131,9 @@ func TestTrustProbe(t *testing.T) {
 
 			respSig := resp.Header.Get("x-inngest-signature")
 			r.NotEmpty(respSig)
-			defer resp.Body.Close()
+			defer func() {
+				_ = resp.Body.Close()
+			}()
 
 			respBody, err := io.ReadAll(resp.Body)
 			r.NoError(err)

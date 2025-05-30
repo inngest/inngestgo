@@ -645,7 +645,9 @@ func TestClientMiddleware(t *testing.T) {
 			Apps:       []inngestgo.Client{c},
 		})
 		r.NoError(err)
-		defer conn.Close()
+		defer func() {
+			_ = conn.Close()
+		}()
 
 		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
 		r.NoError(err)
