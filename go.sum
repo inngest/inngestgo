@@ -24,8 +24,8 @@ github.com/hashicorp/errwrap v1.1.0 h1:OxrOeh75EUXMY8TBjag2fzXGZ40LB6IKw45YeGUDY
 github.com/hashicorp/errwrap v1.1.0/go.mod h1:YH+1FKiLXxHSkmPseP+kNlulaMuP3n2brvKWEqk/Jc4=
 github.com/hashicorp/go-multierror v1.1.1 h1:H5DkEtf6CXdFp0N0Em5UCwQpXMWke8IA0+lD48awMYo=
 github.com/hashicorp/go-multierror v1.1.1/go.mod h1:iw975J/qwKPdAO1clOe2L8331t/9/fmwbPZ6JB6eMoM=
-github.com/inngest/inngest v1.6.3-0.20250529085559-86af3952780e h1:xSg4y/qTrUgeKPq+z+7Rq42tnVwv23pesMD1XQJlm84=
-github.com/inngest/inngest v1.6.3-0.20250529085559-86af3952780e/go.mod h1:Aw8ZfseCWwSigwmzthIB7F+dRUXy+HRjEEyFVTXu0wI=
+github.com/inngest/inngest v1.6.4-0.20250530181652-294d872f1ecb h1:JYpoqVA4UfPNSpHOOerSrQbYjrXRv+a6846lefQcf2k=
+github.com/inngest/inngest v1.6.4-0.20250530181652-294d872f1ecb/go.mod h1:Aw8ZfseCWwSigwmzthIB7F+dRUXy+HRjEEyFVTXu0wI=
 github.com/kr/pretty v0.2.1/go.mod h1:ipq/a2n7PKx3OHsz4KJII5eveXtPO4qwEXGdVfWzfnI=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
 github.com/kr/pretty v0.3.1/go.mod h1:hoEshYVHaxMs3cyo3Yncou5ZscifuDolrwPKZanG3xk=
