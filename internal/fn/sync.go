@@ -19,6 +19,7 @@ func GetFnSyncConfig(fn ServableFunction) *SyncConfig {
 		Timeouts:    config.Timeouts,
 		Cancel:      config.Cancel,
 		Retries:     config.Retries,
+		Singleton:   config.Singleton,
 	}
 }
 
@@ -72,6 +73,12 @@ type SyncConfig struct {
 
 	// Cancel specifies cancellation signals for the function
 	Cancel []Cancel `json:"cancel,omitempty"`
+
+	// Singleton represents a mechanism to ensure that only one instance of a function
+	// runs at a time for a given key. Additional invocations with the same key will either
+	// be ignored or cause the current instance to be canceled and replaced, depending on
+	// the specified mode.
+	Singleton *Singleton
 
 	Steps map[string]SDKStep `json:"steps"`
 }

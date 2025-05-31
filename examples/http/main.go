@@ -71,7 +71,9 @@ func AccountCreated(ctx context.Context, input inngestgo.Input[AccountCreatedEve
 			// errors such as rate limits.
 			return nil, errors.RetryAtError(fmt.Errorf("rate-limited"), retryAfter)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 
 		item := &TodoItem{}
 		err = json.NewDecoder(resp.Body).Decode(item)

@@ -73,6 +73,9 @@ type FunctionOpts struct {
 	RateLimit *RateLimit
 	// BatchEvents represents batching
 	BatchEvents *EventBatchConfig
+
+	// Singleton ensures only one active function run per key.
+	Singleton *Singleton
 }
 
 func (f FunctionOpts) Validate() error {
@@ -296,4 +299,22 @@ func encodeJSONWithDuration(input any, fields ...string) (out []byte, err error)
 	}
 
 	return json.Marshal(val)
+}
+
+// FnSingleton configures a function to run as a singleton, ensuring that only one
+// instance of the function is active at a time for a given key. This is useful for
+// deduplicating runs or enforcing exclusive execution.
+//
+// If a new run is triggered while another instance with the same key is active,
+// it will either be skipped or replace the existing instance depending on the mode.
+type Singleton struct {
+	// Key is an optional string used to scope the singleton based on event data.
+	// For example, to singleton incoming notifications per user, you could use
+	// a key like "event.user.id". This ensures that only one instance of the
+	// function runs at a time for each unique user.
+	Key *string `json:"key,omitempty"`
+
+	// Mode determines how to handle a new run when another singleton instance is already active.
+	// Use `skip` to skip the new run, or `cancel` to stop the current instance and run the new one.
+	Mode enums.SingletonMode `json:"mode"`
 }
