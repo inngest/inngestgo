@@ -75,9 +75,7 @@ type SyncConfig struct {
 	Cancel []Cancel `json:"cancel,omitempty"`
 
 	// Singleton represents a mechanism to ensure that only one instance of a function
-	// runs at a time for a given key. Additional invocations with the same key will either
-	// be ignored or cause the current instance to be canceled and replaced, depending on
-	// the specified mode.
+	// runs at a time for a given key. Additional invocations with the same key will be skipped.
 	Singleton *Singleton
 
 	Steps map[string]SDKStep `json:"steps"`
