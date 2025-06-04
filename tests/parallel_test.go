@@ -279,71 +279,144 @@ func TestParallel(t *testing.T) {
 	})
 
 	t.Run("struct with specific type", func(t *testing.T) {
-		// Struct return types are preserved.
+		t.Run("inline", func(t *testing.T) {
+			// Struct return types are preserved when passing parallel steps
+			// inline.
 
-		ctx := context.Background()
-		r := require.New(t)
+			ctx := context.Background()
+			r := require.New(t)
 
-		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
-			AppID: randomSuffix("app"),
+			c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+				AppID: randomSuffix("app"),
+			})
+			r.NoError(err)
+
+			type person struct {
+				Name string `json:"name"`
+			}
+
+			type animal struct {
+				Name string `json:"name"`
+			}
+
+			var res group.Results
+			eventName := randomSuffix("my-event")
+			_, err = inngestgo.CreateFunction(
+				c,
+				inngestgo.FunctionOpts{
+					ID: "fn",
+				},
+				inngestgo.EventTrigger(eventName, nil),
+				func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+					res = group.Parallel(
+						ctx,
+						func(ctx context.Context) (any, error) {
+							return step.Run(ctx, "a", func(ctx context.Context) (person, error) {
+								return person{Name: "Alice"}, nil
+							})
+						},
+						func(ctx context.Context) (any, error) {
+							return step.Run(ctx, "b", func(ctx context.Context) (animal, error) {
+								return animal{Name: "Baxter"}, nil
+							})
+						},
+					)
+					return nil, res.AnyError()
+				},
+			)
+			r.NoError(err)
+
+			server, sync := serve(t, c)
+			defer server.Close()
+			r.NoError(sync())
+
+			_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
+			r.NoError(err)
+
+			r.EventuallyWithT(func(t *assert.CollectT) {
+				a := assert.New(t)
+				if !a.Len(res, 2) {
+					return
+				}
+
+				v1, ok := res[0].Value.(person)
+				a.True(ok)
+				a.Equal("Alice", v1.Name)
+
+				v2, ok := res[1].Value.(animal)
+				a.True(ok)
+				a.Equal("Baxter", v2.Name)
+			}, time.Second*10, time.Millisecond*100)
 		})
-		r.NoError(err)
 
-		type person struct {
-			Name string `json:"name"`
-		}
+		t.Run("slice", func(t *testing.T) {
+			// Struct return types are preserved, even when building a slice
+			// with an any return type.
 
-		type animal struct {
-			Name string `json:"name"`
-		}
+			ctx := context.Background()
+			r := require.New(t)
 
-		var res group.Results
-		eventName := randomSuffix("my-event")
-		_, err = inngestgo.CreateFunction(
-			c,
-			inngestgo.FunctionOpts{
-				ID: "fn",
-			},
-			inngestgo.EventTrigger(eventName, nil),
-			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				res = group.Parallel(
-					ctx,
-					func(ctx context.Context) (any, error) {
+			c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+				AppID: randomSuffix("app"),
+			})
+			r.NoError(err)
+
+			type person struct {
+				Name string `json:"name"`
+			}
+
+			type animal struct {
+				Name string `json:"name"`
+			}
+
+			var res group.Results
+			eventName := randomSuffix("my-event")
+			_, err = inngestgo.CreateFunction(
+				c,
+				inngestgo.FunctionOpts{
+					ID: "fn",
+				},
+				inngestgo.EventTrigger(eventName, nil),
+				func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+					var steps []func(ctx context.Context) (any, error)
+					steps = append(steps, func(ctx context.Context) (any, error) {
 						return step.Run(ctx, "a", func(ctx context.Context) (person, error) {
 							return person{Name: "Alice"}, nil
 						})
-					},
-					func(ctx context.Context) (any, error) {
+					})
+					steps = append(steps, func(ctx context.Context) (any, error) {
 						return step.Run(ctx, "b", func(ctx context.Context) (animal, error) {
 							return animal{Name: "Baxter"}, nil
 						})
-					},
-				)
-				return nil, res.AnyError()
-			},
-		)
-		r.NoError(err)
+					})
 
-		server, sync := serve(t, c)
-		defer server.Close()
-		r.NoError(sync())
+					res = group.Parallel(ctx, steps...)
+					return nil, res.AnyError()
+				},
+			)
+			r.NoError(err)
 
-		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
-		r.NoError(err)
+			server, sync := serve(t, c)
+			defer server.Close()
+			r.NoError(sync())
 
-		r.EventuallyWithT(func(t *assert.CollectT) {
-			a := assert.New(t)
-			if !a.Len(res, 2) {
-				return
-			}
+			_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
+			r.NoError(err)
 
-			v1, ok := res[0].Value.(person)
-			a.True(ok)
-			a.Equal("Alice", v1.Name)
+			r.EventuallyWithT(func(t *assert.CollectT) {
+				a := assert.New(t)
+				if !a.Len(res, 2) {
+					return
+				}
 
-			v2, ok := res[1].Value.(animal)
-			a.True(ok)
-			a.Equal("Baxter", v2.Name)
-		}, time.Second*10, time.Millisecond*100)
+				v1, ok := res[0].Value.(person)
+				a.True(ok)
+				a.Equal("Alice", v1.Name)
+
+				v2, ok := res[1].Value.(animal)
+				a.True(ok)
+				a.Equal("Baxter", v2.Name)
+			}, time.Second*10, time.Millisecond*100)
+		})
 	})
 }
