@@ -80,6 +80,15 @@ type (
 	// If a new run is triggered while another instance with the same key is active,
 	// it is skipped.
 	FnSingleton = fn.Singleton
+
+	// FnPriority allows you to dynamically execute some runs ahead or behind others based
+	// on any data. This allows you to prioritize some jobs ahead of others without the need
+	// for a separate queue. Some use cases for priority include:
+	//
+	// - Giving higher priority based on a user's subscription level, for example, free vs. paid users.
+	// - Ensuring that critical work is executed before other work in the queue.
+	// - Prioritizing certain jobs during onboarding to give the user a better first-run experience.
+	FnPriority = fn.Priority
 )
 
 type (
