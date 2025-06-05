@@ -299,7 +299,7 @@ func TestParallel(t *testing.T) {
 				Name string `json:"name"`
 			}
 
-			var res group.Results
+			var res TypedAtomic[group.Results]
 			eventName := randomSuffix("my-event")
 			_, err = inngestgo.CreateFunction(
 				c,
@@ -308,7 +308,7 @@ func TestParallel(t *testing.T) {
 				},
 				inngestgo.EventTrigger(eventName, nil),
 				func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-					res = group.Parallel(
+					results := group.Parallel(
 						ctx,
 						func(ctx context.Context) (any, error) {
 							return step.Run(ctx, "a", func(ctx context.Context) (person, error) {
@@ -321,7 +321,8 @@ func TestParallel(t *testing.T) {
 							})
 						},
 					)
-					return nil, res.AnyError()
+					res.Store(results)
+					return nil, results.AnyError()
 				},
 			)
 			r.NoError(err)
@@ -335,15 +336,19 @@ func TestParallel(t *testing.T) {
 
 			r.EventuallyWithT(func(t *assert.CollectT) {
 				a := assert.New(t)
-				if !a.Len(res, 2) {
+				results, ok := res.Load()
+				if !ok {
+					return
+				}
+				if !a.Len(results, 2) {
 					return
 				}
 
-				v1, ok := res[0].Value.(person)
+				v1, ok := results[0].Value.(person)
 				a.True(ok)
 				a.Equal("Alice", v1.Name)
 
-				v2, ok := res[1].Value.(animal)
+				v2, ok := results[1].Value.(animal)
 				a.True(ok)
 				a.Equal("Baxter", v2.Name)
 			}, time.Second*10, time.Millisecond*100)
@@ -369,7 +374,7 @@ func TestParallel(t *testing.T) {
 				Name string `json:"name"`
 			}
 
-			var res group.Results
+			var res TypedAtomic[group.Results]
 			eventName := randomSuffix("my-event")
 			_, err = inngestgo.CreateFunction(
 				c,
@@ -390,8 +395,9 @@ func TestParallel(t *testing.T) {
 						})
 					})
 
-					res = group.Parallel(ctx, steps...)
-					return nil, res.AnyError()
+					results := group.Parallel(ctx, steps...)
+					res.Store(results)
+					return nil, results.AnyError()
 				},
 			)
 			r.NoError(err)
@@ -405,15 +411,19 @@ func TestParallel(t *testing.T) {
 
 			r.EventuallyWithT(func(t *assert.CollectT) {
 				a := assert.New(t)
-				if !a.Len(res, 2) {
+				results, ok := res.Load()
+				if !ok {
+					return
+				}
+				if !a.Len(results, 2) {
 					return
 				}
 
-				v1, ok := res[0].Value.(person)
+				v1, ok := results[0].Value.(person)
 				a.True(ok)
 				a.Equal("Alice", v1.Name)
 
-				v2, ok := res[1].Value.(animal)
+				v2, ok := results[1].Value.(animal)
 				a.True(ok)
 				a.Equal("Baxter", v2.Name)
 			}, time.Second*10, time.Millisecond*100)

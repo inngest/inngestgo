@@ -117,7 +117,7 @@ func TestStepRun(t *testing.T) {
 			Name string `json:"name"`
 		}
 
-		var stepOutput any
+		var stepOutput TypedAtomic[any]
 		eventName := randomSuffix("my-event")
 		_, err = inngestgo.CreateFunction(
 			c,
@@ -127,7 +127,7 @@ func TestStepRun(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				stepOutput, err = step.Run(ctx,
+				output, err := step.Run(ctx,
 					"a",
 					func(ctx context.Context) (any, error) {
 						return person{Name: "Alice"}, nil
@@ -136,6 +136,7 @@ func TestStepRun(t *testing.T) {
 				if err != nil {
 					return nil, err
 				}
+				stepOutput.Store(output)
 				return nil, nil
 			},
 		)
@@ -150,7 +151,11 @@ func TestStepRun(t *testing.T) {
 
 		r.EventuallyWithT(func(t *assert.CollectT) {
 			a := assert.New(t)
-			v, ok := stepOutput.(map[string]any)
+			output, ok := stepOutput.Load()
+			if !ok {
+				return
+			}
+			v, ok := output.(map[string]any)
 			if !a.True(ok) {
 				return
 			}
@@ -176,7 +181,7 @@ func TestStepRun(t *testing.T) {
 			Name string `json:"name"`
 		}
 
-		var stepOutput person
+		var stepOutput TypedAtomic[person]
 		eventName := randomSuffix("my-event")
 		_, err = inngestgo.CreateFunction(
 			c,
@@ -186,7 +191,7 @@ func TestStepRun(t *testing.T) {
 			},
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
-				stepOutput, err = step.Run(ctx,
+				output, err := step.Run(ctx,
 					"a",
 					func(ctx context.Context) (person, error) {
 						return person{Name: "Alice"}, nil
@@ -195,6 +200,7 @@ func TestStepRun(t *testing.T) {
 				if err != nil {
 					return nil, err
 				}
+				stepOutput.Store(output)
 				return nil, nil
 			},
 		)
@@ -209,7 +215,11 @@ func TestStepRun(t *testing.T) {
 
 		r.EventuallyWithT(func(t *assert.CollectT) {
 			a := assert.New(t)
-			a.Equal("Alice", stepOutput.Name)
+			result, ok := stepOutput.Load()
+			if !ok {
+				return
+			}
+			a.Equal("Alice", result.Name)
 		}, time.Second*10, time.Millisecond*100)
 	})
 }

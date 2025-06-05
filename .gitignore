@@ -34,3 +34,6 @@ go.work
 # Release
 node_modules
 .npmrc
+
+# AI
+CLAUDE.md
