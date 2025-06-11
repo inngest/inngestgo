@@ -1,5 +1,12 @@
 # inngestgo
 
+## 0.13.0
+
+### Minor Changes
+
+- f54d7a8: Add step.WaitForSignal
+- f54d7a8: Add step.WaitForSignal
+
 ## 0.12.0
 
 ### Minor Changes
