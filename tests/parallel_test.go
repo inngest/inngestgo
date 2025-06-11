@@ -11,6 +11,7 @@ import (
 	"github.com/inngest/inngestgo"
 	"github.com/inngest/inngestgo/group"
 	"github.com/inngest/inngestgo/step"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -275,5 +276,157 @@ func TestParallel(t *testing.T) {
 		// after. This is because of the way parallelism works with step
 		// discovery.
 		r.Equal([]string{"1a", "2", "1b", "after"}, logs.Load())
+	})
+
+	t.Run("struct with specific type", func(t *testing.T) {
+		t.Run("inline", func(t *testing.T) {
+			// Struct return types are preserved when passing parallel steps
+			// inline.
+
+			ctx := context.Background()
+			r := require.New(t)
+
+			c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+				AppID: randomSuffix("app"),
+			})
+			r.NoError(err)
+
+			type person struct {
+				Name string `json:"name"`
+			}
+
+			type animal struct {
+				Name string `json:"name"`
+			}
+
+			var res TypedAtomic[group.Results]
+			eventName := randomSuffix("my-event")
+			_, err = inngestgo.CreateFunction(
+				c,
+				inngestgo.FunctionOpts{
+					ID: "fn",
+				},
+				inngestgo.EventTrigger(eventName, nil),
+				func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+					results := group.Parallel(
+						ctx,
+						func(ctx context.Context) (any, error) {
+							return step.Run(ctx, "a", func(ctx context.Context) (person, error) {
+								return person{Name: "Alice"}, nil
+							})
+						},
+						func(ctx context.Context) (any, error) {
+							return step.Run(ctx, "b", func(ctx context.Context) (animal, error) {
+								return animal{Name: "Baxter"}, nil
+							})
+						},
+					)
+					res.Store(results)
+					return nil, results.AnyError()
+				},
+			)
+			r.NoError(err)
+
+			server, sync := serve(t, c)
+			defer server.Close()
+			r.NoError(sync())
+
+			_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
+			r.NoError(err)
+
+			r.EventuallyWithT(func(t *assert.CollectT) {
+				a := assert.New(t)
+				results, ok := res.Load()
+				if !ok {
+					return
+				}
+				if !a.Len(results, 2) {
+					return
+				}
+
+				v1, ok := results[0].Value.(person)
+				a.True(ok)
+				a.Equal("Alice", v1.Name)
+
+				v2, ok := results[1].Value.(animal)
+				a.True(ok)
+				a.Equal("Baxter", v2.Name)
+			}, time.Second*10, time.Millisecond*100)
+		})
+
+		t.Run("slice", func(t *testing.T) {
+			// Struct return types are preserved, even when building a slice
+			// with an any return type.
+
+			ctx := context.Background()
+			r := require.New(t)
+
+			c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+				AppID: randomSuffix("app"),
+			})
+			r.NoError(err)
+
+			type person struct {
+				Name string `json:"name"`
+			}
+
+			type animal struct {
+				Name string `json:"name"`
+			}
+
+			var res TypedAtomic[group.Results]
+			eventName := randomSuffix("my-event")
+			_, err = inngestgo.CreateFunction(
+				c,
+				inngestgo.FunctionOpts{
+					ID: "fn",
+				},
+				inngestgo.EventTrigger(eventName, nil),
+				func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+					var steps []func(ctx context.Context) (any, error)
+					steps = append(steps, func(ctx context.Context) (any, error) {
+						return step.Run(ctx, "a", func(ctx context.Context) (person, error) {
+							return person{Name: "Alice"}, nil
+						})
+					})
+					steps = append(steps, func(ctx context.Context) (any, error) {
+						return step.Run(ctx, "b", func(ctx context.Context) (animal, error) {
+							return animal{Name: "Baxter"}, nil
+						})
+					})
+
+					results := group.Parallel(ctx, steps...)
+					res.Store(results)
+					return nil, results.AnyError()
+				},
+			)
+			r.NoError(err)
+
+			server, sync := serve(t, c)
+			defer server.Close()
+			r.NoError(sync())
+
+			_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
+			r.NoError(err)
+
+			r.EventuallyWithT(func(t *assert.CollectT) {
+				a := assert.New(t)
+				results, ok := res.Load()
+				if !ok {
+					return
+				}
+				if !a.Len(results, 2) {
+					return
+				}
+
+				v1, ok := results[0].Value.(person)
+				a.True(ok)
+				a.Equal("Alice", v1.Name)
+
+				v2, ok := results[1].Value.(animal)
+				a.True(ok)
+				a.Equal("Baxter", v2.Name)
+			}, time.Second*10, time.Millisecond*100)
+		})
 	})
 }

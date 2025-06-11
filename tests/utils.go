@@ -142,3 +142,24 @@ func (s *SafeSlice[T]) Load() []T {
 	defer s.mu.Unlock()
 	return s.slice
 }
+
+// TypedAtomic provides a type-safe wrapper around sync/atomic.Value.
+type TypedAtomic[T any] struct {
+	value atomic.Value
+}
+
+// Store atomically stores the value.
+func (s *TypedAtomic[T]) Store(v T) {
+	s.value.Store(v)
+}
+
+// Load atomically loads the value. Returns the zero value and false if no value
+// has been stored.
+func (s *TypedAtomic[T]) Load() (T, bool) {
+	v := s.value.Load()
+	if v == nil {
+		var zero T
+		return zero, false
+	}
+	return v.(T), true
+}
