@@ -224,7 +224,7 @@ func TestStep(t *testing.T) {
 	})
 
 	t.Run("It doesn't do anything with a cancelled context", func(t *testing.T) {
-		mgr.Cancel()
+		cancel() // Cancel the context directly
 
 		func() {
 			defer func() {

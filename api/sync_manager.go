@@ -50,10 +50,6 @@ func NewRequestManager(
 	}
 }
 
-func (s *syncInvocationManager) Cancel() {
-	// No-op for sync execution - API functions should continue execution
-	// rather than being cancelled after each step
-}
 
 func (s *syncInvocationManager) Request() *sdkrequest.Request {
 	// For API functions, we don't have a traditional request with steps

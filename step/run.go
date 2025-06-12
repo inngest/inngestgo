@@ -94,10 +94,6 @@ func Run[T any](
 		panic(ControlHijack{})
 	}
 
-	// We're calling a function, so always cancel the context afterwards so that no
-	// other tools run.
-	defer mgr.Cancel()
-
 	mw := internal.MiddlewareFromContext(ctx)
 
 	// We're about to run a step callback, which is "new code".
