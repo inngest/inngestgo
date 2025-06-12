@@ -2,14 +2,11 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 
-	"github.com/inngest/inngestgo/internal"
-	"github.com/inngest/inngestgo/internal/fn"
 	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 )
@@ -36,10 +33,10 @@ type Middleware struct {
 // NewMiddleware creates a new API middleware instance
 func NewMiddleware(opts MiddlewareOpts) *Middleware {
 	apiManager := NewAPIManager(opts.BaseURL, opts.SigningKey)
-	
+
 	// Create a middleware manager for step execution hooks
-	mw := middleware.NewManager()
-	
+	mw := middleware.New()
+
 	return &Middleware{
 		apiManager: apiManager,
 		opts:       opts,
@@ -76,7 +73,7 @@ func (rw *responseWriter) Write(data []byte) (int, error) {
 func (m *Middleware) Handler(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		startTime := time.Now()
-		
+
 		// Read request body for function input
 		var requestBody []byte
 		if r.Body != nil {
@@ -113,7 +110,7 @@ func (m *Middleware) Handler(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		// Create sync invocation manager
-		syncMgr := NewSyncInvocationManager(
+		syncMgr := NewRequestManager(
 			runID,
 			m.apiManager,
 			m.opts.SigningKey,
@@ -123,7 +120,6 @@ func (m *Middleware) Handler(next http.HandlerFunc) http.HandlerFunc {
 
 		// Set up context with managers
 		ctx := sdkrequest.SetManager(r.Context(), syncMgr)
-		ctx = internal.SetMiddlewareManagerInContext(ctx, m.mw)
 
 		// Wrap response writer to capture output
 		rw := newResponseWriter(w)
@@ -175,3 +171,4 @@ func flattenHeaders(headers http.Header) map[string]string {
 	}
 	return result
 }
+

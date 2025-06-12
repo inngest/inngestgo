@@ -2,7 +2,6 @@ package step
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/inngest/inngest/pkg/enums"
@@ -25,12 +24,8 @@ func Sleep(ctx context.Context, id string, duration time.Duration) {
 		return
 	}
 
-	mw, ok := internal.MiddlewareManagerFromContext(ctx)
-	if !ok {
-		mgr.SetErr(fmt.Errorf("no middleware manager found in context"))
-		panic(ControlHijack{})
-	}
-	mw.BeforeExecution(ctx, mgr.MiddlewareCallCtx())
+	mw := internal.MiddlewareFromContext(ctx)
+	mw.BeforeExecution(ctx, mgr.CallContext())
 	mgr.AppendOp(sdkrequest.GeneratorOpcode{
 		ID:   op.MustHash(),
 		Op:   enums.OpcodeSleep,

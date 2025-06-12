@@ -12,7 +12,6 @@ import (
 
 func TestInferTypes(t *testing.T) {
 	t.Run("It handles OpenAI requests using a 3rd party provider", func(t *testing.T) {
-
 		ctx, cancel := context.WithCancel(context.Background())
 		req := &sdkrequest.Request{
 			Steps: map[string]json.RawMessage{
@@ -20,7 +19,7 @@ func TestInferTypes(t *testing.T) {
 			},
 		}
 
-		mw := middleware.NewMiddlewareManager()
+		mw := middleware.New()
 		mgr := sdkrequest.NewManager(nil, mw, cancel, req, "")
 		ctx = sdkrequest.SetManager(ctx, mgr)
 

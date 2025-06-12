@@ -736,7 +736,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	if !ok {
 		return errors.New("invalid client type")
 	}
-	mw := middleware.NewMiddlewareManager().Add(cImpl.Middleware...)
+	mw := middleware.New().Add(cImpl.Middleware...)
 
 	var sig string
 	defer func() {
@@ -1180,7 +1180,7 @@ func invoke(
 	// within a step.  This allows us to prevent any execution of future tools after a
 	// tool has run.
 	fCtx, cancel := context.WithCancel(
-		internal.ContextWithMiddlewareManager(
+		internal.ContextWithMiddleware(
 			internal.ContextWithEventSender(ctx, client),
 			mw,
 		),
@@ -1229,7 +1229,7 @@ func invoke(
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
-				callCtx := mgr.MiddlewareCallCtx()
+				callCtx := mgr.CallContext()
 
 				// Was this us attepmting to prevent functions from continuing, using
 				// panic as a crappy control flow because go doesn't have generators?
@@ -1274,7 +1274,7 @@ func invoke(
 			mwInput.WithContext(fCtx)
 
 			// Run hook.
-			mw.TransformInput(ctx, mgr.MiddlewareCallCtx(), mwInput)
+			mw.TransformInput(ctx, mgr.CallContext(), mwInput)
 
 			// Update the context in case the hook changed it.
 			fCtx = mwInput.Context()
@@ -1292,7 +1292,7 @@ func invoke(
 		if len(input.Steps) == 0 {
 			// There are no memoized steps, so the start of the function is "new
 			// code".
-			mw.BeforeExecution(fCtx, mgr.MiddlewareCallCtx())
+			mw.BeforeExecution(fCtx, mgr.CallContext())
 		}
 
 		// Call the defined function with the input data.
@@ -1311,7 +1311,7 @@ func invoke(
 			fnError = res[1].Interface().(error)
 		}
 
-		mw.AfterExecution(ctx, mgr.MiddlewareCallCtx(), fnResponse, fnError)
+		mw.AfterExecution(ctx, mgr.CallContext(), fnResponse, fnError)
 
 		{
 			// Transform output via MW
@@ -1319,7 +1319,7 @@ func invoke(
 				Result: fnResponse,
 				Error:  fnError,
 			}
-			mw.TransformOutput(ctx, mgr.MiddlewareCallCtx(), out)
+			mw.TransformOutput(ctx, mgr.CallContext(), out)
 			// And update the vars
 			fnResponse = out.Result
 			fnError = out.Error

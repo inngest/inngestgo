@@ -58,8 +58,8 @@ func WaitForSignal[T any](ctx context.Context, stepID string, opts WaitForSignal
 	mgr := preflight(ctx)
 
 	args := map[string]any{
-		"signal":     opts.Signal,
-		"timeout":    str2duration.String(opts.Timeout),
+		"signal":   opts.Signal,
+		"timeout":  str2duration.String(opts.Timeout),
 		"conflict": SignalConflictFail,
 	}
 	if opts.Name == "" {

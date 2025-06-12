@@ -98,22 +98,17 @@ func Run[T any](
 	// other tools run.
 	defer mgr.Cancel()
 
-	mw, ok := internal.MiddlewareManagerFromContext(ctx)
-	if !ok {
-		mgr.SetErr(fmt.Errorf("no middleware manager found in context"))
-		panic(ControlHijack{})
-	}
+	mw := internal.MiddlewareFromContext(ctx)
 
 	// We're about to run a step callback, which is "new code".
-	mw.BeforeExecution(ctx, mgr.MiddlewareCallCtx())
+	mw.BeforeExecution(ctx, mgr.CallContext())
 	result, err := f(setWithinStep(ctx))
-
-	mw.AfterExecution(ctx, mgr.MiddlewareCallCtx(), result, err)
+	mw.AfterExecution(ctx, mgr.CallContext(), result, err)
 	out := &middleware.TransformableOutput{
 		Result: result,
 		Error:  err,
 	}
-	mw.TransformOutput(ctx, mgr.MiddlewareCallCtx(), out)
+	mw.TransformOutput(ctx, mgr.CallContext(), out)
 
 	mutated := out.Result
 	err = out.Error

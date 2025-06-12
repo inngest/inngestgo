@@ -20,7 +20,7 @@ func TestStep(t *testing.T) {
 		Steps: map[string]json.RawMessage{},
 	}
 
-	mw := middleware.NewMiddlewareManager()
+	mw := middleware.New()
 	mgr := sdkrequest.NewManager(nil, mw, cancel, req, "")
 	ctx = sdkrequest.SetManager(ctx, mgr)
 
@@ -183,10 +183,10 @@ func TestStep(t *testing.T) {
 		t.Run("Appends opcodes", func(t *testing.T) {
 			name = "new step must append"
 
-			mw := middleware.NewMiddlewareManager()
+			mw := middleware.New()
 			mgr := sdkrequest.NewManager(nil, mw, cancel, req, "")
 			ctx = sdkrequest.SetManager(ctx, mgr)
-			ctx = internal.ContextWithMiddlewareManager(ctx, mw)
+			ctx = internal.ContextWithMiddleware(ctx, mw)
 
 			func() {
 				defer func() {

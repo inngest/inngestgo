@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sync"
 
 	"github.com/inngest/inngest/pkg/enums"
@@ -33,8 +32,8 @@ type syncInvocationManager struct {
 	cancelled  bool
 }
 
-// NewSyncInvocationManager creates a new InvocationManager for API functions
-func NewSyncInvocationManager(
+// NewRequestManager creates a new InvocationManager for API functions
+func NewRequestManager(
 	runID string,
 	apiManager APIManager,
 	signingKey string,
@@ -52,9 +51,8 @@ func NewSyncInvocationManager(
 }
 
 func (s *syncInvocationManager) Cancel() {
-	s.l.Lock()
-	defer s.l.Unlock()
-	s.cancelled = true
+	// No-op for sync execution - API functions should continue execution
+	// rather than being cancelled after each step
 }
 
 func (s *syncInvocationManager) Request() *sdkrequest.Request {
@@ -124,7 +122,7 @@ func (s *syncInvocationManager) SigningKey() string {
 	return s.signingKey
 }
 
-func (s *syncInvocationManager) MiddlewareCallCtx() experimental.CallContext {
+func (s *syncInvocationManager) CallContext() middleware.CallContext {
 	opts := fn.FunctionOpts{}
 	if s.fn != nil {
 		opts = s.fn.Config()
@@ -142,3 +140,4 @@ func (s *syncInvocationManager) StepMode() sdkrequest.StepMode {
 	// API functions continue execution after checkpointing
 	return sdkrequest.StepModeContinue
 }
+

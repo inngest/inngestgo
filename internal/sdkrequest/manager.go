@@ -55,8 +55,8 @@ type InvocationManager interface {
 	// SigningKey returns the signing key used for this request.  This lets us
 	// retrieve creds for eg. publishing or API alls.
 	SigningKey() string
-	// MiddlewareCallCtx exposes the call context for middleware calls.
-	MiddlewareCallCtx() experimental.CallContext
+	// CallContext exposes the call context for middleware calls.
+	CallContext() experimental.CallContext
 	// StepMode returns how steps should be executed in this context
 	StepMode() StepMode
 }
@@ -165,7 +165,7 @@ func (r *requestCtxManager) Ops() []GeneratorOpcode {
 	return r.ops
 }
 
-func (r *requestCtxManager) MiddlewareCallCtx() middleware.CallContext {
+func (r *requestCtxManager) CallContext() middleware.CallContext {
 	opts := fn.FunctionOpts{}
 	if r.fn != nil {
 		opts = r.fn.Config()
@@ -193,7 +193,7 @@ func (r *requestCtxManager) Step(ctx context.Context, op UnhashedOp) (json.RawMe
 	if r.unseen.Len() == 0 {
 		// We exhausted all memoized steps, so we're about to run "new code"
 		// after a memoized step.
-		r.mw.BeforeExecution(ctx, r.MiddlewareCallCtx())
+		r.mw.BeforeExecution(ctx, r.CallContext())
 	}
 
 	val, ok := r.request.Steps[hash]
