@@ -124,7 +124,7 @@ func Run[T any](
 			panic(ControlHijack{})
 		}
 
-		result, _ := json.Marshal(mutated)
+		marshalled, _ := json.Marshal(mutated)
 
 		// Implement per-step errors.
 		mgr.AppendOp(sdkrequest.GeneratorOpcode{
@@ -134,11 +134,18 @@ func Run[T any](
 			Error: &sdkrequest.UserError{
 				Name:    "Step failed",
 				Message: err.Error(),
-				Data:    result,
+				Data:    marshalled,
 			},
 		})
 		mgr.SetErr(err)
-		panic(ControlHijack{})
+
+		// Check step mode for error handling
+		if mgr.StepMode() == sdkrequest.StepModeReturn {
+			panic(ControlHijack{})
+		}
+
+		// API functions: return the error without panic
+		return result, err
 	}
 
 	byt, err := json.Marshal(mutated)
@@ -151,5 +158,13 @@ func Run[T any](
 		Name: id,
 		Data: byt,
 	})
-	panic(ControlHijack{})
+
+	// Check step mode to determine execution flow
+	if mgr.StepMode() == sdkrequest.StepModeReturn {
+		// Async functions: return control to executor after step
+		panic(ControlHijack{})
+	}
+
+	// API functions: continue execution after checkpointing
+	return result, nil
 }

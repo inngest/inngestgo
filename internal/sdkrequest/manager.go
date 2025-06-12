@@ -15,6 +15,16 @@ import (
 	"github.com/inngest/inngestgo/internal/types"
 )
 
+// StepMode defines how steps should be executed
+type StepMode int
+
+const (
+	// StepModeReturn returns control to executor after each step (async functions)
+	StepModeReturn StepMode = iota
+	// StepModeContinue continues execution after checkpointing (API functions)
+	StepModeContinue
+)
+
 type requestCtxKeyType struct{}
 
 var requestCtxKey = requestCtxKeyType{}
@@ -47,6 +57,8 @@ type InvocationManager interface {
 	SigningKey() string
 	// MiddlewareCallCtx exposes the call context for middleware calls.
 	MiddlewareCallCtx() experimental.CallContext
+	// StepMode returns how steps should be executed in this context
+	StepMode() StepMode
 }
 
 // NewManager returns an InvocationManager to manage the incoming executor request.  This
@@ -165,6 +177,11 @@ func (r *requestCtxManager) MiddlewareCallCtx() middleware.CallContext {
 		RunID:        r.request.CallCtx.RunID,
 		Attempt:      r.request.CallCtx.Attempt,
 	}
+}
+
+func (r *requestCtxManager) StepMode() StepMode {
+	// Async functions return control to executor after each step
+	return StepModeReturn
 }
 
 func (r *requestCtxManager) Step(ctx context.Context, op UnhashedOp) (json.RawMessage, bool) {
