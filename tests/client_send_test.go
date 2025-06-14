@@ -159,6 +159,33 @@ func TestClientSendMany(t *testing.T) {
 			r.NotEmpty(id)
 		}
 	})
+
+	t.Run("panic on sending events should be recovered", func(t *testing.T) {
+		ctx := context.Background()
+		r := require.New(t)
+
+		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
+			AppID: randomSuffix("app"),
+		})
+		r.NoError(err)
+
+		// Send data that panics in SendMany
+		panicValidator := &panicOnValidate{}
+		panicData := []any{panicValidator}
+
+		// SendMany should recover from panic and return an error
+		ids, err := c.SendMany(ctx, panicData)
+		r.Error(err)
+		r.Contains(err.Error(), "panic sending events")
+		r.Nil(ids)
+	})
+}
+
+// Helper type that panics when Validate() is called
+type panicOnValidate struct{}
+
+func (p *panicOnValidate) Validate() error {
+	panic("validation panic for testing")
 }
 
 func TestClientSendRetry(t *testing.T) {
