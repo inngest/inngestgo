@@ -21,7 +21,7 @@ func TestStep(t *testing.T) {
 	}
 
 	mw := middleware.New()
-	mgr := sdkrequest.NewManager(nil, mw, cancel, req, "")
+	mgr := sdkrequest.NewManager(nil, mw, cancel, req, "", sdkrequest.StepModeBackground)
 	ctx = sdkrequest.SetManager(ctx, mgr)
 
 	type response struct {
@@ -184,14 +184,14 @@ func TestStep(t *testing.T) {
 			name = "new step must append"
 
 			mw := middleware.New()
-			mgr := sdkrequest.NewManager(nil, mw, cancel, req, "")
+			mgr := sdkrequest.NewManager(nil, mw, cancel, req, "", sdkrequest.StepModeBackground)
 			ctx = sdkrequest.SetManager(ctx, mgr)
 			ctx = internal.ContextWithMiddleware(ctx, mw)
 
 			func() {
 				defer func() {
 					rcv := recover()
-					require.Equal(t, ControlHijack{}, rcv)
+					require.Equal(t, sdkrequest.ControlHijack{}, rcv)
 				}()
 
 				require.False(t, IsWithinStep(ctx))
@@ -229,7 +229,7 @@ func TestStep(t *testing.T) {
 		func() {
 			defer func() {
 				rcv := recover()
-				require.Equal(t, ControlHijack{}, rcv)
+				require.Equal(t, sdkrequest.ControlHijack{}, rcv)
 			}()
 			val, err := Run(ctx, "new", func(ctx context.Context) (response, error) {
 				return expected, nil

@@ -64,8 +64,12 @@ type InvocationManager interface {
 	SigningKey() string
 	// CallContext exposes the call context for middleware calls.
 	CallContext() experimental.CallContext
+	// SetCheckpointFunc sets the function used for background checkpointing
+	SetCheckpointFunc(fn func(ctx context.Context, runID string, steps []GeneratorOpcode) error)
 	// StepMode returns how steps should be executed in this context
 	StepMode() StepMode
+	// SetStepMode overrides the step mode.
+	SetStepMode(m StepMode)
 }
 
 // NewManager returns an InvocationManager to manage the incoming executor request.  This
@@ -76,6 +80,7 @@ func NewManager(
 	cancel context.CancelFunc,
 	request *Request,
 	signingKey string,
+	mode StepMode,
 ) InvocationManager {
 	unseen := types.Set[string]{}
 	for k := range request.Steps {
@@ -83,17 +88,24 @@ func NewManager(
 	}
 
 	return &requestCtxManager{
-		fn:         fn,
-		cancel:     cancel,
-		request:    request,
-		indexes:    map[string]int{},
-		l:          &sync.RWMutex{},
-		signingKey: signingKey,
-		seen:       map[string]struct{}{},
-		seenLock:   &sync.RWMutex{},
-		unseen:     &unseen,
-		mw:         mw,
+		fn:             fn,
+		cancel:         cancel,
+		request:        request,
+		indexes:        map[string]int{},
+		l:              &sync.RWMutex{},
+		signingKey:     signingKey,
+		seen:           map[string]struct{}{},
+		seenLock:       &sync.RWMutex{},
+		unseen:         &unseen,
+		mw:             mw,
+		mode:           mode,
+		checkpointFunc: nil,
 	}
+}
+
+// SetCheckpointFunc sets the function used for background checkpointing
+func (r *requestCtxManager) SetCheckpointFunc(fn func(ctx context.Context, runID string, steps []GeneratorOpcode) error) {
+	r.checkpointFunc = fn
 }
 
 func SetManager(ctx context.Context, r InvocationManager) context.Context {
@@ -106,6 +118,8 @@ func Manager(ctx context.Context) (InvocationManager, bool) {
 }
 
 type requestCtxManager struct {
+	mode StepMode
+
 	fn fn.ServableFunction
 	// key is the signing key
 	signingKey string
@@ -130,6 +144,9 @@ type requestCtxManager struct {
 	unseen *types.Set[string]
 
 	mw *middleware.MiddlewareManager
+
+	// checkpointFunc is called for background checkpointing in StepModeBackground
+	checkpointFunc func(ctx context.Context, runID string, steps []GeneratorOpcode) error
 }
 
 func (r *requestCtxManager) SigningKey() string {
@@ -170,11 +187,7 @@ func (r *requestCtxManager) AppendOp(op GeneratorOpcode) {
 		panic(ControlHijack{})
 
 	case StepModeBackground:
-		// Trigger checkpointing in the background.
-		// TODO: Goroutine checkpoint function in the background.  This should use the
-		// same checkpointing function in a goroutine, optionally with a delay by N milliseconds
-		// so that we can send one request with a batch of opcodes.
-
+		// Trigger batch checkpointing in the background with delay
 	case StepModeCheckpoint:
 		// Block on checkpointing, only resuming the next step once checkpointing has finished.
 	}
@@ -199,8 +212,11 @@ func (r *requestCtxManager) CallContext() middleware.CallContext {
 }
 
 func (r *requestCtxManager) StepMode() StepMode {
-	// Async functions return control to executor after each step
-	return StepModeReturn
+	return r.mode
+}
+
+func (r *requestCtxManager) SetStepMode(m StepMode) {
+	r.mode = m
 }
 
 func (r *requestCtxManager) Step(ctx context.Context, op UnhashedOp) (json.RawMessage, bool) {
@@ -306,13 +322,6 @@ type GeneratorOpcode struct {
 	Timing Interval `json:"timing"`
 }
 
-type Interval struct {
-	// Start represents the start of the interval
-	Start time.Time `json:"a"`
-	// end represents the end of the interval.
-	End time.Time `json:"b"`
-}
-
 // UserError is a reexport of inngest/state.UserError
 type UserError struct {
 	Name    string `json:"name"`
@@ -329,4 +338,11 @@ type UserError struct {
 
 	// Cause allows nested errors to be passed back to the SDK.
 	Cause *UserError `json:"cause,omitempty"`
+}
+
+type Interval struct {
+	// Start represents the start of the interval
+	Start time.Time `json:"a"`
+	// end represents the end of the interval.
+	End time.Time `json:"b"`
 }

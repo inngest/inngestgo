@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngestgo/errors"
@@ -60,8 +61,11 @@ func Run[T any](
 
 	// We're about to run a step callback, which is "new code".
 	mw.BeforeExecution(ctx, mgr.CallContext())
+	pre := time.Now()
 	result, err := f(setWithinStep(ctx))
+	post := time.Now()
 	mw.AfterExecution(ctx, mgr.CallContext(), result, err)
+
 	out := &middleware.TransformableOutput{
 		Result: result,
 		Error:  err,
@@ -90,6 +94,10 @@ func Run[T any](
 				Message: err.Error(),
 				Data:    marshalled,
 			},
+			Timing: sdkrequest.Interval{
+				Start: pre,
+				End:   post,
+			},
 		})
 
 		// API functions: return the error without panic
@@ -108,6 +116,10 @@ func Run[T any](
 		Op:   enums.OpcodeStepRun,
 		Name: id,
 		Data: byt,
+		Timing: sdkrequest.Interval{
+			Start: pre,
+			End:   post,
+		},
 	})
 
 	return result, nil

@@ -42,7 +42,7 @@ func Infer[InputT any, OutputT any](
 				err := errors.StepError{}
 				if err := json.Unmarshal(unwrapped.Error, &err); err != nil {
 					mgr.SetErr(fmt.Errorf("error unmarshalling error for step '%s': %w", id, err))
-					panic(ControlHijack{})
+					panic(sdkrequest.ControlHijack{})
 				}
 
 				// See if we have any data for multiple returns in the error type.
@@ -92,7 +92,7 @@ func Infer[InputT any, OutputT any](
 	reqBytes, err := json.Marshal(in.Body)
 	if err != nil {
 		mgr.SetErr(fmt.Errorf("error unmarshalling state for step '%s': %w", id, err))
-		panic(ControlHijack{})
+		panic(sdkrequest.ControlHijack{})
 	}
 
 	mgr.AppendOp(sdkrequest.GeneratorOpcode{
@@ -108,7 +108,8 @@ func Infer[InputT any, OutputT any](
 		},
 		Data: reqBytes,
 	})
-	panic(ControlHijack{})
+	// Always defers back to an async function.
+	panic(sdkrequest.ControlHijack{})
 }
 
 type inferOpcodeOpts struct {

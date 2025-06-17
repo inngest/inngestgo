@@ -38,12 +38,14 @@ func TestStepRun(t *testing.T) {
 			inngestgo.EventTrigger(eventName, nil),
 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
 				runID.Store(input.InputCtx.RunID)
+
 				_, stepError = step.Run(ctx,
 					"a",
 					func(ctx context.Context) (any, error) {
 						return nil, fmt.Errorf("oh no")
 					},
 				)
+
 				return nil, stepError
 			},
 		)

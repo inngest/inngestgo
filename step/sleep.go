@@ -35,7 +35,7 @@ func Sleep(ctx context.Context, id string, duration time.Duration) {
 		},
 	})
 
-	panic(ControlHijack{})
+	panic(sdkrequest.ControlHijack{})
 }
 
 // SleepUntil sleeps until a given time.  This halts function execution entirely,

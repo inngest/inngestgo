@@ -13,15 +13,15 @@ import (
 
 func main() {
 	// Create Inngest API middleware
-	middleware := stephttp.NewMiddleware(stephttp.MiddlewareOpts{
+	provider := stephttp.Setup(stephttp.SetupOpts{
 		SigningKey: "your-signing-key", // TODO: Load from environment
 		AppID:      "my-api-app",
 		Domain:     "api.mycompany.com",
 	})
 
 	// Create HTTP server with step tooling
-	http.HandleFunc("/users", middleware.Handler(handleUsers))
-	http.HandleFunc("/orders", middleware.Handler(handleOrders))
+	http.HandleFunc("/users", provider.ServeHTTP(handleUsers))
+	http.HandleFunc("/orders", provider.ServeHTTP(handleOrders))
 
 	fmt.Println("API server with Inngest step tooling running on :8080")
 	fmt.Println("Try: curl -X POST http://localhost:8080/users -d '{\"email\":\"user@example.com\"}'")
@@ -198,4 +198,3 @@ type Order struct {
 	Amount        int    `json:"amount"`
 	Status        string `json:"status"`
 }
-

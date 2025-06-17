@@ -1,24 +1,67 @@
 package stephttp
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"net/http"
 	"time"
 
+	"github.com/inngest/inngestgo"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
+	"github.com/oklog/ulid/v2"
 )
 
-// syncRunAPI handles API function runs and step checkpointing
-type syncRunAPI interface {
-	// CreateAPIRun creates a new API run in Inngest cloud
-	CreateAPIRun(ctx context.Context, domain, endpoint, method string, input []byte, metadata map[string]any) (string, error)
-	// CheckpointStep sends step data to Inngest in the background
-	CheckpointStep(ctx context.Context, runID string, step sdkrequest.GeneratorOpcode) error
-	// StoreResult stores the final API response as the function result
-	StoreResult(ctx context.Context, runID string, result APIResult) error
+// checkpointAPI handles API function runs and step checkpointing
+type checkpointAPI interface {
+	CheckpointNewRun(ctx context.Context, input NewAPIRunData) error
+	CheckpointSteps(ctx context.Context, runID ulid.ULID, steps []sdkrequest.GeneratorOpcode) error
+	CheckpointResponse(ctx context.Context, runID ulid.ULID, result APIResult) error
+}
+
+// NewAPIRunRequest represents the entire request payload used to create new
+// API-based runs.
+type CheckpointNewRunRequest struct {
+	// Seed allows us to construct a deterministic run ID from this data and the
+	// event TS.
+	Seed string `json:"seed"`
+
+	// Idempotency allows the customization of an idempotency key, allowing us to
+	// handle API idempotency using Inngest.
+	Idempotency string `json:"idempotency"`
+
+	// Event embeds the key request information which is used as the triggering
+	// event for API-based runs.
+	Event inngestgo.GenericEvent[NewAPIRunData] `json:"event"`
+}
+
+// NewAPIRunData represents event data stored and used to create new API-based
+// runs.
+type NewAPIRunData struct {
+	// Domain is the domain that served the incoming request.
+	Domain string `json:"domain"`
+	// Method is the incoming request method.  This is used for RESTful
+	// API endpoints.
+	Method string `json:"method"`
+	// Path is the path for the incoming request.
+	Path string `json:"path"` // request path
+	// Fn is the optional function slug.  If not present, this is created
+	// using a combination of the method and the path: "POST /v1/runs"
+	Fn string `json:"fn"`
+
+	// IP is the IP that created the request.
+	IP string `json:"ip"` // incoming IP
+	// ContentType is the content type for the request.
+	ContentType string `json:"content_type"`
+	// QueryParams are the query parameters for the request, as a single string
+	// without the leading "?".
+	//
+	// NOTE: This is optional;  we do not require that users store the query params
+	// for every request, as this may contain data that users choose not to log.
+	QueryParams string `json:"query_params"`
+	// Body is the incoming request body.
+	//
+	// NOTE: This is optional;  we do not require that users store the body for
+	// every request, as this may contain data that users choose not to log.
+	Body json.RawMessage `json:"body"`
 }
 
 // APIResult represents the final result of an API function call
@@ -35,165 +78,4 @@ type APIResult struct {
 	// Error represents any error from the API.  This is only for internal errors,
 	// eg. when a step permanently fails
 	Error string `json:"error,omitempty"`
-}
-
-// syncClient implements the API interface
-type syncClient struct {
-	baseURL    string
-	signingKey string
-	client     *http.Client
-}
-
-// NewAPIManager creates a new API manager for handling API function runs.  The base URL is
-// the URL endpoint for Inngest's API, eg "https://api.inngest.com".
-func NewAPIManager(baseURL, env, signingKey string) syncRunAPI {
-	return &syncClient{
-		baseURL:    baseURL,
-		signingKey: signingKey,
-		client: &http.Client{
-			Timeout: 10 * time.Second,
-		},
-	}
-}
-
-// CreateAPIRunRequest represents the request to create a new API run
-type CreateAPIRunRequest struct {
-	Domain   string          `json:"domain"`
-	Endpoint string          `json:"endpoint"`
-	Method   string          `json:"method"`
-	Input    json.RawMessage `json:"input"`
-	Metadata map[string]any  `json:"metadata"`
-}
-
-// CreateAPIRunResponse represents the response from creating an API run
-type CreateAPIRunResponse struct {
-	RunID string `json:"run_id"`
-}
-
-func (m *syncClient) CreateAPIRun(ctx context.Context, domain, endpoint, method string, input []byte, metadata map[string]any) (string, error) {
-	req := CreateAPIRunRequest{
-		Domain:   domain,
-		Endpoint: endpoint,
-		Method:   method,
-		Input:    json.RawMessage(input),
-		Metadata: metadata,
-	}
-
-	reqBody, err := json.Marshal(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal create run request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", m.baseURL+"/v1/api-runs", bytes.NewReader(reqBody))
-	if err != nil {
-		return "", fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+m.signingKey)
-
-	resp, err := m.client.Do(httpReq)
-	if err != nil {
-		return "", fmt.Errorf("failed to create API run: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf("API run creation failed with status %d", resp.StatusCode)
-	}
-
-	var createResp CreateAPIRunResponse
-	if err := json.NewDecoder(resp.Body).Decode(&createResp); err != nil {
-		return "", fmt.Errorf("failed to decode create run response: %w", err)
-	}
-
-	return createResp.RunID, nil
-}
-
-// CheckpointStepRequest represents a step checkpoint request
-type CheckpointStepRequest struct {
-	RunID string                     `json:"run_id"`
-	Step  sdkrequest.GeneratorOpcode `json:"step"`
-}
-
-func (m *syncClient) CheckpointStep(ctx context.Context, runID string, step sdkrequest.GeneratorOpcode) error {
-	req := CheckpointStepRequest{
-		RunID: runID,
-		Step:  step,
-	}
-
-	reqBody, err := json.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("failed to marshal checkpoint request: %w", err)
-	}
-
-	// Send checkpoint in background to avoid blocking the API response
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		httpReq, err := http.NewRequestWithContext(ctx, "POST", m.baseURL+"/v1/api-runs/checkpoint", bytes.NewReader(reqBody))
-		if err != nil {
-			// TODO: Add proper logging
-			return
-		}
-
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Authorization", "Bearer "+m.signingKey)
-
-		resp, err := m.client.Do(httpReq)
-		if err != nil {
-			// TODO: Add proper logging
-			return
-		}
-		defer resp.Body.Close()
-
-		// TODO: Add proper logging for non-200 responses
-	}()
-
-	return nil
-}
-
-// StoreResultRequest represents a request to store the final API result
-type StoreResultRequest struct {
-	RunID  string    `json:"run_id"`
-	Result APIResult `json:"result"`
-}
-
-func (m *syncClient) StoreResult(ctx context.Context, runID string, result APIResult) error {
-	req := StoreResultRequest{
-		RunID:  runID,
-		Result: result,
-	}
-
-	reqBody, err := json.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("failed to marshal store result request: %w", err)
-	}
-
-	// Send result storage in background
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		httpReq, err := http.NewRequestWithContext(ctx, "POST", m.baseURL+"/v1/api-runs/result", bytes.NewReader(reqBody))
-		if err != nil {
-			// TODO: Add proper logging
-			return
-		}
-
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Authorization", "Bearer "+m.signingKey)
-
-		resp, err := m.client.Do(httpReq)
-		if err != nil {
-			// TODO: Add proper logging
-			return
-		}
-		defer resp.Body.Close()
-
-		// TODO: Add proper logging for non-200 responses
-	}()
-
-	return nil
 }
