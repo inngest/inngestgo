@@ -8,7 +8,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gosimple/slug v1.12.0
 	github.com/gowebpki/jcs v1.0.0
-	github.com/inngest/inngest v1.6.4-0.20250602130422-49e24112eb84
+	github.com/inngest/inngest v1.6.4-0.20250530181652-294d872f1ecb
 	github.com/oklog/ulid/v2 v2.1.0
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/sashabaranov/go-openai v1.35.6
