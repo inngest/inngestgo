@@ -12,7 +12,6 @@ import (
 	"math"
 	mathrand "math/rand"
 	"net/http"
-	"net/url"
 	"os"
 	"time"
 
@@ -37,7 +36,6 @@ type Client interface {
 	Serve() http.Handler
 	ServeWithOpts(opts ServeOpts) http.Handler
 	SetOptions(opts ClientOpts) error
-	SetURL(u *url.URL)
 }
 
 type ClientOpts struct {
@@ -90,10 +88,6 @@ type ClientOpts struct {
 
 	// MaxBodySize is the max body size to read for incoming invoke requests
 	MaxBodySize int
-
-	// URL that the function is served at.  If not supplied this is taken from
-	// the incoming request's data.
-	URL *url.URL
 
 	// UseStreaming enables streaming - continued writes to the HTTP writer.  This
 	// differs from true streaming in that we don't support server-sent events.
@@ -160,7 +154,6 @@ func clientOptsToHandlerOpts(opts ClientOpts) handlerOpts {
 		RegisterURL:        opts.RegisterURL,
 		AppVersion:         opts.AppVersion,
 		MaxBodySize:        opts.MaxBodySize,
-		URL:                opts.URL,
 		UseStreaming:       opts.UseStreaming,
 		AllowInBandSync:    opts.AllowInBandSync,
 		Dev:                opts.Dev,
@@ -240,11 +233,6 @@ func (a *apiClient) SetOptions(opts ClientOpts) error {
 	a.ClientOpts = opts
 	a.h.SetOptions(clientOptsToHandlerOpts(opts))
 	return nil
-}
-
-func (a *apiClient) SetURL(u *url.URL) {
-	a.URL = u
-	a.h.SetOptions(clientOptsToHandlerOpts(a.ClientOpts))
 }
 
 type validatable interface {
