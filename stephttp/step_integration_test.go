@@ -1,4 +1,4 @@
-package api
+package stephttp
 
 import (
 	"context"
@@ -31,7 +31,6 @@ func TestStepRun_APIFunctionExecution(t *testing.T) {
 	result, err := step.Run(ctx, "test-step", func(ctx context.Context) (string, error) {
 		return "step-result", nil
 	})
-
 	// Verify step executed and returned result
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
@@ -249,3 +248,4 @@ func TestStepRun_NoInvocationManager(t *testing.T) {
 		return "should not reach", nil
 	})
 }
+

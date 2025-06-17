@@ -38,49 +38,11 @@ func Run[T any](
 	hashedID := op.MustHash()
 
 	if val, ok := mgr.Step(ctx, op); ok {
-		// Create a new empty type T in v
-		ft := reflect.TypeOf(f)
-		v := reflect.New(ft.Out(0)).Interface()
-
-		// This step has already ran as we have state for it. Unmarshal the JSON into type T
-		unwrapped := response{}
-		if err := json.Unmarshal(val, &unwrapped); err == nil {
-			// Check for step errors first.
-			if len(unwrapped.Error) > 0 {
-				err := errors.StepError{}
-				if err := json.Unmarshal(unwrapped.Error, &err); err != nil {
-					mgr.SetErr(fmt.Errorf("error unmarshalling error for step '%s': %w", id, err))
-					panic(ControlHijack{})
-				}
-
-				// See if we have any data for multiple returns in the error type.
-				if err := json.Unmarshal(err.Data, v); err != nil {
-					mgr.SetErr(fmt.Errorf("error unmarshalling state for step '%s': %w", id, err))
-					panic(ControlHijack{})
-				}
-
-				val, _ := reflect.ValueOf(v).Elem().Interface().(T)
-				return val, err
-			}
-			// If there's an error, assume that val is already of type T without wrapping
-			// in the 'data' object as per the SDK spec.  Here, if this succeeds we can be
-			// sure that we're wrapping the data in a compliant way.
-			if len(unwrapped.Data) > 0 {
-				val = unwrapped.Data
-			}
-		}
-
-		// Grab the data as the step type.
-		if err := json.Unmarshal(val, v); err != nil {
-			mgr.SetErr(fmt.Errorf("error unmarshalling state for step '%s': %w", id, err))
-			panic(ControlHijack{})
-		}
-		val, _ := reflect.ValueOf(v).Elem().Interface().(T)
-		return val, nil
+		return loadExistingStep(id, mgr, val, f)
 	}
 
 	if targetID != nil && *targetID != hashedID {
-		panic(ControlHijack{})
+		panic(sdkrequest.ControlHijack{})
 	}
 
 	planParallel := targetID == nil && isParallel(ctx)
@@ -91,7 +53,7 @@ func Run[T any](
 			Op:   enums.OpcodeStepPlanned,
 			Name: id,
 		})
-		panic(ControlHijack{})
+		panic(sdkrequest.ControlHijack{})
 	}
 
 	mw := internal.MiddlewareFromContext(ctx)
@@ -112,12 +74,13 @@ func Run[T any](
 		// If tihs is a StepFailure already, fail fast.
 		if errors.IsStepError(err) {
 			mgr.SetErr(fmt.Errorf("unhandled step error: %s", err))
-			panic(ControlHijack{})
+			panic(sdkrequest.ControlHijack{})
 		}
 
 		marshalled, _ := json.Marshal(mutated)
 
 		// Implement per-step errors.
+		mgr.SetErr(err)
 		mgr.AppendOp(sdkrequest.GeneratorOpcode{
 			ID:   hashedID,
 			Op:   enums.OpcodeStepError,
@@ -128,12 +91,6 @@ func Run[T any](
 				Data:    marshalled,
 			},
 		})
-		mgr.SetErr(err)
-
-		// Check step mode for error handling
-		if mgr.StepMode() == sdkrequest.StepModeReturn {
-			panic(ControlHijack{})
-		}
 
 		// API functions: return the error without panic
 		return result, err
@@ -143,6 +100,9 @@ func Run[T any](
 	if err != nil {
 		mgr.SetErr(fmt.Errorf("unable to marshal run respone for '%s': %w", id, err))
 	}
+
+	// Depending on the manager's step mode, this will either return control to the handler
+	// to prevent function execution or checkpoint the step immediately.
 	mgr.AppendOp(sdkrequest.GeneratorOpcode{
 		ID:   hashedID,
 		Op:   enums.OpcodeStepRun,
@@ -150,12 +110,53 @@ func Run[T any](
 		Data: byt,
 	})
 
-	// Check step mode to determine execution flow
-	if mgr.StepMode() == sdkrequest.StepModeReturn {
-		// Async functions: return control to executor after step
-		panic(ControlHijack{})
+	return result, nil
+}
+
+func loadExistingStep[T any](
+	id string,
+	mgr sdkrequest.InvocationManager,
+	existing json.RawMessage,
+	f func(ctx context.Context) (T, error),
+) (T, error) {
+	// Create a new empty type T in v
+	ft := reflect.TypeOf(f)
+	v := reflect.New(ft.Out(0)).Interface()
+
+	// This step has already ran as we have state for it. Unmarshal the JSON into type T
+	unwrapped := response{}
+	if err := json.Unmarshal(existing, &unwrapped); err == nil {
+		// Check for step errors first.
+		if len(unwrapped.Error) > 0 {
+			err := errors.StepError{}
+			if err := json.Unmarshal(unwrapped.Error, &err); err != nil {
+				mgr.SetErr(fmt.Errorf("error unmarshalling error for step '%s': %w", id, err))
+				panic(sdkrequest.ControlHijack{})
+			}
+
+			// See if we have any data for multiple returns in the error type.
+			if err := json.Unmarshal(err.Data, v); err != nil {
+				mgr.SetErr(fmt.Errorf("error unmarshalling state for step '%s': %w", id, err))
+				panic(sdkrequest.ControlHijack{})
+			}
+
+			val, _ := reflect.ValueOf(v).Elem().Interface().(T)
+			return val, err
+		}
+		// If there's an error, assume that val is already of type T without wrapping
+		// in the 'data' object as per the SDK spec.  Here, if this succeeds we can be
+		// sure that we're wrapping the data in a compliant way.
+		if len(unwrapped.Data) > 0 {
+			existing = unwrapped.Data
+		}
 	}
 
-	// API functions: continue execution after checkpointing
-	return result, nil
+	// Grab the data as the step type.
+	if err := json.Unmarshal(existing, v); err != nil {
+		mgr.SetErr(fmt.Errorf("error unmarshalling state for step '%s': %w", id, err))
+		panic(sdkrequest.ControlHijack{})
+	}
+
+	val, _ := reflect.ValueOf(v).Elem().Interface().(T)
+	return val, nil
 }

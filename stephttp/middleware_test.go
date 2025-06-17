@@ -1,4 +1,4 @@
-package api
+package stephttp
 
 import (
 	"context"
@@ -35,7 +35,7 @@ func TestMiddleware_Handler_BasicFlow(t *testing.T) {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"result": result})
 	}
@@ -43,10 +43,10 @@ func TestMiddleware_Handler_BasicFlow(t *testing.T) {
 	// Create test request
 	req := httptest.NewRequest("POST", "/test", strings.NewReader(`{"test": "data"}`))
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	// Record response
 	rr := httptest.NewRecorder()
-	
+
 	// Execute
 	wrappedHandler := middleware.Handler(handler)
 	wrappedHandler(rr, req)
@@ -60,7 +60,7 @@ func TestMiddleware_Handler_BasicFlow(t *testing.T) {
 	if !mockAPIManager.runCreated {
 		t.Error("Expected CreateAPIRun to be called")
 	}
-	
+
 	if !mockAPIManager.resultStored {
 		t.Error("Expected StoreResult to be called")
 	}
@@ -204,9 +204,9 @@ func TestResponseWriter_DefaultStatusCode(t *testing.T) {
 
 func TestFlattenHeaders(t *testing.T) {
 	headers := http.Header{
-		"Content-Type":   []string{"application/json"},
-		"X-Custom":       []string{"value1", "value2"},
-		"Authorization":  []string{"Bearer token"},
+		"Content-Type":  []string{"application/json"},
+		"X-Custom":      []string{"value1", "value2"},
+		"Authorization": []string{"Bearer token"},
 	}
 
 	flattened := flattenHeaders(headers)
@@ -251,3 +251,4 @@ func (m *mockAPIManagerWithCapture) StoreResult(ctx context.Context, runID strin
 	}
 	return nil
 }
+

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngestgo/experimental"
@@ -15,14 +16,22 @@ import (
 	"github.com/inngest/inngestgo/internal/types"
 )
 
+type ControlHijack struct{}
+
 // StepMode defines how steps should be executed
 type StepMode int
 
 const (
 	// StepModeReturn returns control to executor after each step (async functions)
 	StepModeReturn StepMode = iota
-	// StepModeContinue continues execution after checkpointing (API functions)
-	StepModeContinue
+	// StepModeCheckpoint checkpoints each step via an API then continues execution after
+	// acknowledgement of the step data.
+	StepModeCheckpoint
+	// StepModeBackground continues execution, checkpointing in the background.  Note
+	// that this doesn't wait for checkpoints to finish before continuing, leading to
+	// potentially unsynced steps.  This is only intended for HTTP endpoints in which
+	// steps are treated as enhanced tracing spans.
+	StepModeBackground
 )
 
 type requestCtxKeyType struct{}
@@ -127,7 +136,6 @@ func (r *requestCtxManager) SigningKey() string {
 	return r.signingKey
 }
 
-
 func (r *requestCtxManager) SetRequest(req *Request) {
 	r.request = req
 }
@@ -154,9 +162,21 @@ func (r *requestCtxManager) AppendOp(op GeneratorOpcode) {
 		r.ops = append(r.ops, op)
 	}
 
-	// Auto-cancel for async functions (StepModeReturn) after appending an op
-	if r.StepMode() == StepModeReturn {
+	switch r.StepMode() {
+	case StepModeReturn:
+		// Auto-cancel for async functions (StepModeReturn) after appending an op
 		r.cancel()
+		// return control to executor after step
+		panic(ControlHijack{})
+
+	case StepModeBackground:
+		// Trigger checkpointing in the background.
+		// TODO: Goroutine checkpoint function in the background.  This should use the
+		// same checkpointing function in a goroutine, optionally with a delay by N milliseconds
+		// so that we can send one request with a batch of opcodes.
+
+	case StepModeCheckpoint:
+		// Block on checkpointing, only resuming the next step once checkpointing has finished.
 	}
 }
 
@@ -282,6 +302,15 @@ type GeneratorOpcode struct {
 	Error *UserError `json:"error"`
 	// SDK versions < 3.?.? don't respond with the display name.
 	DisplayName *string `json:"displayName"`
+	// Timing represents the start and end time for the opcode, in terms of processing.
+	Timing Interval `json:"timing"`
+}
+
+type Interval struct {
+	// Start represents the start of the interval
+	Start time.Time `json:"a"`
+	// end represents the end of the interval.
+	End time.Time `json:"b"`
 }
 
 // UserError is a reexport of inngest/state.UserError

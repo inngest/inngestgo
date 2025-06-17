@@ -1,20 +1,19 @@
-package api
+package stephttp
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"net/http"
 	"time"
 
+	"github.com/inngest/inngestgo/internal/event"
 	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
+	"github.com/oklog/ulid/v2"
 )
 
 // MiddlewareOpts contains configuration for the API middleware
 type MiddlewareOpts struct {
-	// BaseURL is the Inngest API base URL (e.g., "https://api.inngest.com")
-	BaseURL string
 	// SigningKey is the Inngest signing key for authentication
 	SigningKey string
 	// AppID is the application identifier
@@ -27,20 +26,48 @@ type MiddlewareOpts struct {
 type Middleware struct {
 	opts MiddlewareOpts
 	mw   *middleware.MiddlewareManager
+
+	maxRequestReadLimit int
+	baseURL             string
+}
+
+type MiddlewareOpt func(mw *Middleware)
+
+func WithRequestReadLimit(limit int) MiddlewareOpt {
+	return func(mw *Middleware) {
+		mw.maxRequestReadLimit = limit
+	}
+}
+
+func WithBaseURL(url string) MiddlewareOpt {
+	return func(mw *Middleware) {
+		mw.baseURL = url
+	}
+}
+
+func WithInngestMiddleware(mw func() middleware.Middleware) MiddlewareOpt {
+	return func(httpmw *Middleware) {
+		httpmw.mw.Add(mw)
+	}
 }
 
 // NewMiddleware creates a new API middleware instance
-func NewMiddleware(opts MiddlewareOpts) *Middleware {
-	apiManager := NewAPIManager(opts.BaseURL, opts.SigningKey)
+func NewMiddleware(opts MiddlewareOpts, optionalOpts ...MiddlewareOpt) *Middleware {
+	// apiManager := NewAPIManager(opts.BaseURL, opts.SigningKey)
 
 	// Create a middleware manager for step execution hooks
 	mw := middleware.New()
 
-	return &Middleware{
-		apiManager: apiManager,
-		opts:       opts,
-		mw:         mw,
+	http := &Middleware{
+		opts: opts,
+		mw:   mw,
 	}
+
+	for _, o := range optionalOpts {
+		o(http)
+	}
+
+	return http
 }
 
 // responseWriter captures the response for storing as the API result
@@ -71,51 +98,38 @@ func (rw *responseWriter) Write(data []byte) (int, error) {
 // Handler wraps an HTTP handler to provide Inngest step tooling
 func (m *Middleware) Handler(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		startTime := time.Now()
+		// TODO: Is this an incoming request with existing steps?
+		var runID *ulid.ULID
 
-		// Read request body for function input
-		var requestBody []byte
-		if r.Body != nil {
-			var err error
-			requestBody, err = io.ReadAll(r.Body)
-			if err != nil {
-				http.Error(w, "Failed to read request body", http.StatusInternalServerError)
-				return
+		if runID == nil {
+			startTime := time.Now()
+
+			// Read request body for function input
+			var requestBody []byte
+			if r.Body != nil {
+				var err error
+				requestBody, err = io.ReadAll(r.Body)
+				if err != nil {
+					http.Error(w, "Failed to read request body", http.StatusInternalServerError)
+					return
+				}
+				// Restore body for the handler
+				r.Body = io.NopCloser(bytes.NewReader(requestBody))
 			}
-			// Restore body for the handler
-			r.Body = io.NopCloser(bytes.NewReader(requestBody))
+
+			event := event.GenericEvent[apiEventData]{
+				Name: "inngest/api.request",
+				Data: apiEventData{
+					IP:      getClientIP(r),
+					Method:  r.Method,
+					Path:    r.URL.Path,
+					Headers: flattenHeaders(r.Header),
+				},
+			}
 		}
 
-		// Create metadata from request
-		metadata := map[string]interface{}{
-			"ip":         getClientIP(r),
-			"user_agent": r.Header.Get("User-Agent"),
-			"headers":    r.Header,
-		}
-
-		// Create API run in Inngest
-		runID, err := m.apiManager.CreateAPIRun(
-			r.Context(),
-			m.opts.Domain,
-			r.URL.Path,
-			r.Method,
-			requestBody,
-			metadata,
-		)
-		if err != nil {
-			// Log error but don't fail the request
-			// TODO: Add proper logging
-			runID = fmt.Sprintf("local-%d", time.Now().UnixNano())
-		}
-
-		// Create sync invocation manager
-		syncMgr := NewRequestManager(
-			runID,
-			m.apiManager,
-			m.opts.SigningKey,
-			m.mw,
-			nil, // No specific function for API handlers
-		)
+		// TODO Create a new function run in Inngest for this api request.
+		// TODO: Create sync invocation manager
 
 		// Set up context with managers
 		ctx := sdkrequest.SetManager(r.Context(), syncMgr)
@@ -137,16 +151,16 @@ func (m *Middleware) Handler(next http.HandlerFunc) http.HandlerFunc {
 			Duration:   duration,
 		}
 
-		if syncMgr.Err() != nil {
-			result.Error = syncMgr.Err().Error()
-		}
+		// if syncMgr.Err() != nil {
+		// 	result.Error = syncMgr.Err().Error()
+		// }
 
-		// Store result in background
-		_ = m.apiManager.StoreResult(r.Context(), runID, result)
+		// Finalize run and store the output via an API call
+		// _ = m.apiManager.StoreResult(r.Context(), runID, result)
 	}
 }
 
-// getClientIP extracts the client IP from the request
+// getClientIP extracts the client IP from the request.
 func getClientIP(r *http.Request) string {
 	// Check X-Forwarded-For header first
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
@@ -169,4 +183,17 @@ func flattenHeaders(headers http.Header) map[string]string {
 		}
 	}
 	return result
+}
+
+type apiEventData struct {
+	IP     string
+	Method string
+	Path   string
+	// Headers stores the request headers.
+	// TODO: This should have the authorization header removed.
+	Headers map[string]string
+	// ContentType represents the content type of the incoming request.
+	ContentType string
+	// Data represents the request body
+	Data []byte
 }

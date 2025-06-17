@@ -7,15 +7,14 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/inngest/inngestgo/api"
 	"github.com/inngest/inngestgo/step"
+	"github.com/inngest/inngestgo/stephttp"
 )
 
 func main() {
 	// Create Inngest API middleware
-	middleware := api.NewMiddleware(api.MiddlewareOpts{
-		BaseURL:    "https://api.inngest.com", // or your Inngest instance URL
-		SigningKey: "your-signing-key",        // TODO: Load from environment
+	middleware := stephttp.NewMiddleware(stephttp.MiddlewareOpts{
+		SigningKey: "your-signing-key", // TODO: Load from environment
 		AppID:      "my-api-app",
 		Domain:     "api.mycompany.com",
 	})
@@ -199,3 +198,4 @@ type Order struct {
 	Amount        int    `json:"amount"`
 	Status        string `json:"status"`
 }
+

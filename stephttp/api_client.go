@@ -1,4 +1,4 @@
-package api
+package stephttp
 
 import (
 	"bytes"
@@ -11,10 +11,10 @@ import (
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 )
 
-// APIManager handles API function runs and step checkpointing
-type APIManager interface {
+// syncRunAPI handles API function runs and step checkpointing
+type syncRunAPI interface {
 	// CreateAPIRun creates a new API run in Inngest cloud
-	CreateAPIRun(ctx context.Context, domain, endpoint, method string, input []byte, metadata map[string]interface{}) (string, error)
+	CreateAPIRun(ctx context.Context, domain, endpoint, method string, input []byte, metadata map[string]any) (string, error)
 	// CheckpointStep sends step data to Inngest in the background
 	CheckpointStep(ctx context.Context, runID string, step sdkrequest.GeneratorOpcode) error
 	// StoreResult stores the final API response as the function result
@@ -23,23 +23,31 @@ type APIManager interface {
 
 // APIResult represents the final result of an API function call
 type APIResult struct {
-	StatusCode int               `json:"status_code"`
-	Headers    map[string]string `json:"headers"`
-	Body       []byte            `json:"body,omitempty"`
-	Duration   time.Duration     `json:"duration"`
-	Error      string            `json:"error,omitempty"`
+	// StatusCode represents the status code for the API result
+	StatusCode int `json:"status_code"`
+	// Headers represents any response headers sent in the server response
+	Headers map[string]string `json:"headers"`
+	// Body represents the API response.  This may be nil by default.  It is only
+	// captured when you manually specify that you want to track the result.
+	Body []byte `json:"body,omitempty"`
+	// Duration represents the duration
+	Duration time.Duration `json:"duration"`
+	// Error represents any error from the API.  This is only for internal errors,
+	// eg. when a step permanently fails
+	Error string `json:"error,omitempty"`
 }
 
-// apiManager implements APIManager
-type apiManager struct {
+// syncClient implements the API interface
+type syncClient struct {
 	baseURL    string
 	signingKey string
 	client     *http.Client
 }
 
-// NewAPIManager creates a new API manager for handling API function runs
-func NewAPIManager(baseURL, signingKey string) APIManager {
-	return &apiManager{
+// NewAPIManager creates a new API manager for handling API function runs.  The base URL is
+// the URL endpoint for Inngest's API, eg "https://api.inngest.com".
+func NewAPIManager(baseURL, env, signingKey string) syncRunAPI {
+	return &syncClient{
 		baseURL:    baseURL,
 		signingKey: signingKey,
 		client: &http.Client{
@@ -50,11 +58,11 @@ func NewAPIManager(baseURL, signingKey string) APIManager {
 
 // CreateAPIRunRequest represents the request to create a new API run
 type CreateAPIRunRequest struct {
-	Domain   string                 `json:"domain"`
-	Endpoint string                 `json:"endpoint"`
-	Method   string                 `json:"method"`
-	Input    json.RawMessage        `json:"input"`
-	Metadata map[string]interface{} `json:"metadata"`
+	Domain   string          `json:"domain"`
+	Endpoint string          `json:"endpoint"`
+	Method   string          `json:"method"`
+	Input    json.RawMessage `json:"input"`
+	Metadata map[string]any  `json:"metadata"`
 }
 
 // CreateAPIRunResponse represents the response from creating an API run
@@ -62,7 +70,7 @@ type CreateAPIRunResponse struct {
 	RunID string `json:"run_id"`
 }
 
-func (m *apiManager) CreateAPIRun(ctx context.Context, domain, endpoint, method string, input []byte, metadata map[string]interface{}) (string, error) {
+func (m *syncClient) CreateAPIRun(ctx context.Context, domain, endpoint, method string, input []byte, metadata map[string]any) (string, error) {
 	req := CreateAPIRunRequest{
 		Domain:   domain,
 		Endpoint: endpoint,
@@ -108,7 +116,7 @@ type CheckpointStepRequest struct {
 	Step  sdkrequest.GeneratorOpcode `json:"step"`
 }
 
-func (m *apiManager) CheckpointStep(ctx context.Context, runID string, step sdkrequest.GeneratorOpcode) error {
+func (m *syncClient) CheckpointStep(ctx context.Context, runID string, step sdkrequest.GeneratorOpcode) error {
 	req := CheckpointStepRequest{
 		RunID: runID,
 		Step:  step,
@@ -152,7 +160,7 @@ type StoreResultRequest struct {
 	Result APIResult `json:"result"`
 }
 
-func (m *apiManager) StoreResult(ctx context.Context, runID string, result APIResult) error {
+func (m *syncClient) StoreResult(ctx context.Context, runID string, result APIResult) error {
 	req := StoreResultRequest{
 		RunID:  runID,
 		Result: result,

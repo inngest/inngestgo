@@ -1,4 +1,4 @@
-package api
+package stephttp
 
 import (
 	"context"
@@ -61,9 +61,8 @@ func TestAPIManager_CreateAPIRun(t *testing.T) {
 		"/users",
 		"POST",
 		[]byte(`{"user": "test"}`),
-		map[string]interface{}{"ip": "127.0.0.1"},
+		map[string]any{"ip": "127.0.0.1"},
 	)
-
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -132,7 +131,6 @@ func TestAPIManager_CheckpointStep(t *testing.T) {
 	}
 
 	err := manager.CheckpointStep(context.Background(), "run_123", step)
-
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}
@@ -184,7 +182,6 @@ func TestAPIManager_StoreResult(t *testing.T) {
 	}
 
 	err := manager.StoreResult(context.Background(), "run_123", result)
-
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}
@@ -252,7 +249,7 @@ func TestAPIResult_JSONSerialization(t *testing.T) {
 	}
 
 	if restored.Headers["Content-Type"] != result.Headers["Content-Type"] {
-		t.Errorf("Headers mismatch: expected %s, got %s", 
+		t.Errorf("Headers mismatch: expected %s, got %s",
 			result.Headers["Content-Type"], restored.Headers["Content-Type"])
 	}
 
