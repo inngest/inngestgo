@@ -38,7 +38,7 @@ github.com/hashicorp/errwrap
 # github.com/hashicorp/go-multierror v1.1.1
 ## explicit; go 1.13
 github.com/hashicorp/go-multierror
-# github.com/inngest/inngest v1.6.4-0.20250530181652-294d872f1ecb
+# github.com/inngest/inngest v1.8.2-0.20250623215333-d2cfeecbae74
 ## explicit; go 1.24
 github.com/inngest/inngest/pkg/connect/types
 github.com/inngest/inngest/pkg/connect/wsproto
