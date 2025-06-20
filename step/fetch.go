@@ -4,13 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngestgo/errors"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 )
 
+// FetchOpts configures the HTTP call made from Inngest.  Note that the HTTP call
+// respects all step limits:  the response will be capped at the maximum step size,
+// and the HTTP request will terminate after the maximum step timeout.
+//
+// These are currently 4MB and 2 hours respectively, but may change without SDK version
+// updates on the execution side.
 type FetchOpts struct {
 	// URL is the full endpoint that we're sending the request to.  This must
 	// always be provided by our SDKs.
@@ -25,12 +30,19 @@ type FetchOpts struct {
 	Method string `json:"method,omitempty"`
 }
 
+type FetchResponse[InputT any] struct {
+	Body       InputT            `json:"body"`
+	Headers    map[string]string `json:"headers"`
+	StatusCode int               `json:"status_code"`
+	URL        string            `json:"url"`
+}
+
 // Fetch offloads the request to Inngest and continues execution with the response when complete
 func Fetch[OutputT any](
 	ctx context.Context,
 	id string,
 	in FetchOpts,
-) (out OutputT, err error) {
+) (out FetchResponse[OutputT], err error) {
 	mgr := preflight(ctx)
 	op := mgr.NewOp(enums.OpcodeGateway, id, nil)
 	hashedID := op.MustHash()
@@ -38,6 +50,7 @@ func Fetch[OutputT any](
 	if val, ok := mgr.Step(ctx, op); ok {
 		// This step has already ran as we have state for it. Unmarshal the JSON into type T
 		unwrapped := response{}
+
 		if err := json.Unmarshal(val, &unwrapped); err == nil {
 			// Check for step errors first.
 			if len(unwrapped.Error) > 0 {
@@ -48,7 +61,7 @@ func Fetch[OutputT any](
 				}
 
 				// See if we have any data for multiple returns in the error type.
-				_ = json.Unmarshal(err.Data, out)
+				_ = json.Unmarshal(err.Data, &out)
 				return out, err
 			}
 			// If there's an error, assume that val is already of type T without wrapping
@@ -59,35 +72,8 @@ func Fetch[OutputT any](
 			}
 		}
 
-		// If we're not unmarshalling, return the raw data.  This uses some type foo to make
-		// things work correctly.
-		v := reflect.New(reflect.TypeOf(out)).Interface()
-		switch v.(type) {
-		case json.RawMessage:
-			val, _ := reflect.ValueOf(unwrapped.Data).Elem().Interface().(OutputT)
-			return val, nil
-		case []byte:
-			val, _ := reflect.ValueOf([]byte(unwrapped.Data)).Elem().Interface().(OutputT)
-			return val, nil
-		case string:
-			val, _ := reflect.ValueOf(string(unwrapped.Data)).Elem().Interface().(OutputT)
-			return val, nil
-		}
-
-		// Check to see if we were passed a pointer or not. If not, we must make this a pointer.
-		if reflect.TypeOf(out).Kind() != reflect.Ptr {
-			v := reflect.New(reflect.TypeOf(out)).Interface()
-			err := json.Unmarshal(val, v)
-			return reflect.ValueOf(v).Elem().Interface().(OutputT), err
-		}
-
-		// NOTE: API responses may change, so return both the val and the error.
-		v = reflect.New(reflect.TypeOf(out).Elem()).Interface()
-
-		err := json.Unmarshal(val, v)
-		res := reflect.ValueOf(v).Interface()
-		out, _ = res.(OutputT)
-
+		// NOTE: The executor ALWAYS embeds the actual FetchResponse in type Data.
+		err := json.Unmarshal(val, &out)
 		return out, err
 	}
 

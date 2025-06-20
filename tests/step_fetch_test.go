@@ -2,7 +2,6 @@ package tests
 
 import (
 	"context"
-	"fmt"
 	"sync/atomic"
 	"testing"
 
@@ -39,10 +38,12 @@ func TestStepFetch(t *testing.T) {
 					Method: "GET",
 				})
 				r.NoError(err)
-				fmt.Println(res)
+				r.EqualValues("https://example.com", res.URL)
+				r.EqualValues(200, res.StatusCode)
+				r.Contains(res.Body, "Example Domain")
 
 				runID.Store(input.InputCtx.RunID)
-				panic("oops")
+				return res.Body, nil
 			},
 		)
 		r.NoError(err)
@@ -54,9 +55,7 @@ func TestStepFetch(t *testing.T) {
 		_, err = c.Send(ctx, inngestgo.Event{Name: eventName})
 		r.NoError(err)
 
-		run := waitForRun(t, &runID, enums.RunStatusFailed.String())
-		output, ok := run.Output.(map[string]any)
-		r.True(ok)
-		r.Contains(output["message"], "function panicked: oops")
+		run := waitForRun(t, &runID, enums.RunStatusCompleted.String())
+		_ = run // dont actually need it.
 	})
 }
