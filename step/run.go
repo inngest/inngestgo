@@ -20,6 +20,8 @@ type RunOpts struct {
 	Name string
 }
 
+// response represents the basic response format for all steps.  if the step errored,
+// we expect to find the error in our Error field.
 type response struct {
 	Data  json.RawMessage `json:"data"`
 	Error json.RawMessage `json:"error"`
