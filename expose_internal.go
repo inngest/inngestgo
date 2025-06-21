@@ -78,7 +78,7 @@ type (
 	// deduplicating runs or enforcing exclusive execution.
 	//
 	// If a new run is triggered while another instance with the same key is active,
-	// it is skipped.
+	// it will either be skipped or replace the existing instance depending on the mode.
 	FnSingleton = fn.Singleton
 
 	// FnPriority allows you to dynamically execute some runs ahead or behind others based

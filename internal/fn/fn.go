@@ -306,7 +306,7 @@ func encodeJSONWithDuration(input any, fields ...string) (out []byte, err error)
 // deduplicating runs or enforcing exclusive execution.
 //
 // If a new run is triggered while another instance with the same key is active,
-// it will be skipped.
+// it will either be skipped or replace the existing instance depending on the mode.
 type Singleton struct {
 	// Key is an optional string used to scope the singleton based on event data.
 	// For example, to singleton incoming notifications per user, you could use
@@ -315,6 +315,6 @@ type Singleton struct {
 	Key *string `json:"key,omitempty"`
 
 	// Mode determines how to handle a new run when another singleton instance is already active.
-	// Use `skip` to skip the new run.
+	// Use `skip` to skip the new run, or `cancel` to stop the current instance and run the new one.
 	Mode enums.SingletonMode `json:"mode"`
 }
