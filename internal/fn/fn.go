@@ -148,7 +148,7 @@ type Cancel struct {
 	If      *string `json:"if,omitempty"`
 }
 
-// FnBatchEvents allows you run functions with a batch of events, instead of executing
+// EventBatchConfig allows you run functions with a batch of events, instead of executing
 // a new run for every event received.
 //
 // The MaxSize option configures how many events will be collected into a batch before
@@ -195,7 +195,7 @@ func (t Debounce) MarshalJSON() ([]byte, error) {
 	return encodeJSONWithDuration(t, "timeout", "period")
 }
 
-// FnThrottle represents concurrency over time.  This limits the maximum number of new
+// Throttle represents concurrency over time.  This limits the maximum number of new
 // function runs over time.  Any runs over the limit are enqueued for the future.
 //
 // Note that this does not limit the number of steps executing at once and only limits
@@ -301,7 +301,7 @@ func encodeJSONWithDuration(input any, fields ...string) (out []byte, err error)
 	return json.Marshal(val)
 }
 
-// FnSingleton configures a function to run as a singleton, ensuring that only one
+// Singleton configures a function to run as a singleton, ensuring that only one
 // instance of the function is active at a time for a given key. This is useful for
 // deduplicating runs or enforcing exclusive execution.
 //

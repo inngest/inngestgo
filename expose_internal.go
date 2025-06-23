@@ -17,26 +17,26 @@ type (
 	// concurrency, retry, and flow control configuration.
 	FunctionOpts = fn.FunctionOpts
 
-	// FnDebounce represents debounce configuration.
-	FnDebounce = fn.Debounce
+	// ConfigDebounce represents debounce configuration.
+	ConfigDebounce = fn.Debounce
 
-	// FnThrottle represents concurrency over time.  This limits the maximum number of new
+	// ConfigThrottle represents concurrency over time.  This limits the maximum number of new
 	// function runs over time.  Any runs over the limit are enqueued for the future.
 	//
 	// Note that this does not limit the number of steps executing at once and only limits
 	// how frequently runs can start.  To limit the number of steps executing at once, use
 	// concurrency limits.
-	FnThrottle = fn.Throttle
+	ConfigThrottle = fn.Throttle
 
-	// FnRateLimit rate limits a function to a maximum number of runs over a given period.
+	// ConfigRateLimit rate limits a function to a maximum number of runs over a given period.
 	// Any runs over the limit are ignored and are NOT enqueued for the future.
-	FnRateLimit = fn.RateLimit
+	ConfigRateLimit = fn.RateLimit
 
-	// FnTimeouts represents timeouts for the function. If any of the timeouts are hit, the function
+	// ConfigTimeouts represents timeouts for the function. If any of the timeouts are hit, the function
 	// will be marked as cancelled with a cancellation reason.
-	FnTimeouts = fn.Timeouts
+	ConfigTimeouts = fn.Timeouts
 
-	// FnConcurrency represents a single concurrency limit for a function.  Concurrency limits
+	// ConfigStepConcurrency represents a single concurrency limit for a function.  Concurrency limits
 	// the number of running steps for a given key at a time.  Other steps will be enqueued
 	// for the future and executed as soon as there's capacity.
 	//
@@ -52,14 +52,14 @@ type (
 	// 		event.data.account_id
 	//
 	// Concurrency is then limited for each unique account_id field in parent events.
-	FnConcurrency = fn.Concurrency
+	ConfigStepConcurrency = fn.Concurrency
 
-	// FnCancel represents a cancellation signal for a function.  When specified, this
+	// ConfigCancel represents a cancellation signal for a function.  When specified, this
 	// will set up pauses which automatically cancel the function based off of matching
 	// events and expressions.
-	FnCancel = fn.Cancel
+	ConfigCancel = fn.Cancel
 
-	// FnBatchEvents allows you run functions with a batch of events, instead of executing
+	// ConfigBatchEvents allows you run functions with a batch of events, instead of executing
 	// a new run for every event received.
 	//
 	// The MaxSize option configures how many events will be collected into a batch before
@@ -71,24 +71,24 @@ type (
 	//
 	// Inngest will execute your function as soon as MaxSize is reached or the Timeout is
 	// reached.
-	FnBatchEvents = fn.EventBatchConfig
+	ConfigBatchEvents = fn.EventBatchConfig
 
-	// FnSingleton configures a function to run as a singleton, ensuring that only one
+	// ConfigSingleton configures a function to run as a singleton, ensuring that only one
 	// instance of the function is active at a time for a given key. This is useful for
 	// deduplicating runs or enforcing exclusive execution.
 	//
 	// If a new run is triggered while another instance with the same key is active,
 	// it will either be skipped or replace the existing instance depending on the mode.
-	FnSingleton = fn.Singleton
+	ConfigSingleton = fn.Singleton
 
-	// FnPriority allows you to dynamically execute some runs ahead or behind others based
+	// ConfigPriority allows you to dynamically execute some runs ahead or behind others based
 	// on any data. This allows you to prioritize some jobs ahead of others without the need
 	// for a separate queue. Some use cases for priority include:
 	//
 	// - Giving higher priority based on a user's subscription level, for example, free vs. paid users.
 	// - Ensuring that critical work is executed before other work in the queue.
 	// - Prioritizing certain jobs during onboarding to give the user a better first-run experience.
-	FnPriority = fn.Priority
+	ConfigPriority = fn.Priority
 )
 
 type (
