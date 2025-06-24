@@ -23,8 +23,8 @@ type ServableFunction interface {
 
 	Config() FunctionOpts
 
-	// Trigger returns the event name or schedule that triggers the function.
-	Trigger() Trigger
+	// Trigger returns the event names or schedules that triggers the function.
+	Trigger() Triggerable
 
 	// ZeroEvent returns the zero event type to marshal the event into, given an
 	// event name.
@@ -90,11 +90,26 @@ func (f FunctionOpts) Validate() error {
 // such that we don't have a bunch of unnecessary vendor imports from using this
 // package.
 
+// Triggerable represents a single or multiple triggers for a function.
+type Triggerable interface {
+	Triggers() []Trigger
+}
+
+type MultipleTriggers []Trigger
+
+func (m MultipleTriggers) Triggers() []Trigger {
+	return m
+}
+
 // Trigger represents either an event trigger or a cron trigger.  Only one is valid;  when
 // defining a function within Cue we enforce that only an event or cron field can be specified.
 type Trigger struct {
 	*EventTrigger
 	*CronTrigger
+}
+
+func (t Trigger) Triggers() []Trigger {
+	return []Trigger{t}
 }
 
 // EventTrigger is a trigger which invokes the function each time a specific event is received.

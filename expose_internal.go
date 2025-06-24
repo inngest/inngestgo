@@ -13,6 +13,10 @@ type (
 	// Trigger represents a function trigger - either an EventTrigger or a CronTrigger
 	Trigger = fn.Trigger
 
+	// MultipleTriggers represents the configuration for a function that can be triggered
+	// by multiple triggers.
+	MultipleTriggers = fn.MultipleTriggers
+
 	// FunctionOpts represents the options available to configure functions.  This includes
 	// concurrency, retry, and flow control configuration.
 	FunctionOpts = fn.FunctionOpts

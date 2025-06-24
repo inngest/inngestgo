@@ -8,7 +8,7 @@ func GetFnSyncConfig(fn ServableFunction) *SyncConfig {
 	return &SyncConfig{
 		Name:        fn.Name(),
 		Slug:        fn.FullyQualifiedID(),
-		Triggers:    []Trigger{fn.Trigger()},
+		Triggers:    fn.Trigger().Triggers(),
 		Concurrency: config.Concurrency,
 		Priority:    config.Priority,
 		EventBatch:  config.BatchEvents,

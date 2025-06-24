@@ -53,7 +53,7 @@ func IntPtr(i int) *int { return &i }
 func CreateFunction[T any](
 	c Client,
 	fc FunctionOpts,
-	trigger fn.Trigger,
+	trigger fn.Triggerable,
 	f SDKFunction[T],
 ) (ServableFunction, error) {
 	// Validate that the input type is a concrete type, and not an interface.
@@ -122,7 +122,7 @@ type SDKFunction[T any] func(ctx context.Context, input Input[T]) (any, error)
 type servableFunc struct {
 	appID   string
 	fc      FunctionOpts
-	trigger fn.Trigger
+	trigger fn.Triggerable
 	f       any
 }
 
@@ -145,7 +145,7 @@ func (s servableFunc) Name() string {
 	return s.fc.Name
 }
 
-func (s servableFunc) Trigger() fn.Trigger {
+func (s servableFunc) Trigger() fn.Triggerable {
 	return s.trigger
 }
 
