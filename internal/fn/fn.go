@@ -23,8 +23,8 @@ type ServableFunction interface {
 
 	Config() FunctionOpts
 
-	// Trigger returns the event name or schedule that triggers the function.
-	Trigger() Trigger
+	// Trigger returns the event names or schedules that triggers the function.
+	Trigger() Triggerable
 
 	// ZeroEvent returns the zero event type to marshal the event into, given an
 	// event name.
@@ -90,11 +90,26 @@ func (f FunctionOpts) Validate() error {
 // such that we don't have a bunch of unnecessary vendor imports from using this
 // package.
 
+// Triggerable represents a single or multiple triggers for a function.
+type Triggerable interface {
+	Triggers() []Trigger
+}
+
+type MultipleTriggers []Trigger
+
+func (m MultipleTriggers) Triggers() []Trigger {
+	return m
+}
+
 // Trigger represents either an event trigger or a cron trigger.  Only one is valid;  when
 // defining a function within Cue we enforce that only an event or cron field can be specified.
 type Trigger struct {
 	*EventTrigger
 	*CronTrigger
+}
+
+func (t Trigger) Triggers() []Trigger {
+	return []Trigger{t}
 }
 
 // EventTrigger is a trigger which invokes the function each time a specific event is received.
@@ -148,7 +163,7 @@ type Cancel struct {
 	If      *string `json:"if,omitempty"`
 }
 
-// FnBatchEvents allows you run functions with a batch of events, instead of executing
+// EventBatchConfig allows you run functions with a batch of events, instead of executing
 // a new run for every event received.
 //
 // The MaxSize option configures how many events will be collected into a batch before
@@ -195,7 +210,7 @@ func (t Debounce) MarshalJSON() ([]byte, error) {
 	return encodeJSONWithDuration(t, "timeout", "period")
 }
 
-// FnThrottle represents concurrency over time.  This limits the maximum number of new
+// Throttle represents concurrency over time.  This limits the maximum number of new
 // function runs over time.  Any runs over the limit are enqueued for the future.
 //
 // Note that this does not limit the number of steps executing at once and only limits
@@ -301,7 +316,7 @@ func encodeJSONWithDuration(input any, fields ...string) (out []byte, err error)
 	return json.Marshal(val)
 }
 
-// FnSingleton configures a function to run as a singleton, ensuring that only one
+// Singleton configures a function to run as a singleton, ensuring that only one
 // instance of the function is active at a time for a given key. This is useful for
 // deduplicating runs or enforcing exclusive execution.
 //
