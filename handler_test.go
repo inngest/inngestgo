@@ -16,10 +16,8 @@ import (
 
 	"github.com/gowebpki/jcs"
 	"github.com/inngest/inngest/pkg/enums"
-	"github.com/inngest/inngest/pkg/execution/state"
-	"github.com/inngest/inngest/pkg/inngest"
-	"github.com/inngest/inngest/pkg/sdk"
 	"github.com/inngest/inngest/pkg/syscode"
+	ifn "github.com/inngest/inngestgo/internal/fn"
 	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/step"
@@ -40,8 +38,10 @@ type EventAData struct {
 	Bar string `json:"bar"`
 }
 
-type EventB = GenericEvent[map[string]any]
-type EventC = GenericEvent[map[string]any]
+type (
+	EventB = GenericEvent[map[string]any]
+	EventC = GenericEvent[map[string]any]
+)
 
 func TestRegister(t *testing.T) {
 	r := require.New(t)
@@ -73,7 +73,7 @@ func TestRegister(t *testing.T) {
 
 	_, err = CreateFunction(
 		c,
-		FunctionOpts{ID: "batch-func", BatchEvents: &inngest.EventBatchConfig{MaxSize: 20, Timeout: "10s"}},
+		FunctionOpts{ID: "batch-func", BatchEvents: &ifn.EventBatchConfig{MaxSize: 20, Timeout: 10 * time.Second}},
 		EventTrigger("test/batch.a", nil),
 		func(ctx context.Context, input Input[map[string]any]) (any, error) {
 			return nil, nil
@@ -139,7 +139,7 @@ func TestInvoke(t *testing.T) {
 		}
 		a, err := CreateFunction(
 			c,
-			FunctionOpts{ID: "my-func-name", BatchEvents: &inngest.EventBatchConfig{MaxSize: 5, Timeout: "10s"}},
+			FunctionOpts{ID: "my-func-name", BatchEvents: &ifn.EventBatchConfig{MaxSize: 5, Timeout: 10 * time.Second}},
 			EventTrigger("test/event.a", nil),
 			func(ctx context.Context, event Input[EventAData]) (any, error) {
 				require.EqualValues(t, event.Event, input)
@@ -368,7 +368,9 @@ func TestServe(t *testing.T) {
 		url := fmt.Sprintf("%s?%s", server.URL, queryParams.Encode())
 		resp := handlerPost(t, url, createRequest(t, event))
 
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 		require.Equal(t, int32(1), atomic.LoadInt32(&called), "http function was not called")
 
 		// Assert that the output is correct.
@@ -387,7 +389,9 @@ func TestServe(t *testing.T) {
 		resp := handlerPost(t, url, createRequest(t, event))
 
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 		require.Equal(t, 410, resp.StatusCode)
 	})
 }
@@ -444,18 +448,20 @@ func TestSteps(t *testing.T) {
 
 	t.Run("It invokes the first step and returns an opcode", func(t *testing.T) {
 		resp := handlerPost(t, url, createRequest(t, event))
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 
 		// This should return an opcode indicating that the first step ran as expected.
 		byt, _ := io.ReadAll(resp.Body)
 
 		var (
-			opcode state.GeneratorOpcode
+			opcode sdkrequest.GeneratorOpcode
 			stepA  map[string]any
 		)
 
 		t.Run("The first step.Run opcodes are correct", func(t *testing.T) {
-			opcodes := []state.GeneratorOpcode{}
+			opcodes := []sdkrequest.GeneratorOpcode{}
 			err := json.Unmarshal(byt, &opcodes)
 			require.NoError(t, err, string(byt))
 
@@ -484,10 +490,12 @@ func TestSteps(t *testing.T) {
 				opcode.ID: opcode.Data,
 			}
 			resp := handlerPost(t, url, req)
-			defer resp.Body.Close()
+			defer func() {
+				_ = resp.Body.Close()
+			}()
 
 			// The response should be a new opcode.
-			opcodes := []state.GeneratorOpcode{}
+			opcodes := []sdkrequest.GeneratorOpcode{}
 			err := json.NewDecoder(resp.Body).Decode(&opcodes)
 			require.NoError(t, err)
 
@@ -510,10 +518,8 @@ func TestSteps(t *testing.T) {
 				"b": "lol",
 				"a": stepA,
 			}, stepB)
-
 		})
 	})
-
 }
 
 func TestInspection(t *testing.T) {
@@ -837,10 +843,10 @@ func TestInBandSync(t *testing.T) {
 			inBandSynchronizeResponse{
 				AppID: c.AppID(),
 				Env:   toPtr("my-env"),
-				Functions: []sdk.SDKFunction{{
+				Functions: []ifn.SyncConfig{{
 					Name: "my-fn",
 					Slug: fmt.Sprintf("%s-my-fn", c.AppID()),
-					Steps: map[string]sdk.SDKStep{
+					Steps: map[string]ifn.SDKStep{
 						"step": {
 							ID:   "step",
 							Name: "my-fn",
@@ -849,7 +855,7 @@ func TestInBandSync(t *testing.T) {
 							},
 						},
 					},
-					Triggers: []inngest.Trigger{EventTrigger("my-event", nil)},
+					Triggers: []ifn.Trigger{EventTrigger("my-event", nil)},
 				}},
 				Inspection: map[string]any{
 					"api_origin":               "https://api.inngest.com",

@@ -20,7 +20,7 @@ func main() {
 	key := "signkey-test-12345678"
 	c1, err := inngestgo.NewClient(inngestgo.ClientOpts{
 		AppID:      "connect-app1",
-		Logger:     logger.StdlibLogger(ctx),
+		Logger:     logger.StdlibLogger(ctx).SLog(),
 		SigningKey: &key,
 		AppVersion: nil,
 		Dev:        inngestgo.BoolPtr(true),
@@ -43,7 +43,7 @@ func main() {
 
 	c2, err := inngestgo.NewClient(inngestgo.ClientOpts{
 		AppID:      "connect-app2",
-		Logger:     logger.StdlibLogger(ctx),
+		Logger:     logger.StdlibLogger(ctx).SLog(),
 		SigningKey: &key,
 		AppVersion: nil,
 		Dev:        inngestgo.BoolPtr(true),

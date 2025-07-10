@@ -1,3 +1,3 @@
 package inngestgo
 
-const SDKVersion = "0.11.3"
+const SDKVersion = "0.13.0"

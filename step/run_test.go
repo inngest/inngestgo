@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/inngest/inngest/pkg/enums"
-	"github.com/inngest/inngest/pkg/execution/state"
 	"github.com/inngest/inngestgo/internal"
 	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
@@ -215,7 +214,7 @@ func TestStep(t *testing.T) {
 
 			require.NotEmpty(t, mgr.Ops())
 			require.Equal(t, 1, len(mgr.Ops()))
-			require.Equal(t, []state.GeneratorOpcode{{
+			require.Equal(t, []sdkrequest.GeneratorOpcode{{
 				ID:   op.MustHash(),
 				Op:   enums.OpcodeStepRun,
 				Name: name,
