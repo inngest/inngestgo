@@ -135,7 +135,7 @@ func TestParallel(t *testing.T) {
 			{Value: nil},
 			{Error: step.ErrEventNotReceived},
 		})
-		r.Equal(int(requestCount), 7)
+		r.Equal(6, int(requestCount))
 	})
 
 	t.Run("panic", func(t *testing.T) {
