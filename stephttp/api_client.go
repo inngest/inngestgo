@@ -5,19 +5,41 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/inngest/inngestgo"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/oklog/ulid/v2"
 )
 
+// CheckpointRun represents the response payload for a successful run creation,
+// and is used to resume any checkpointed run (async or sync).
+type CheckpointRun struct {
+	// FnID represents the ID of the function that the checkpoint run relates to.
+	// This is required to be passed back in future step and response checkpoint calls
+	// for proper tracking.
+	FnID uuid.UUID `json:"fn_id"`
+	// AppID represents the ID of the app that the checkpoint run relates to.
+	// This is required to be passed back in future step and response checkpoint calls
+	// for proper tracking.
+	AppID uuid.UUID `json:"app_id"`
+	// RunID is the function run ID created for this execution.
+	RunID ulid.ULID `json:"run_id"`
+
+	// Stack is the current stack, used when resuming requests.
+	Stack []string
+	// Signature is the signature used when resuming requests.
+	Signature string
+}
+
 // checkpointAPI handles API function runs and step checkpointing
 type checkpointAPI interface {
-	CheckpointNewRun(ctx context.Context, runID ulid.ULID, input NewAPIRunData) error
-	CheckpointSteps(ctx context.Context, runID ulid.ULID, steps []sdkrequest.GeneratorOpcode) error
-	CheckpointResponse(ctx context.Context, runID ulid.ULID, result APIResult) error
+	CheckpointNewRun(ctx context.Context, runID ulid.ULID, input NewAPIRunData) (*CheckpointRun, error)
+	CheckpointSteps(ctx context.Context, run CheckpointRun, steps []sdkrequest.GeneratorOpcode) error
+	CheckpointResponse(ctx context.Context, run CheckpointRun, result APIResult) error
 }
 
 // NewAPIRunRequest represents the entire request payload used to create new
@@ -100,7 +122,7 @@ func NewAPIClient(baseURL, signingKey string) *APIClient {
 }
 
 // CheckpointNewRun creates a new API run checkpoint
-func (c *APIClient) CheckpointNewRun(ctx context.Context, runID ulid.ULID, input NewAPIRunData) error {
+func (c *APIClient) CheckpointNewRun(ctx context.Context, runID ulid.ULID, input NewAPIRunData) (*CheckpointRun, error) {
 	payload := CheckpointNewRunRequest{
 		RunID: runID,
 		Event: inngestgo.GenericEvent[NewAPIRunData]{
@@ -108,26 +130,36 @@ func (c *APIClient) CheckpointNewRun(ctx context.Context, runID ulid.ULID, input
 			Data: input,
 		},
 	}
-	return c.makeRequest(ctx, "POST", "/v1/http/runs", payload)
+
+	resp := &CheckpointRun{}
+	err := c.makeRequest(ctx, "POST", "/v1/http/runs", payload, resp)
+	return resp, err
 }
 
 // CheckpointSteps saves step execution state
-func (c *APIClient) CheckpointSteps(ctx context.Context, runID ulid.ULID, steps []sdkrequest.GeneratorOpcode) error {
+func (c *APIClient) CheckpointSteps(ctx context.Context, run CheckpointRun, steps []sdkrequest.GeneratorOpcode) error {
 	payload := map[string]any{
-		"run_id": runID.String(),
+		"run_id": run.RunID,
+		"fn_id":  run.FnID,
+		"app_id": run.AppID,
 		"steps":  steps,
 	}
-
-	return c.makeRequest(ctx, "POST", fmt.Sprintf("/v1/http/runs/%s/steps", runID.String()), payload)
+	return c.makeRequest(ctx, "POST", fmt.Sprintf("/v1/http/runs/%s/steps", run.RunID.String()), payload, nil)
 }
 
 // CheckpointResponse saves the final API response
-func (c *APIClient) CheckpointResponse(ctx context.Context, runID ulid.ULID, result APIResult) error {
-	return c.makeRequest(ctx, "POST", fmt.Sprintf("/v1/http/runs/%s/response", runID.String()), result)
+func (c *APIClient) CheckpointResponse(ctx context.Context, run CheckpointRun, result APIResult) error {
+	payload := map[string]any{
+		"run_id": run.RunID,
+		"fn_id":  run.FnID,
+		"app_id": run.AppID,
+		"result": result,
+	}
+	return c.makeRequest(ctx, "POST", fmt.Sprintf("/v1/http/runs/%s/response", run.RunID.String()), payload, nil)
 }
 
 // makeRequest performs an authenticated HTTP request to the API
-func (c *APIClient) makeRequest(ctx context.Context, method, path string, payload any) error {
+func (c *APIClient) makeRequest(ctx context.Context, method, path string, payload any, response any) error {
 	var body bytes.Buffer
 	if payload != nil {
 		if err := json.NewEncoder(&body).Encode(payload); err != nil {
@@ -147,11 +179,28 @@ func (c *APIClient) makeRequest(ctx context.Context, method, path string, payloa
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
-	_ = resp.Body.Close()
 
+	byt, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("error reading response: %w", err)
+	}
+
+	if response != nil {
+		// The API response always has a wrapper.
+		wrapped := wrapper{Data: response}
+		if err := json.Unmarshal(byt, &wrapped); err != nil {
+			return fmt.Errorf("error unmarshalling response: %w", err)
+		}
+	}
+
+	_ = resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("API request failed with status %d", resp.StatusCode)
+		return fmt.Errorf("API request failed with status %d (%s)", resp.StatusCode, byt)
 	}
 
 	return nil
+}
+
+type wrapper struct {
+	Data any `json:"data"`
 }

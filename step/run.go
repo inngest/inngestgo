@@ -100,10 +100,7 @@ func Run[T any](
 				Message: err.Error(),
 				Data:    marshalled,
 			},
-			Timing: sdkrequest.Interval{
-				Start: pre,
-				End:   post,
-			},
+			Timing: sdkrequest.NewInterval(pre, post),
 		})
 
 		// API functions: return the error without panic
@@ -118,14 +115,11 @@ func Run[T any](
 	// Depending on the manager's step mode, this will either return control to the handler
 	// to prevent function execution or checkpoint the step immediately.
 	mgr.AppendOp(sdkrequest.GeneratorOpcode{
-		ID:   hashedID,
-		Op:   enums.OpcodeStepRun,
-		Name: id,
-		Data: byt,
-		Timing: sdkrequest.Interval{
-			Start: pre,
-			End:   post,
-		},
+		ID:     hashedID,
+		Op:     enums.OpcodeStepRun,
+		Name:   id,
+		Data:   byt,
+		Timing: sdkrequest.NewInterval(pre, post),
 	})
 
 	return result, nil

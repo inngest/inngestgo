@@ -10,12 +10,6 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-type existingRun struct {
-	RunID     ulid.ULID
-	Stack     []string
-	Signature string
-}
-
 // responseWriter captures the response for storing as the API result
 type responseWriter struct {
 	http.ResponseWriter
@@ -57,36 +51,36 @@ func readRequestBody(r *http.Request) ([]byte, error) {
 	return requestBody, nil
 }
 
-func (p *provider) getExistingRun(r *http.Request, created chan bool) (existingRun, bool) {
+func (p *provider) getExistingRun(r *http.Request, created chan CheckpointRun) (CheckpointRun, bool) {
 	// Check if this is a resume request with Inngest headers
 	runIDHeader := r.Header.Get(headerRunID)
 	stackHeader := r.Header.Get(headerStack)
 	signatureHeader := r.Header.Get(headerSignature)
 
 	if runIDHeader == "" || stackHeader == "" || signatureHeader == "" {
-		return existingRun{}, false
+		return CheckpointRun{}, false
 	}
 
 	// TODO: Validate signature
 
 	var err error
-	er := existingRun{
+	run := CheckpointRun{
 		Signature: signatureHeader,
 	}
-	if er.RunID, err = ulid.Parse(runIDHeader); err != nil {
-		return existingRun{}, false
+	if run.RunID, err = ulid.Parse(runIDHeader); err != nil {
+		return CheckpointRun{}, false
 	}
-	if err = json.Unmarshal([]byte(stackHeader), &er.Stack); err != nil {
-		return existingRun{}, false
+	if err = json.Unmarshal([]byte(stackHeader), &run.Stack); err != nil {
+		return CheckpointRun{}, false
 	}
 
 	// TODO: Use API to fetch run data, then resume.
 
 	// Ensure we signal that the run is created in a goroutine, such that we do not blcok
 	// checkpointing.
-	go func() { created <- true }()
+	go func() { created <- run }()
 
-	return er, true
+	return run, true
 }
 
 // createResumeManager creates a manager for resumed API requests

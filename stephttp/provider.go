@@ -1,6 +1,7 @@
 package stephttp
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"fmt"
@@ -119,7 +120,7 @@ func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
 
 			// createRunLock is a lock which can be awaited on whilst the run is checkpointed in
 			// the background
-			created = make(chan bool, 1)
+			created = make(chan CheckpointRun, 1)
 		)
 
 		mgr := sdkrequest.NewManager(
@@ -175,21 +176,21 @@ func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
 			// context is cancelled.  Stop this from breaking our API calls.
 			ctx = context.WithoutCancel(ctx)
 
-			if ok := <-created; !ok {
-				// TODO: Log that we cannot checkpoint steps.
+			run := <-created
+			if bytes.Equal(run.RunID[:], (ulid.ULID{}).Bytes()) {
 				p.logger.Error("cannot checkpoint steps to unsynced run", "run_id", runID)
 				return
 			}
 
 			// Checkpoint the steps AFTER the run has finished creating.
-			if err := p.api.CheckpointSteps(ctx, runID, mgr.Ops()); err != nil {
+			if err := p.api.CheckpointSteps(ctx, run, mgr.Ops()); err != nil {
 				p.logger.Error("error checkpointing steps",
 					"error", err,
 					"run_id", runID,
 				)
 			}
 
-			if err := p.api.CheckpointResponse(ctx, runID, result); err != nil {
+			if err := p.api.CheckpointResponse(ctx, run, result); err != nil {
 				p.logger.Error("error checkpointing result",
 					"error", err,
 					"run_id", runID,
@@ -264,7 +265,7 @@ func (p *provider) call(w http.ResponseWriter, r *http.Request, mgr sdkrequest.I
 
 // handleNewRun creates a new run with the given request information.  This automatically upserts
 // the requried apps and functions via the same API request whilst creating a new run.
-func (p *provider) handleNewRun(r *http.Request, runID ulid.ULID, created chan bool) {
+func (p *provider) handleNewRun(r *http.Request, runID ulid.ULID, created chan CheckpointRun) {
 	requestBody, err := readRequestBody(r)
 	if err != nil {
 		p.logger.Error("error reading request body creating new run", "error", err)
@@ -278,7 +279,7 @@ func (p *provider) handleNewRun(r *http.Request, runID ulid.ULID, created chan b
 		// TODO: Retry this up to 3 times.
 		// TODO: End to end encryption, if enabled.
 		if p.api == nil {
-			created <- false
+			created <- CheckpointRun{}
 			return
 		}
 
@@ -287,7 +288,7 @@ func (p *provider) handleNewRun(r *http.Request, runID ulid.ULID, created chan b
 			scheme = "https://"
 		}
 
-		err := p.api.CheckpointNewRun(r.Context(), runID, NewAPIRunData{
+		resp, err := p.api.CheckpointNewRun(r.Context(), runID, NewAPIRunData{
 			Domain:      scheme + r.Host,
 			Method:      r.Method,
 			Path:        r.URL.Path,
@@ -299,9 +300,9 @@ func (p *provider) handleNewRun(r *http.Request, runID ulid.ULID, created chan b
 		if err != nil {
 			p.logger.Error("error creating new api-based inngest run", "error", err)
 			// lol
-			created <- false
+			created <- CheckpointRun{}
 			return
 		}
-		created <- true
+		created <- *resp
 	}()
 }

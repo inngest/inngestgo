@@ -58,6 +58,7 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 	// Step 2: Validate user data
 	validation, err := step.Run(r.Context(), "validate-user", func(ctx context.Context) (*ValidationResult, error) {
 		// Simulate validation
+		time.Sleep(5 * time.Millisecond)
 		if req.Email == "" {
 			return nil, fmt.Errorf("email is required")
 		}
