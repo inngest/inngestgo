@@ -42,3 +42,12 @@ func isTrue(val string) bool {
 
 	return false
 }
+
+// APIServerURL returns the URL used to access the Inngest API.  This uses the INNGEST_DEV
+// environment variable, or defaults to 'https://api.inngest.com' (production) if unset.
+func APIServerURL() string {
+	if url := DevServerURL(); url != "" {
+		return url
+	}
+	return "https://api.inngest.com"
+}

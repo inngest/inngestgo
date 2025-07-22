@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/oklog/ulid/v2"
 )
@@ -56,7 +57,7 @@ func readRequestBody(r *http.Request) ([]byte, error) {
 	return requestBody, nil
 }
 
-func getExistingRun(r *http.Request) (existingRun, bool) {
+func (p *provider) getExistingRun(r *http.Request, created chan bool) (existingRun, bool) {
 	// Check if this is a resume request with Inngest headers
 	runIDHeader := r.Header.Get(headerRunID)
 	stackHeader := r.Header.Get(headerStack)
@@ -65,6 +66,8 @@ func getExistingRun(r *http.Request) (existingRun, bool) {
 	if runIDHeader == "" || stackHeader == "" || signatureHeader == "" {
 		return existingRun{}, false
 	}
+
+	// TODO: Validate signature
 
 	var err error
 	er := existingRun{
@@ -76,21 +79,37 @@ func getExistingRun(r *http.Request) (existingRun, bool) {
 	if err = json.Unmarshal([]byte(stackHeader), &er.Stack); err != nil {
 		return existingRun{}, false
 	}
+
+	// TODO: Use API to fetch run data, then resume.
+
+	// Ensure we signal that the run is created in a goroutine, such that we do not blcok
+	// checkpointing.
+	go func() { created <- true }()
+
 	return er, true
 }
 
 // createResumeManager creates a manager for resumed API requests
 // getClientIP extracts the client IP from the request.
 func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header first
+	// Check X-Forwarded-For header first (common in load balancers/proxies)
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return xff
+		// X-Forwarded-For can contain multiple IPs, take the first one
+		if idx := strings.Index(xff, ","); idx != -1 {
+			return strings.TrimSpace(xff[:idx])
+		}
+		return strings.TrimSpace(xff)
 	}
-	// Check X-Real-IP header
+
+	// Check X-Real-IP header (another common proxy header)
 	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
+		return strings.TrimSpace(xri)
 	}
-	// Fall back to RemoteAddr
+
+	// Fall back to RemoteAddr (may include port)
+	if idx := strings.LastIndex(r.RemoteAddr, ":"); idx != -1 {
+		return r.RemoteAddr[:idx]
+	}
 	return r.RemoteAddr
 }
 

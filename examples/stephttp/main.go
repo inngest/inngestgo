@@ -25,7 +25,7 @@ func main() {
 
 	fmt.Println("API server with Inngest step tooling running on :8080")
 	fmt.Println("Try: curl -X POST http://localhost:8080/users -d '{\"email\":\"user@example.com\"}'")
-	http.ListenAndServe(":8080", nil)
+	_ = http.ListenAndServe(":8080", nil)
 }
 
 // handleUsers demonstrates API function with step tooling
@@ -104,7 +104,7 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 	// Response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(CreateUserResponse{
+	_ = json.NewEncoder(w).Encode(CreateUserResponse{
 		User:    *user,
 		AuthID:  auth.UserID,
 		Valid:   validation.Valid,
@@ -149,7 +149,7 @@ func handleOrders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(order)
+	_ = json.NewEncoder(w).Encode(order)
 }
 
 // Request/Response types

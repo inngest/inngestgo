@@ -64,8 +64,6 @@ type InvocationManager interface {
 	SigningKey() string
 	// CallContext exposes the call context for middleware calls.
 	CallContext() experimental.CallContext
-	// SetCheckpointFunc sets the function used for background checkpointing
-	SetCheckpointFunc(fn func(ctx context.Context, runID string, steps []GeneratorOpcode) error)
 	// StepMode returns how steps should be executed in this context
 	StepMode() StepMode
 	// SetStepMode overrides the step mode.
@@ -88,24 +86,18 @@ func NewManager(
 	}
 
 	return &requestCtxManager{
-		fn:             fn,
-		cancel:         cancel,
-		request:        request,
-		indexes:        map[string]int{},
-		l:              &sync.RWMutex{},
-		signingKey:     signingKey,
-		seen:           map[string]struct{}{},
-		seenLock:       &sync.RWMutex{},
-		unseen:         &unseen,
-		mw:             mw,
-		mode:           mode,
-		checkpointFunc: nil,
+		fn:         fn,
+		cancel:     cancel,
+		request:    request,
+		indexes:    map[string]int{},
+		l:          &sync.RWMutex{},
+		signingKey: signingKey,
+		seen:       map[string]struct{}{},
+		seenLock:   &sync.RWMutex{},
+		unseen:     &unseen,
+		mw:         mw,
+		mode:       mode,
 	}
-}
-
-// SetCheckpointFunc sets the function used for background checkpointing
-func (r *requestCtxManager) SetCheckpointFunc(fn func(ctx context.Context, runID string, steps []GeneratorOpcode) error) {
-	r.checkpointFunc = fn
 }
 
 func SetManager(ctx context.Context, r InvocationManager) context.Context {
@@ -144,9 +136,6 @@ type requestCtxManager struct {
 	unseen *types.Set[string]
 
 	mw *middleware.MiddlewareManager
-
-	// checkpointFunc is called for background checkpointing in StepModeBackground
-	checkpointFunc func(ctx context.Context, runID string, steps []GeneratorOpcode) error
 }
 
 func (r *requestCtxManager) SigningKey() string {

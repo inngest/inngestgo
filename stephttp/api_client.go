@@ -15,7 +15,7 @@ import (
 
 // checkpointAPI handles API function runs and step checkpointing
 type checkpointAPI interface {
-	CheckpointNewRun(ctx context.Context, input NewAPIRunData) error
+	CheckpointNewRun(ctx context.Context, runID ulid.ULID, input NewAPIRunData) error
 	CheckpointSteps(ctx context.Context, runID ulid.ULID, steps []sdkrequest.GeneratorOpcode) error
 	CheckpointResponse(ctx context.Context, runID ulid.ULID, result APIResult) error
 }
@@ -23,9 +23,9 @@ type checkpointAPI interface {
 // NewAPIRunRequest represents the entire request payload used to create new
 // API-based runs.
 type CheckpointNewRunRequest struct {
-	// Seed allows us to construct a deterministic run ID from this data and the
-	// event TS.
-	Seed string `json:"seed"`
+	// RunID represents the run ID for this request.  This is generated on the
+	// client, and embeds the timestamp that the request started
+	RunID ulid.ULID `json:"run_id"`
 
 	// Idempotency allows the customization of an idempotency key, allowing us to
 	// handle API idempotency using Inngest.
@@ -64,7 +64,7 @@ type NewAPIRunData struct {
 	//
 	// NOTE: This is optional;  we do not require that users store the body for
 	// every request, as this may contain data that users choose not to log.
-	Body json.RawMessage `json:"body"`
+	Body []byte `json:"body"`
 }
 
 // APIResult represents the final result of an API function call
@@ -91,8 +91,7 @@ type APIClient struct {
 }
 
 // NewAPIClient creates a new API client with the given domain and signing key
-func NewAPIClient(domain, signingKey string) *APIClient {
-	baseURL := fmt.Sprintf("https://%s", domain)
+func NewAPIClient(baseURL, signingKey string) *APIClient {
 	return &APIClient{
 		baseURL:    baseURL,
 		signingKey: signingKey,
@@ -101,34 +100,34 @@ func NewAPIClient(domain, signingKey string) *APIClient {
 }
 
 // CheckpointNewRun creates a new API run checkpoint
-func (c *APIClient) CheckpointNewRun(ctx context.Context, input NewAPIRunData) error {
+func (c *APIClient) CheckpointNewRun(ctx context.Context, runID ulid.ULID, input NewAPIRunData) error {
 	payload := CheckpointNewRunRequest{
+		RunID: runID,
 		Event: inngestgo.GenericEvent[NewAPIRunData]{
-			Name: "api/run.created",
+			Name: "http/run.started",
 			Data: input,
 		},
 	}
-
-	return c.makeRequest(ctx, "POST", "/v1/runs", payload)
+	return c.makeRequest(ctx, "POST", "/v1/http/runs", payload)
 }
 
 // CheckpointSteps saves step execution state
 func (c *APIClient) CheckpointSteps(ctx context.Context, runID ulid.ULID, steps []sdkrequest.GeneratorOpcode) error {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"run_id": runID.String(),
 		"steps":  steps,
 	}
 
-	return c.makeRequest(ctx, "POST", fmt.Sprintf("/v1/runs/%s/steps", runID.String()), payload)
+	return c.makeRequest(ctx, "POST", fmt.Sprintf("/v1/http/runs/%s/steps", runID.String()), payload)
 }
 
 // CheckpointResponse saves the final API response
 func (c *APIClient) CheckpointResponse(ctx context.Context, runID ulid.ULID, result APIResult) error {
-	return c.makeRequest(ctx, "POST", fmt.Sprintf("/v1/runs/%s/response", runID.String()), result)
+	return c.makeRequest(ctx, "POST", fmt.Sprintf("/v1/http/runs/%s/response", runID.String()), result)
 }
 
 // makeRequest performs an authenticated HTTP request to the API
-func (c *APIClient) makeRequest(ctx context.Context, method, path string, payload interface{}) error {
+func (c *APIClient) makeRequest(ctx context.Context, method, path string, payload any) error {
 	var body bytes.Buffer
 	if payload != nil {
 		if err := json.NewEncoder(&body).Encode(payload); err != nil {
@@ -148,7 +147,7 @@ func (c *APIClient) makeRequest(ctx context.Context, method, path string, payloa
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("API request failed with status %d", resp.StatusCode)
