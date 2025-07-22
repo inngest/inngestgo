@@ -79,7 +79,7 @@ func WaitForSignal[T any](ctx context.Context, stepID string, opts WaitForSignal
 		}
 		if err := json.Unmarshal(val, &output); err != nil {
 			mgr.SetErr(fmt.Errorf("error unmarshalling wait for signal value in '%s': %w", opts.Signal, err))
-			panic(ControlHijack{})
+			panic(sdkrequest.ControlHijack{})
 		}
 		return output.Data, nil
 	}
@@ -87,7 +87,7 @@ func WaitForSignal[T any](ctx context.Context, stepID string, opts WaitForSignal
 	if targetID != nil && *targetID != hashedID {
 		// Don't report this step since targeting is happening and it isn't
 		// targeted
-		panic(ControlHijack{})
+		panic(sdkrequest.ControlHijack{})
 	}
 
 	plannedOp := sdkrequest.GeneratorOpcode{
@@ -99,5 +99,5 @@ func WaitForSignal[T any](ctx context.Context, stepID string, opts WaitForSignal
 	}
 	plannedOp.SetParallelMode(parallelMode(ctx))
 	mgr.AppendOp(plannedOp)
-	panic(ControlHijack{})
+	panic(sdkrequest.ControlHijack{})
 }

@@ -1,0 +1,158 @@
+package stephttp
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/inngest/inngestgo"
+	"github.com/inngest/inngestgo/internal/sdkrequest"
+	"github.com/oklog/ulid/v2"
+)
+
+// checkpointAPI handles API function runs and step checkpointing
+type checkpointAPI interface {
+	CheckpointNewRun(ctx context.Context, input NewAPIRunData) error
+	CheckpointSteps(ctx context.Context, runID ulid.ULID, steps []sdkrequest.GeneratorOpcode) error
+	CheckpointResponse(ctx context.Context, runID ulid.ULID, result APIResult) error
+}
+
+// NewAPIRunRequest represents the entire request payload used to create new
+// API-based runs.
+type CheckpointNewRunRequest struct {
+	// Seed allows us to construct a deterministic run ID from this data and the
+	// event TS.
+	Seed string `json:"seed"`
+
+	// Idempotency allows the customization of an idempotency key, allowing us to
+	// handle API idempotency using Inngest.
+	Idempotency string `json:"idempotency"`
+
+	// Event embeds the key request information which is used as the triggering
+	// event for API-based runs.
+	Event inngestgo.GenericEvent[NewAPIRunData] `json:"event"`
+}
+
+// NewAPIRunData represents event data stored and used to create new API-based
+// runs.
+type NewAPIRunData struct {
+	// Domain is the domain that served the incoming request.
+	Domain string `json:"domain"`
+	// Method is the incoming request method.  This is used for RESTful
+	// API endpoints.
+	Method string `json:"method"`
+	// Path is the path for the incoming request.
+	Path string `json:"path"` // request path
+	// Fn is the optional function slug.  If not present, this is created
+	// using a combination of the method and the path: "POST /v1/runs"
+	Fn string `json:"fn"`
+
+	// IP is the IP that created the request.
+	IP string `json:"ip"` // incoming IP
+	// ContentType is the content type for the request.
+	ContentType string `json:"content_type"`
+	// QueryParams are the query parameters for the request, as a single string
+	// without the leading "?".
+	//
+	// NOTE: This is optional;  we do not require that users store the query params
+	// for every request, as this may contain data that users choose not to log.
+	QueryParams string `json:"query_params"`
+	// Body is the incoming request body.
+	//
+	// NOTE: This is optional;  we do not require that users store the body for
+	// every request, as this may contain data that users choose not to log.
+	Body json.RawMessage `json:"body"`
+}
+
+// APIResult represents the final result of an API function call
+type APIResult struct {
+	// StatusCode represents the status code for the API result
+	StatusCode int `json:"status_code"`
+	// Headers represents any response headers sent in the server response
+	Headers map[string]string `json:"headers"`
+	// Body represents the API response.  This may be nil by default.  It is only
+	// captured when you manually specify that you want to track the result.
+	Body []byte `json:"body,omitempty"`
+	// Duration represents the duration
+	Duration time.Duration `json:"duration"`
+	// Error represents any error from the API.  This is only for internal errors,
+	// eg. when a step permanently fails
+	Error string `json:"error,omitempty"`
+}
+
+// APIClient handles HTTP requests to the checkpoint API
+type APIClient struct {
+	baseURL    string
+	signingKey string
+	httpClient *http.Client
+}
+
+// NewAPIClient creates a new API client with the given domain and signing key
+func NewAPIClient(domain, signingKey string) *APIClient {
+	baseURL := fmt.Sprintf("https://%s", domain)
+	return &APIClient{
+		baseURL:    baseURL,
+		signingKey: signingKey,
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+// CheckpointNewRun creates a new API run checkpoint
+func (c *APIClient) CheckpointNewRun(ctx context.Context, input NewAPIRunData) error {
+	payload := CheckpointNewRunRequest{
+		Event: inngestgo.GenericEvent[NewAPIRunData]{
+			Name: "api/run.created",
+			Data: input,
+		},
+	}
+
+	return c.makeRequest(ctx, "POST", "/v1/runs", payload)
+}
+
+// CheckpointSteps saves step execution state
+func (c *APIClient) CheckpointSteps(ctx context.Context, runID ulid.ULID, steps []sdkrequest.GeneratorOpcode) error {
+	payload := map[string]interface{}{
+		"run_id": runID.String(),
+		"steps":  steps,
+	}
+
+	return c.makeRequest(ctx, "POST", fmt.Sprintf("/v1/runs/%s/steps", runID.String()), payload)
+}
+
+// CheckpointResponse saves the final API response
+func (c *APIClient) CheckpointResponse(ctx context.Context, runID ulid.ULID, result APIResult) error {
+	return c.makeRequest(ctx, "POST", fmt.Sprintf("/v1/runs/%s/response", runID.String()), result)
+}
+
+// makeRequest performs an authenticated HTTP request to the API
+func (c *APIClient) makeRequest(ctx context.Context, method, path string, payload interface{}) error {
+	var body bytes.Buffer
+	if payload != nil {
+		if err := json.NewEncoder(&body).Encode(payload); err != nil {
+			return fmt.Errorf("failed to encode request body: %w", err)
+		}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, &body)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.signingKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("API request failed with status %d", resp.StatusCode)
+	}
+
+	return nil
+}

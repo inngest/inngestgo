@@ -61,7 +61,7 @@ func WaitForEvent[T any](ctx context.Context, stepID string, opts WaitForEventOp
 		}
 		if err := json.Unmarshal(val, &output); err != nil {
 			mgr.SetErr(fmt.Errorf("error unmarshalling wait for event value in '%s': %w", opts.Event, err))
-			panic(ControlHijack{})
+			panic(sdkrequest.ControlHijack{})
 		}
 		return output, nil
 	}
@@ -69,7 +69,7 @@ func WaitForEvent[T any](ctx context.Context, stepID string, opts WaitForEventOp
 	if targetID != nil && *targetID != hashedID {
 		// Don't report this step since targeting is happening and it isn't
 		// targeted
-		panic(ControlHijack{})
+		panic(sdkrequest.ControlHijack{})
 	}
 
 	plannedOp := sdkrequest.GeneratorOpcode{
@@ -80,5 +80,6 @@ func WaitForEvent[T any](ctx context.Context, stepID string, opts WaitForEventOp
 	}
 	plannedOp.SetParallelMode(parallelMode(ctx))
 	mgr.AppendOp(plannedOp)
-	panic(ControlHijack{})
+	// This cannot resolve.  It must always hand control back to the handler.
+	panic(sdkrequest.ControlHijack{})
 }

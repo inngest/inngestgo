@@ -736,7 +736,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	if !ok {
 		return errors.New("invalid client type")
 	}
-	mw := middleware.NewMiddlewareManager().Add(cImpl.Middleware...)
+	mw := middleware.New().Add(cImpl.Middleware...)
 
 	var sig string
 	defer func() {
@@ -1180,7 +1180,7 @@ func invoke(
 	// within a step.  This allows us to prevent any execution of future tools after a
 	// tool has run.
 	fCtx, cancel := context.WithCancel(
-		internal.ContextWithMiddlewareManager(
+		internal.ContextWithMiddleware(
 			internal.ContextWithEventSender(ctx, client),
 			mw,
 		),
@@ -1190,7 +1190,7 @@ func invoke(
 	}
 
 	// This must be a pointer so that it can be mutated from within function tools.
-	mgr := sdkrequest.NewManager(sf, mw, cancel, input, signingKey)
+	mgr := sdkrequest.NewManager(sf, mw, cancel, input, signingKey, sdkrequest.StepModeReturn)
 	fCtx = sdkrequest.SetManager(fCtx, mgr)
 
 	// Create a new Input type.  We don't know ahead of time the type signature as
@@ -1229,13 +1229,13 @@ func invoke(
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
-				callCtx := mgr.MiddlewareCallCtx()
+				callCtx := mgr.CallContext()
 
 				// Was this us attepmting to prevent functions from continuing, using
 				// panic as a crappy control flow because go doesn't have generators?
 				//
 				// XXX: I'm not very happy with using this;  it is dirty
-				if _, ok := r.(step.ControlHijack); ok {
+				if _, ok := r.(sdkrequest.ControlHijack); ok {
 					// Step attempt ended (completed or errored).
 					//
 					// Note that if this is a step.Run, middleware has already been invoked
@@ -1263,7 +1263,7 @@ func invoke(
 				var evt event.Event
 				if err := json.Unmarshal(rawjson, &evt); err != nil {
 					mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
-					panic(step.ControlHijack{})
+					panic(sdkrequest.ControlHijack{})
 				}
 				evts[i] = &evt
 			}
@@ -1274,7 +1274,7 @@ func invoke(
 			mwInput.WithContext(fCtx)
 
 			// Run hook.
-			mw.TransformInput(ctx, mgr.MiddlewareCallCtx(), mwInput)
+			mw.TransformInput(ctx, mgr.CallContext(), mwInput)
 
 			// Update the context in case the hook changed it.
 			fCtx = mwInput.Context()
@@ -1292,7 +1292,7 @@ func invoke(
 		if len(input.Steps) == 0 {
 			// There are no memoized steps, so the start of the function is "new
 			// code".
-			mw.BeforeExecution(fCtx, mgr.MiddlewareCallCtx())
+			mw.BeforeExecution(fCtx, mgr.CallContext())
 		}
 
 		// Call the defined function with the input data.
@@ -1311,7 +1311,7 @@ func invoke(
 			fnError = res[1].Interface().(error)
 		}
 
-		mw.AfterExecution(ctx, mgr.MiddlewareCallCtx(), fnResponse, fnError)
+		mw.AfterExecution(ctx, mgr.CallContext(), fnResponse, fnError)
 
 		{
 			// Transform output via MW
@@ -1319,7 +1319,7 @@ func invoke(
 				Result: fnResponse,
 				Error:  fnError,
 			}
-			mw.TransformOutput(ctx, mgr.MiddlewareCallCtx(), out)
+			mw.TransformOutput(ctx, mgr.CallContext(), out)
 			// And update the vars
 			fnResponse = out.Result
 			fnError = out.Error
@@ -1356,7 +1356,7 @@ func updateInput(
 			byt, err := json.Marshal(event)
 			if err != nil {
 				mgr.SetErr(fmt.Errorf("error marshalling event for function: %w", err))
-				panic(step.ControlHijack{})
+				panic(sdkrequest.ControlHijack{})
 			}
 
 			// The same type as the event.
@@ -1364,7 +1364,7 @@ func updateInput(
 
 			if err := json.Unmarshal(byt, newEvent); err != nil {
 				mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
-				panic(step.ControlHijack{})
+				panic(sdkrequest.ControlHijack{})
 			}
 			fnInput.FieldByName("Event").Set(reflect.ValueOf(newEvent).Elem())
 		}
@@ -1379,14 +1379,14 @@ func updateInput(
 				byt, err := json.Marshal(evt)
 				if err != nil {
 					mgr.SetErr(fmt.Errorf("error marshalling event for function: %w", err))
-					panic(step.ControlHijack{})
+					panic(sdkrequest.ControlHijack{})
 				}
 
 				// The same type as the event.
 				newEvent := reflect.New(eventType).Interface()
 				if err := json.Unmarshal(byt, newEvent); err != nil {
 					mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
-					panic(step.ControlHijack{})
+					panic(sdkrequest.ControlHijack{})
 				}
 
 				newEvents = reflect.Append(newEvents, reflect.ValueOf(newEvent).Elem())
@@ -1399,13 +1399,13 @@ func updateInput(
 			byt, err := json.Marshal(event)
 			if err != nil {
 				mgr.SetErr(fmt.Errorf("error marshalling event for function: %w", err))
-				panic(step.ControlHijack{})
+				panic(sdkrequest.ControlHijack{})
 			}
 
 			newEvent := map[string]any{}
 			if err := json.Unmarshal(byt, &newEvent); err != nil {
 				mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
-				panic(step.ControlHijack{})
+				panic(sdkrequest.ControlHijack{})
 			}
 			fnInput.FieldByName("Event").Set(reflect.ValueOf(newEvent))
 		}
@@ -1417,13 +1417,13 @@ func updateInput(
 				byt, err := json.Marshal(evt)
 				if err != nil {
 					mgr.SetErr(fmt.Errorf("error marshalling event for function: %w", err))
-					panic(step.ControlHijack{})
+					panic(sdkrequest.ControlHijack{})
 				}
 
 				var newEvent map[string]any
 				if err := json.Unmarshal(byt, &newEvent); err != nil {
 					mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
-					panic(step.ControlHijack{})
+					panic(sdkrequest.ControlHijack{})
 				}
 
 				newEvents[i] = newEvent

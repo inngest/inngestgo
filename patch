@@ -1,0 +1,1794 @@
+diff --git a/connect.go b/connect.go
+index 64524b4..fe8de4e 100644
+--- a/connect.go
++++ b/connect.go
+@@ -151,7 +151,7 @@ func (h *handler) InvokeFunction(ctx context.Context, slug string, stepId *strin
+ 	if !ok {
+ 		return nil, nil, fmt.Errorf("invalid client")
+ 	}
+-	mw := middleware.NewMiddlewareManager().Add(cImpl.Middleware...)
++	mw := middleware.New().Add(cImpl.Middleware...)
+ 
+ 	// Invoke function, always complete regardless of
+ 	resp, ops, err := invoke(
+diff --git a/examples/stephttp/main.go b/examples/stephttp/main.go
+new file mode 100644
+index 0000000..71ad4b7
+--- /dev/null
++++ b/examples/stephttp/main.go
+@@ -0,0 +1,200 @@
++package main
++
++import (
++	"context"
++	"encoding/json"
++	"fmt"
++	"net/http"
++	"time"
++
++	"github.com/inngest/inngestgo/step"
++	"github.com/inngest/inngestgo/stephttp"
++)
++
++func main() {
++	// Create Inngest API middleware
++	provider := stephttp.Setup(stephttp.SetupOpts{
++		SigningKey: "your-signing-key", // TODO: Load from environment
++		AppID:      "my-api-app",
++		Domain:     "api.mycompany.com",
++	})
++
++	// Create HTTP server with step tooling
++	http.HandleFunc("/users", provider.ServeHTTP(handleUsers))
++	http.HandleFunc("/orders", provider.ServeHTTP(handleOrders))
++
++	fmt.Println("API server with Inngest step tooling running on :8080")
++	fmt.Println("Try: curl -X POST http://localhost:8080/users -d '{\"email\":\"user@example.com\"}'")
++	http.ListenAndServe(":8080", nil)
++}
++
++// handleUsers demonstrates API function with step tooling
++func handleUsers(w http.ResponseWriter, r *http.Request) {
++	if r.Method != http.MethodPost {
++		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
++		return
++	}
++
++	var req CreateUserRequest
++	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
++		http.Error(w, "Invalid JSON", http.StatusBadRequest)
++		return
++	}
++
++	// Step 1: Authenticate (with full observability)
++	auth, err := step.Run(r.Context(), "authenticate", func(ctx context.Context) (*AuthResult, error) {
++		// Simulate auth check
++		time.Sleep(50 * time.Millisecond)
++		return &AuthResult{
++			UserID: "user_123",
++			Valid:  true,
++		}, nil
++	})
++	if err != nil {
++		http.Error(w, "Authentication failed", http.StatusUnauthorized)
++		return
++	}
++
++	// Step 2: Validate user data
++	validation, err := step.Run(r.Context(), "validate-user", func(ctx context.Context) (*ValidationResult, error) {
++		// Simulate validation
++		if req.Email == "" {
++			return nil, fmt.Errorf("email is required")
++		}
++		return &ValidationResult{
++			Valid:  true,
++			Errors: nil,
++		}, nil
++	})
++	if err != nil {
++		http.Error(w, fmt.Sprintf("Validation failed: %v", err), http.StatusBadRequest)
++		return
++	}
++
++	// Step 3: Create user in database
++	user, err := step.Run(r.Context(), "create-user", func(ctx context.Context) (*User, error) {
++		// Simulate database insert
++		time.Sleep(100 * time.Millisecond)
++		return &User{
++			ID:    "user_" + fmt.Sprintf("%d", time.Now().Unix()),
++			Email: req.Email,
++			Name:  req.Name,
++		}, nil
++	})
++	if err != nil {
++		http.Error(w, "Failed to create user", http.StatusInternalServerError)
++		return
++	}
++
++	// Step 4: Send welcome email (this could trigger background jobs)
++	_, err = step.Run(r.Context(), "send-welcome-email", func(ctx context.Context) (*EmailResult, error) {
++		// This step is fully traced and can trigger background events
++		// step.SendEvent() could be called here to trigger async workflows
++		time.Sleep(200 * time.Millisecond)
++		return &EmailResult{
++			Sent:      true,
++			MessageID: "msg_" + user.ID,
++		}, nil
++	})
++	if err != nil {
++		// Email failure doesn't fail the API - log it but continue
++		fmt.Printf("Warning: Failed to send welcome email: %v\n", err)
++	}
++
++	// Response
++	w.Header().Set("Content-Type", "application/json")
++	w.WriteHeader(http.StatusCreated)
++	json.NewEncoder(w).Encode(CreateUserResponse{
++		User:    *user,
++		AuthID:  auth.UserID,
++		Valid:   validation.Valid,
++		Message: "User created successfully",
++	})
++}
++
++// handleOrders demonstrates another API endpoint with step tooling
++func handleOrders(w http.ResponseWriter, r *http.Request) {
++	if r.Method != http.MethodPost {
++		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
++		return
++	}
++
++	// Step 1: Process payment
++	payment, err := step.Run(r.Context(), "process-payment", func(ctx context.Context) (*PaymentResult, error) {
++		// Simulate payment processing with retries built-in
++		time.Sleep(300 * time.Millisecond)
++		return &PaymentResult{
++			TransactionID: "txn_123",
++			Amount:        9999, // $99.99
++			Status:        "completed",
++		}, nil
++	})
++	if err != nil {
++		http.Error(w, "Payment failed", http.StatusPaymentRequired)
++		return
++	}
++
++	// Step 2: Create order
++	order, err := step.Run(r.Context(), "create-order", func(ctx context.Context) (*Order, error) {
++		return &Order{
++			ID:            "order_" + payment.TransactionID,
++			TransactionID: payment.TransactionID,
++			Amount:        payment.Amount,
++			Status:        "confirmed",
++		}, nil
++	})
++	if err != nil {
++		http.Error(w, "Order creation failed", http.StatusInternalServerError)
++		return
++	}
++
++	w.Header().Set("Content-Type", "application/json")
++	json.NewEncoder(w).Encode(order)
++}
++
++// Request/Response types
++type CreateUserRequest struct {
++	Email string `json:"email"`
++	Name  string `json:"name"`
++}
++
++type CreateUserResponse struct {
++	User    User   `json:"user"`
++	AuthID  string `json:"auth_id"`
++	Valid   bool   `json:"valid"`
++	Message string `json:"message"`
++}
++
++type AuthResult struct {
++	UserID string `json:"user_id"`
++	Valid  bool   `json:"valid"`
++}
++
++type ValidationResult struct {
++	Valid  bool     `json:"valid"`
++	Errors []string `json:"errors"`
++}
++
++type User struct {
++	ID    string `json:"id"`
++	Email string `json:"email"`
++	Name  string `json:"name"`
++}
++
++type EmailResult struct {
++	Sent      bool   `json:"sent"`
++	MessageID string `json:"message_id"`
++}
++
++type PaymentResult struct {
++	TransactionID string `json:"transaction_id"`
++	Amount        int    `json:"amount"`
++	Status        string `json:"status"`
++}
++
++type Order struct {
++	ID            string `json:"id"`
++	TransactionID string `json:"transaction_id"`
++	Amount        int    `json:"amount"`
++	Status        string `json:"status"`
++}
+diff --git a/group/group.go b/group/group.go
+index 10d0a49..3ff93fb 100644
+--- a/group/group.go
++++ b/group/group.go
+@@ -4,6 +4,7 @@ import (
+ 	"context"
+ 
+ 	"github.com/inngest/inngest/pkg/enums"
++	"github.com/inngest/inngestgo/internal/sdkrequest"
+ 	"github.com/inngest/inngestgo/step"
+ )
+ 
+@@ -56,7 +57,7 @@ func ParallelWithOpts(
+ 		go func(fn func(ctx context.Context) (any, error)) {
+ 			defer func() {
+ 				if r := recover(); r != nil {
+-					if _, ok := r.(step.ControlHijack); ok {
++					if _, ok := r.(sdkrequest.ControlHijack); ok {
+ 						isPlanned = true
+ 					} else {
+ 						unexpectedPanic = r
+@@ -77,7 +78,7 @@ func ParallelWithOpts(
+ 	}
+ 
+ 	if isPlanned {
+-		panic(step.ControlHijack{})
++		panic(sdkrequest.ControlHijack{})
+ 	}
+ 
+ 	return results
+diff --git a/handler.go b/handler.go
+index faec2d2..01dd823 100644
+--- a/handler.go
++++ b/handler.go
+@@ -736,7 +736,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
+ 	if !ok {
+ 		return errors.New("invalid client type")
+ 	}
+-	mw := middleware.NewMiddlewareManager().Add(cImpl.Middleware...)
++	mw := middleware.New().Add(cImpl.Middleware...)
+ 
+ 	var sig string
+ 	defer func() {
+@@ -1180,7 +1180,7 @@ func invoke(
+ 	// within a step.  This allows us to prevent any execution of future tools after a
+ 	// tool has run.
+ 	fCtx, cancel := context.WithCancel(
+-		internal.ContextWithMiddlewareManager(
++		internal.ContextWithMiddleware(
+ 			internal.ContextWithEventSender(ctx, client),
+ 			mw,
+ 		),
+@@ -1190,7 +1190,7 @@ func invoke(
+ 	}
+ 
+ 	// This must be a pointer so that it can be mutated from within function tools.
+-	mgr := sdkrequest.NewManager(sf, mw, cancel, input, signingKey)
++	mgr := sdkrequest.NewManager(sf, mw, cancel, input, signingKey, sdkrequest.StepModeReturn)
+ 	fCtx = sdkrequest.SetManager(fCtx, mgr)
+ 
+ 	// Create a new Input type.  We don't know ahead of time the type signature as
+@@ -1229,13 +1229,13 @@ func invoke(
+ 	func() {
+ 		defer func() {
+ 			if r := recover(); r != nil {
+-				callCtx := mgr.MiddlewareCallCtx()
++				callCtx := mgr.CallContext()
+ 
+ 				// Was this us attepmting to prevent functions from continuing, using
+ 				// panic as a crappy control flow because go doesn't have generators?
+ 				//
+ 				// XXX: I'm not very happy with using this;  it is dirty
+-				if _, ok := r.(step.ControlHijack); ok {
++				if _, ok := r.(sdkrequest.ControlHijack); ok {
+ 					// Step attempt ended (completed or errored).
+ 					//
+ 					// Note that if this is a step.Run, middleware has already been invoked
+@@ -1263,7 +1263,7 @@ func invoke(
+ 				var evt event.Event
+ 				if err := json.Unmarshal(rawjson, &evt); err != nil {
+ 					mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
+-					panic(step.ControlHijack{})
++					panic(sdkrequest.ControlHijack{})
+ 				}
+ 				evts[i] = &evt
+ 			}
+@@ -1274,7 +1274,7 @@ func invoke(
+ 			mwInput.WithContext(fCtx)
+ 
+ 			// Run hook.
+-			mw.TransformInput(ctx, mgr.MiddlewareCallCtx(), mwInput)
++			mw.TransformInput(ctx, mgr.CallContext(), mwInput)
+ 
+ 			// Update the context in case the hook changed it.
+ 			fCtx = mwInput.Context()
+@@ -1292,7 +1292,7 @@ func invoke(
+ 		if len(input.Steps) == 0 {
+ 			// There are no memoized steps, so the start of the function is "new
+ 			// code".
+-			mw.BeforeExecution(fCtx, mgr.MiddlewareCallCtx())
++			mw.BeforeExecution(fCtx, mgr.CallContext())
+ 		}
+ 
+ 		// Call the defined function with the input data.
+@@ -1311,7 +1311,7 @@ func invoke(
+ 			fnError = res[1].Interface().(error)
+ 		}
+ 
+-		mw.AfterExecution(ctx, mgr.MiddlewareCallCtx(), fnResponse, fnError)
++		mw.AfterExecution(ctx, mgr.CallContext(), fnResponse, fnError)
+ 
+ 		{
+ 			// Transform output via MW
+@@ -1319,7 +1319,7 @@ func invoke(
+ 				Result: fnResponse,
+ 				Error:  fnError,
+ 			}
+-			mw.TransformOutput(ctx, mgr.MiddlewareCallCtx(), out)
++			mw.TransformOutput(ctx, mgr.CallContext(), out)
+ 			// And update the vars
+ 			fnResponse = out.Result
+ 			fnError = out.Error
+@@ -1356,7 +1356,7 @@ func updateInput(
+ 			byt, err := json.Marshal(event)
+ 			if err != nil {
+ 				mgr.SetErr(fmt.Errorf("error marshalling event for function: %w", err))
+-				panic(step.ControlHijack{})
++				panic(sdkrequest.ControlHijack{})
+ 			}
+ 
+ 			// The same type as the event.
+@@ -1364,7 +1364,7 @@ func updateInput(
+ 
+ 			if err := json.Unmarshal(byt, newEvent); err != nil {
+ 				mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
+-				panic(step.ControlHijack{})
++				panic(sdkrequest.ControlHijack{})
+ 			}
+ 			fnInput.FieldByName("Event").Set(reflect.ValueOf(newEvent).Elem())
+ 		}
+@@ -1379,14 +1379,14 @@ func updateInput(
+ 				byt, err := json.Marshal(evt)
+ 				if err != nil {
+ 					mgr.SetErr(fmt.Errorf("error marshalling event for function: %w", err))
+-					panic(step.ControlHijack{})
++					panic(sdkrequest.ControlHijack{})
+ 				}
+ 
+ 				// The same type as the event.
+ 				newEvent := reflect.New(eventType).Interface()
+ 				if err := json.Unmarshal(byt, newEvent); err != nil {
+ 					mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
+-					panic(step.ControlHijack{})
++					panic(sdkrequest.ControlHijack{})
+ 				}
+ 
+ 				newEvents = reflect.Append(newEvents, reflect.ValueOf(newEvent).Elem())
+@@ -1399,13 +1399,13 @@ func updateInput(
+ 			byt, err := json.Marshal(event)
+ 			if err != nil {
+ 				mgr.SetErr(fmt.Errorf("error marshalling event for function: %w", err))
+-				panic(step.ControlHijack{})
++				panic(sdkrequest.ControlHijack{})
+ 			}
+ 
+ 			newEvent := map[string]any{}
+ 			if err := json.Unmarshal(byt, &newEvent); err != nil {
+ 				mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
+-				panic(step.ControlHijack{})
++				panic(sdkrequest.ControlHijack{})
+ 			}
+ 			fnInput.FieldByName("Event").Set(reflect.ValueOf(newEvent))
+ 		}
+@@ -1417,13 +1417,13 @@ func updateInput(
+ 				byt, err := json.Marshal(evt)
+ 				if err != nil {
+ 					mgr.SetErr(fmt.Errorf("error marshalling event for function: %w", err))
+-					panic(step.ControlHijack{})
++					panic(sdkrequest.ControlHijack{})
+ 				}
+ 
+ 				var newEvent map[string]any
+ 				if err := json.Unmarshal(byt, &newEvent); err != nil {
+ 					mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
+-					panic(step.ControlHijack{})
++					panic(sdkrequest.ControlHijack{})
+ 				}
+ 
+ 				newEvents[i] = newEvent
+diff --git a/handler_test.go b/handler_test.go
+index 404d80d..e416bcb 100644
+--- a/handler_test.go
++++ b/handler_test.go
+@@ -85,7 +85,7 @@ func TestRegister(t *testing.T) {
+ // TestInvoke asserts that invoking a function with both the correct and incorrect type
+ // works as expected.
+ func TestInvoke(t *testing.T) {
+-	mw := middleware.NewMiddlewareManager()
++	mw := middleware.New()
+ 
+ 	t.Run("With a struct value event type", func(t *testing.T) {
+ 		ctx := context.Background()
+diff --git a/internal/ctx.go b/internal/ctx.go
+index 5e3f446..feefa04 100644
+--- a/internal/ctx.go
++++ b/internal/ctx.go
+@@ -28,11 +28,15 @@ type middlewareManagerCtxKeyType struct{}
+ 
+ var middlewareManagerCtxKey = middlewareManagerCtxKeyType{}
+ 
+-func ContextWithMiddlewareManager(ctx context.Context, mgr *middleware.MiddlewareManager) context.Context {
++func ContextWithMiddleware(ctx context.Context, mgr middleware.Middleware) context.Context {
+ 	return context.WithValue(ctx, middlewareManagerCtxKey, mgr)
+ }
+ 
+-func MiddlewareManagerFromContext(ctx context.Context) (*middleware.MiddlewareManager, bool) {
+-	mgr, ok := ctx.Value(middlewareManagerCtxKey).(*middleware.MiddlewareManager)
+-	return mgr, ok
++func MiddlewareFromContext(ctx context.Context) middleware.Middleware {
++	mgr, ok := ctx.Value(middlewareManagerCtxKey).(middleware.Middleware)
++	if !ok {
++		// Return noop middleware.
++		return &middleware.BaseMiddleware{}
++	}
++	return mgr
+ }
+diff --git a/internal/middleware/manager.go b/internal/middleware/manager.go
+index 7969c8e..3396ab1 100644
+--- a/internal/middleware/manager.go
++++ b/internal/middleware/manager.go
+@@ -9,9 +9,9 @@ import (
+ // ensure that the MiddlewareManager implements Middleware at compile time.
+ var _ Middleware = &MiddlewareManager{}
+ 
+-// NewMiddlewareManager returns a new middleware manager which invokes
++// New returns a new middleware manager which invokes
+ // each registered middleware.
+-func NewMiddlewareManager() *MiddlewareManager {
++func New() *MiddlewareManager {
+ 	return &MiddlewareManager{
+ 		idempotentHooks: &types.Set[string]{},
+ 		items:           []Middleware{},
+diff --git a/internal/sdkrequest/manager.go b/internal/sdkrequest/manager.go
+index 00eb414..45f5d90 100644
+--- a/internal/sdkrequest/manager.go
++++ b/internal/sdkrequest/manager.go
+@@ -7,6 +7,7 @@ import (
+ 	"encoding/json"
+ 	"fmt"
+ 	"sync"
++	"time"
+ 
+ 	"github.com/inngest/inngest/pkg/enums"
+ 	"github.com/inngest/inngestgo/experimental"
+@@ -15,14 +16,30 @@ import (
+ 	"github.com/inngest/inngestgo/internal/types"
+ )
+ 
++type ControlHijack struct{}
++
++// StepMode defines how steps should be executed
++type StepMode int
++
++const (
++	// StepModeReturn returns control to executor after each step (async functions)
++	StepModeReturn StepMode = iota
++	// StepModeCheckpoint checkpoints each step via an API then continues execution after
++	// acknowledgement of the step data.
++	StepModeCheckpoint
++	// StepModeBackground continues execution, checkpointing in the background.  Note
++	// that this doesn't wait for checkpoints to finish before continuing, leading to
++	// potentially unsynced steps.  This is only intended for HTTP endpoints in which
++	// steps are treated as enhanced tracing spans.
++	StepModeBackground
++)
++
+ type requestCtxKeyType struct{}
+ 
+ var requestCtxKey = requestCtxKeyType{}
+ 
+ // InvocationManager is responsible for the lifecycle of a function invocation.
+ type InvocationManager interface {
+-	// Cancel indicates that a step has ran and cancels future steps from processing.
+-	Cancel()
+ 	// Request returns the incoming executor request.
+ 	Request() *Request
+ 	// Err returns the error generated by step code, if a step errored.
+@@ -45,8 +62,14 @@ type InvocationManager interface {
+ 	// SigningKey returns the signing key used for this request.  This lets us
+ 	// retrieve creds for eg. publishing or API alls.
+ 	SigningKey() string
+-	// MiddlewareCallCtx exposes the call context for middleware calls.
+-	MiddlewareCallCtx() experimental.CallContext
++	// CallContext exposes the call context for middleware calls.
++	CallContext() experimental.CallContext
++	// SetCheckpointFunc sets the function used for background checkpointing
++	SetCheckpointFunc(fn func(ctx context.Context, runID string, steps []GeneratorOpcode) error)
++	// StepMode returns how steps should be executed in this context
++	StepMode() StepMode
++	// SetStepMode overrides the step mode.
++	SetStepMode(m StepMode)
+ }
+ 
+ // NewManager returns an InvocationManager to manage the incoming executor request.  This
+@@ -57,6 +80,7 @@ func NewManager(
+ 	cancel context.CancelFunc,
+ 	request *Request,
+ 	signingKey string,
++	mode StepMode,
+ ) InvocationManager {
+ 	unseen := types.Set[string]{}
+ 	for k := range request.Steps {
+@@ -64,19 +88,26 @@ func NewManager(
+ 	}
+ 
+ 	return &requestCtxManager{
+-		fn:         fn,
+-		cancel:     cancel,
+-		request:    request,
+-		indexes:    map[string]int{},
+-		l:          &sync.RWMutex{},
+-		signingKey: signingKey,
+-		seen:       map[string]struct{}{},
+-		seenLock:   &sync.RWMutex{},
+-		unseen:     &unseen,
+-		mw:         mw,
++		fn:             fn,
++		cancel:         cancel,
++		request:        request,
++		indexes:        map[string]int{},
++		l:              &sync.RWMutex{},
++		signingKey:     signingKey,
++		seen:           map[string]struct{}{},
++		seenLock:       &sync.RWMutex{},
++		unseen:         &unseen,
++		mw:             mw,
++		mode:           mode,
++		checkpointFunc: nil,
+ 	}
+ }
+ 
++// SetCheckpointFunc sets the function used for background checkpointing
++func (r *requestCtxManager) SetCheckpointFunc(fn func(ctx context.Context, runID string, steps []GeneratorOpcode) error) {
++	r.checkpointFunc = fn
++}
++
+ func SetManager(ctx context.Context, r InvocationManager) context.Context {
+ 	return context.WithValue(ctx, requestCtxKey, r)
+ }
+@@ -87,6 +118,8 @@ func Manager(ctx context.Context) (InvocationManager, bool) {
+ }
+ 
+ type requestCtxManager struct {
++	mode StepMode
++
+ 	fn fn.ServableFunction
+ 	// key is the signing key
+ 	signingKey string
+@@ -111,16 +144,15 @@ type requestCtxManager struct {
+ 	unseen *types.Set[string]
+ 
+ 	mw *middleware.MiddlewareManager
++
++	// checkpointFunc is called for background checkpointing in StepModeBackground
++	checkpointFunc func(ctx context.Context, runID string, steps []GeneratorOpcode) error
+ }
+ 
+ func (r *requestCtxManager) SigningKey() string {
+ 	return r.signingKey
+ }
+ 
+-func (r *requestCtxManager) Cancel() {
+-	r.cancel()
+-}
+-
+ func (r *requestCtxManager) SetRequest(req *Request) {
+ 	r.request = req
+ }
+@@ -143,17 +175,29 @@ func (r *requestCtxManager) AppendOp(op GeneratorOpcode) {
+ 
+ 	if r.ops == nil {
+ 		r.ops = []GeneratorOpcode{op}
+-		return
++	} else {
++		r.ops = append(r.ops, op)
+ 	}
+ 
+-	r.ops = append(r.ops, op)
++	switch r.StepMode() {
++	case StepModeReturn:
++		// Auto-cancel for async functions (StepModeReturn) after appending an op
++		r.cancel()
++		// return control to executor after step
++		panic(ControlHijack{})
++
++	case StepModeBackground:
++		// Trigger batch checkpointing in the background with delay
++	case StepModeCheckpoint:
++		// Block on checkpointing, only resuming the next step once checkpointing has finished.
++	}
+ }
+ 
+ func (r *requestCtxManager) Ops() []GeneratorOpcode {
+ 	return r.ops
+ }
+ 
+-func (r *requestCtxManager) MiddlewareCallCtx() middleware.CallContext {
++func (r *requestCtxManager) CallContext() middleware.CallContext {
+ 	opts := fn.FunctionOpts{}
+ 	if r.fn != nil {
+ 		opts = r.fn.Config()
+@@ -167,6 +211,14 @@ func (r *requestCtxManager) MiddlewareCallCtx() middleware.CallContext {
+ 	}
+ }
+ 
++func (r *requestCtxManager) StepMode() StepMode {
++	return r.mode
++}
++
++func (r *requestCtxManager) SetStepMode(m StepMode) {
++	r.mode = m
++}
++
+ func (r *requestCtxManager) Step(ctx context.Context, op UnhashedOp) (json.RawMessage, bool) {
+ 	hash := op.MustHash()
+ 	r.l.RLock()
+@@ -176,7 +228,7 @@ func (r *requestCtxManager) Step(ctx context.Context, op UnhashedOp) (json.RawMe
+ 	if r.unseen.Len() == 0 {
+ 		// We exhausted all memoized steps, so we're about to run "new code"
+ 		// after a memoized step.
+-		r.mw.BeforeExecution(ctx, r.MiddlewareCallCtx())
++		r.mw.BeforeExecution(ctx, r.CallContext())
+ 	}
+ 
+ 	val, ok := r.request.Steps[hash]
+@@ -266,6 +318,8 @@ type GeneratorOpcode struct {
+ 	Error *UserError `json:"error"`
+ 	// SDK versions < 3.?.? don't respond with the display name.
+ 	DisplayName *string `json:"displayName"`
++	// Timing represents the start and end time for the opcode, in terms of processing.
++	Timing Interval `json:"timing"`
+ }
+ 
+ func (g *GeneratorOpcode) SetParallelMode(mode enums.ParallelMode) {
+@@ -307,3 +361,10 @@ type UserError struct {
+ 	// Cause allows nested errors to be passed back to the SDK.
+ 	Cause *UserError `json:"cause,omitempty"`
+ }
++
++type Interval struct {
++	// Start represents the start of the interval
++	Start time.Time `json:"a"`
++	// end represents the end of the interval.
++	End time.Time `json:"b"`
++}
+diff --git a/internal/sdkrequest/request.go b/internal/sdkrequest/request.go
+index 160c03c..a2fed72 100644
+--- a/internal/sdkrequest/request.go
++++ b/internal/sdkrequest/request.go
+@@ -4,11 +4,19 @@ import "encoding/json"
+ 
+ // Request represents an incoming invoke request used to call functions from Inngest.
+ type Request struct {
+-	Event   json.RawMessage            `json:"event"`
+-	Events  []json.RawMessage          `json:"events"`
+-	Steps   map[string]json.RawMessage `json:"steps"`
+-	CallCtx CallCtx                    `json:"ctx"`
+-	UseAPI  bool                       `json:"use_api"`
++	// Event represents the input event.  If the input is a batch of events, this
++	// represents the first event in the batch (for backwards compatibility).
++	Event json.RawMessage `json:"event"`
++	// Events represents the array of input events, if the function run is for
++	// a batch of events.
++	Events []json.RawMessage `json:"events"`
++	// Steps indicates the current step state for the function run.
++	Steps map[string]json.RawMessage `json:"steps"`
++	// CallCtx represents call context - metadata around the current function run.
++	CallCtx CallCtx `json:"ctx"`
++	// UseAPI indicates whether the input request is too large (> 4MB) to be pushed
++	// to each function run, and should instead be fetched from the API on run.
++	UseAPI bool `json:"use_api"`
+ }
+ 
+ // CallCtx represents context for individual function calls.  This logs the function ID, the
+diff --git a/step/fetch.go b/step/fetch.go
+index cba1938..c304c0e 100644
+--- a/step/fetch.go
++++ b/step/fetch.go
+@@ -58,7 +58,7 @@ func Fetch[OutputT any](
+ 				err := errors.StepError{}
+ 				if err := json.Unmarshal(unwrapped.Error, &err); err != nil {
+ 					mgr.SetErr(fmt.Errorf("error unmarshalling error for step '%s': %w", id, err))
+-					panic(ControlHijack{})
++					panic(sdkrequest.ControlHijack{})
+ 				}
+ 
+ 				// See if we have any data for multiple returns in the error type.
+@@ -81,7 +81,7 @@ func Fetch[OutputT any](
+ 	if targetID != nil && *targetID != hashedID {
+ 		// Don't report this step since targeting is happening and it isn't
+ 		// targeted
+-		panic(ControlHijack{})
++		panic(sdkrequest.ControlHijack{})
+ 	}
+ 
+ 	plannedOp := sdkrequest.GeneratorOpcode{
+@@ -92,5 +92,5 @@ func Fetch[OutputT any](
+ 	}
+ 	plannedOp.SetParallelMode(parallelMode(ctx))
+ 	mgr.AppendOp(plannedOp)
+-	panic(ControlHijack{})
++	panic(sdkrequest.ControlHijack{})
+ }
+diff --git a/step/infer.go b/step/infer.go
+index a9c9209..94387a5 100644
+--- a/step/infer.go
++++ b/step/infer.go
+@@ -43,7 +43,7 @@ func Infer[InputT any, OutputT any](
+ 				err := errors.StepError{}
+ 				if err := json.Unmarshal(unwrapped.Error, &err); err != nil {
+ 					mgr.SetErr(fmt.Errorf("error unmarshalling error for step '%s': %w", id, err))
+-					panic(ControlHijack{})
++					panic(sdkrequest.ControlHijack{})
+ 				}
+ 
+ 				// See if we have any data for multiple returns in the error type.
+@@ -93,13 +93,13 @@ func Infer[InputT any, OutputT any](
+ 	reqBytes, err := json.Marshal(in.Body)
+ 	if err != nil {
+ 		mgr.SetErr(fmt.Errorf("error unmarshalling state for step '%s': %w", id, err))
+-		panic(ControlHijack{})
++		panic(sdkrequest.ControlHijack{})
+ 	}
+ 
+ 	if targetID != nil && *targetID != hashedID {
+ 		// Don't report this step since targeting is happening and it isn't
+ 		// targeted
+-		panic(ControlHijack{})
++		panic(sdkrequest.ControlHijack{})
+ 	}
+ 
+ 	plannedOp := sdkrequest.GeneratorOpcode{
+@@ -117,7 +117,7 @@ func Infer[InputT any, OutputT any](
+ 	}
+ 	plannedOp.SetParallelMode(parallelMode(ctx))
+ 	mgr.AppendOp(plannedOp)
+-	panic(ControlHijack{})
++	panic(sdkrequest.ControlHijack{})
+ }
+ 
+ type inferOpcodeOpts struct {
+diff --git a/step/infer_test.go b/step/infer_test.go
+index 42eab03..04400ee 100644
+--- a/step/infer_test.go
++++ b/step/infer_test.go
+@@ -12,7 +12,6 @@ import (
+ 
+ func TestInferTypes(t *testing.T) {
+ 	t.Run("It handles OpenAI requests using a 3rd party provider", func(t *testing.T) {
+-
+ 		ctx, cancel := context.WithCancel(context.Background())
+ 		req := &sdkrequest.Request{
+ 			Steps: map[string]json.RawMessage{
+@@ -20,8 +19,8 @@ func TestInferTypes(t *testing.T) {
+ 			},
+ 		}
+ 
+-		mw := middleware.NewMiddlewareManager()
+-		mgr := sdkrequest.NewManager(nil, mw, cancel, req, "")
++		mw := middleware.New()
++		mgr := sdkrequest.NewManager(nil, mw, cancel, req, "", sdkrequest.StepModeBackground)
+ 		ctx = sdkrequest.SetManager(ctx, mgr)
+ 
+ 		resp, err := Infer[openai.ChatCompletionRequest, openai.ChatCompletionResponse](
+diff --git a/step/invoke.go b/step/invoke.go
+index a39500b..84a3006 100644
+--- a/step/invoke.go
++++ b/step/invoke.go
+@@ -50,13 +50,13 @@ func Invoke[T any](ctx context.Context, id string, opts InvokeOpts) (T, error) {
+ 		var valMap map[string]json.RawMessage
+ 		if err := json.Unmarshal(val, &valMap); err != nil {
+ 			mgr.SetErr(fmt.Errorf("error unmarshalling invoke value for '%s': %w", opts.FunctionId, err))
+-			panic(ControlHijack{})
++			panic(sdkrequest.ControlHijack{})
+ 		}
+ 
+ 		if data, ok := valMap["data"]; ok {
+ 			if err := json.Unmarshal(data, &output); err != nil {
+ 				mgr.SetErr(fmt.Errorf("error unmarshalling invoke data for '%s': %w", opts.FunctionId, err))
+-				panic(ControlHijack{})
++				panic(sdkrequest.ControlHijack{})
+ 			}
+ 			return output, nil
+ 		}
+@@ -69,20 +69,20 @@ func Invoke[T any](ctx context.Context, id string, opts InvokeOpts) (T, error) {
+ 			}
+ 			if err := json.Unmarshal(errorVal, &errObj); err != nil {
+ 				mgr.SetErr(fmt.Errorf("error unmarshalling invoke error for '%s': %w", opts.FunctionId, err))
+-				panic(ControlHijack{})
++				panic(sdkrequest.ControlHijack{})
+ 			}
+ 
+ 			return output, sdkerrors.NoRetryError(fmt.Errorf("%s", errObj.Message))
+ 		}
+ 
+ 		mgr.SetErr(fmt.Errorf("error parsing invoke value for '%s'; unknown shape", opts.FunctionId))
+-		panic(ControlHijack{})
++		panic(sdkrequest.ControlHijack{})
+ 	}
+ 
+ 	if targetID != nil && *targetID != hashedID {
+ 		// Don't report this step since targeting is happening and it isn't
+ 		// targeted
+-		panic(ControlHijack{})
++		panic(sdkrequest.ControlHijack{})
+ 	}
+ 
+ 	plannedOp := sdkrequest.GeneratorOpcode{
+@@ -93,5 +93,5 @@ func Invoke[T any](ctx context.Context, id string, opts InvokeOpts) (T, error) {
+ 	}
+ 	plannedOp.SetParallelMode(parallelMode(ctx))
+ 	mgr.AppendOp(plannedOp)
+-	panic(ControlHijack{})
++	panic(sdkrequest.ControlHijack{})
+ }
+diff --git a/step/run.go b/step/run.go
+index f610b0b..af91a27 100644
+--- a/step/run.go
++++ b/step/run.go
+@@ -5,6 +5,7 @@ import (
+ 	"encoding/json"
+ 	"fmt"
+ 	"reflect"
++	"time"
+ 
+ 	"github.com/inngest/inngest/pkg/enums"
+ 	"github.com/inngest/inngestgo/errors"
+@@ -40,51 +41,13 @@ func Run[T any](
+ 	hashedID := op.MustHash()
+ 
+ 	if val, ok := mgr.Step(ctx, op); ok {
+-		// Create a new empty type T in v
+-		ft := reflect.TypeOf(f)
+-		v := reflect.New(ft.Out(0)).Interface()
+-
+-		// This step has already ran as we have state for it. Unmarshal the JSON into type T
+-		unwrapped := response{}
+-		if err := json.Unmarshal(val, &unwrapped); err == nil {
+-			// Check for step errors first.
+-			if len(unwrapped.Error) > 0 {
+-				err := errors.StepError{}
+-				if err := json.Unmarshal(unwrapped.Error, &err); err != nil {
+-					mgr.SetErr(fmt.Errorf("error unmarshalling error for step '%s': %w", id, err))
+-					panic(ControlHijack{})
+-				}
+-
+-				// See if we have any data for multiple returns in the error type.
+-				if err := json.Unmarshal(err.Data, v); err != nil {
+-					mgr.SetErr(fmt.Errorf("error unmarshalling state for step '%s': %w", id, err))
+-					panic(ControlHijack{})
+-				}
+-
+-				val, _ := reflect.ValueOf(v).Elem().Interface().(T)
+-				return val, err
+-			}
+-			// If there's an error, assume that val is already of type T without wrapping
+-			// in the 'data' object as per the SDK spec.  Here, if this succeeds we can be
+-			// sure that we're wrapping the data in a compliant way.
+-			if len(unwrapped.Data) > 0 {
+-				val = unwrapped.Data
+-			}
+-		}
+-
+-		// Grab the data as the step type.
+-		if err := json.Unmarshal(val, v); err != nil {
+-			mgr.SetErr(fmt.Errorf("error unmarshalling state for step '%s': %w", id, err))
+-			panic(ControlHijack{})
+-		}
+-		val, _ := reflect.ValueOf(v).Elem().Interface().(T)
+-		return val, nil
++		return loadExistingStep(id, mgr, val, f)
+ 	}
+ 
+ 	if targetID != nil && *targetID != hashedID {
+ 		// Don't report this step since targeting is happening and it isn't
+ 		// targeted
+-		panic(ControlHijack{})
++		panic(sdkrequest.ControlHijack{})
+ 	}
+ 
+ 	planParallel := targetID == nil && isParallel(ctx)
+@@ -97,29 +60,23 @@ func Run[T any](
+ 		}
+ 		plannedOp.SetParallelMode(parallelMode(ctx))
+ 		mgr.AppendOp(plannedOp)
+-		panic(ControlHijack{})
++		panic(sdkrequest.ControlHijack{})
+ 	}
+ 
+-	// We're calling a function, so always cancel the context afterwards so that no
+-	// other tools run.
+-	defer mgr.Cancel()
+-
+-	mw, ok := internal.MiddlewareManagerFromContext(ctx)
+-	if !ok {
+-		mgr.SetErr(fmt.Errorf("no middleware manager found in context"))
+-		panic(ControlHijack{})
+-	}
++	mw := internal.MiddlewareFromContext(ctx)
+ 
+ 	// We're about to run a step callback, which is "new code".
+-	mw.BeforeExecution(ctx, mgr.MiddlewareCallCtx())
++	mw.BeforeExecution(ctx, mgr.CallContext())
++	pre := time.Now()
+ 	result, err := f(setWithinStep(ctx))
++	post := time.Now()
++	mw.AfterExecution(ctx, mgr.CallContext(), result, err)
+ 
+-	mw.AfterExecution(ctx, mgr.MiddlewareCallCtx(), result, err)
+ 	out := &middleware.TransformableOutput{
+ 		Result: result,
+ 		Error:  err,
+ 	}
+-	mw.TransformOutput(ctx, mgr.MiddlewareCallCtx(), out)
++	mw.TransformOutput(ctx, mgr.CallContext(), out)
+ 
+ 	mutated := out.Result
+ 	err = out.Error
+@@ -127,12 +84,13 @@ func Run[T any](
+ 		// If tihs is a StepFailure already, fail fast.
+ 		if errors.IsStepError(err) {
+ 			mgr.SetErr(fmt.Errorf("unhandled step error: %s", err))
+-			panic(ControlHijack{})
++			panic(sdkrequest.ControlHijack{})
+ 		}
+ 
+-		result, _ := json.Marshal(mutated)
++		marshalled, _ := json.Marshal(mutated)
+ 
+ 		// Implement per-step errors.
++		mgr.SetErr(err)
+ 		mgr.AppendOp(sdkrequest.GeneratorOpcode{
+ 			ID:   hashedID,
+ 			Op:   enums.OpcodeStepError,
+@@ -140,22 +98,83 @@ func Run[T any](
+ 			Error: &sdkrequest.UserError{
+ 				Name:    "Step failed",
+ 				Message: err.Error(),
+-				Data:    result,
++				Data:    marshalled,
++			},
++			Timing: sdkrequest.Interval{
++				Start: pre,
++				End:   post,
+ 			},
+ 		})
+-		mgr.SetErr(err)
+-		panic(ControlHijack{})
++
++		// API functions: return the error without panic
++		return result, err
+ 	}
+ 
+ 	byt, err := json.Marshal(mutated)
+ 	if err != nil {
+ 		mgr.SetErr(fmt.Errorf("unable to marshal run respone for '%s': %w", id, err))
+ 	}
++
++	// Depending on the manager's step mode, this will either return control to the handler
++	// to prevent function execution or checkpoint the step immediately.
+ 	mgr.AppendOp(sdkrequest.GeneratorOpcode{
+ 		ID:   hashedID,
+ 		Op:   enums.OpcodeStepRun,
+ 		Name: id,
+ 		Data: byt,
++		Timing: sdkrequest.Interval{
++			Start: pre,
++			End:   post,
++		},
+ 	})
+-	panic(ControlHijack{})
++
++	return result, nil
++}
++
++func loadExistingStep[T any](
++	id string,
++	mgr sdkrequest.InvocationManager,
++	existing json.RawMessage,
++	f func(ctx context.Context) (T, error),
++) (T, error) {
++	// Create a new empty type T in v
++	ft := reflect.TypeOf(f)
++	v := reflect.New(ft.Out(0)).Interface()
++
++	// This step has already ran as we have state for it. Unmarshal the JSON into type T
++	unwrapped := response{}
++	if err := json.Unmarshal(existing, &unwrapped); err == nil {
++		// Check for step errors first.
++		if len(unwrapped.Error) > 0 {
++			err := errors.StepError{}
++			if err := json.Unmarshal(unwrapped.Error, &err); err != nil {
++				mgr.SetErr(fmt.Errorf("error unmarshalling error for step '%s': %w", id, err))
++				panic(sdkrequest.ControlHijack{})
++			}
++
++			// See if we have any data for multiple returns in the error type.
++			if err := json.Unmarshal(err.Data, v); err != nil {
++				mgr.SetErr(fmt.Errorf("error unmarshalling state for step '%s': %w", id, err))
++				panic(sdkrequest.ControlHijack{})
++			}
++
++			val, _ := reflect.ValueOf(v).Elem().Interface().(T)
++			return val, err
++		}
++		// If there's an error, assume that val is already of type T without wrapping
++		// in the 'data' object as per the SDK spec.  Here, if this succeeds we can be
++		// sure that we're wrapping the data in a compliant way.
++		if len(unwrapped.Data) > 0 {
++			existing = unwrapped.Data
++		}
++	}
++
++	// Grab the data as the step type.
++	if err := json.Unmarshal(existing, v); err != nil {
++		mgr.SetErr(fmt.Errorf("error unmarshalling state for step '%s': %w", id, err))
++		panic(sdkrequest.ControlHijack{})
++	}
++
++	val, _ := reflect.ValueOf(v).Elem().Interface().(T)
++	return val, nil
+ }
+diff --git a/step/run_test.go b/step/run_test.go
+index 54d14e2..e73976d 100644
+--- a/step/run_test.go
++++ b/step/run_test.go
+@@ -20,8 +20,8 @@ func TestStep(t *testing.T) {
+ 		Steps: map[string]json.RawMessage{},
+ 	}
+ 
+-	mw := middleware.NewMiddlewareManager()
+-	mgr := sdkrequest.NewManager(nil, mw, cancel, req, "")
++	mw := middleware.New()
++	mgr := sdkrequest.NewManager(nil, mw, cancel, req, "", sdkrequest.StepModeBackground)
+ 	ctx = sdkrequest.SetManager(ctx, mgr)
+ 
+ 	type response struct {
+@@ -183,15 +183,15 @@ func TestStep(t *testing.T) {
+ 		t.Run("Appends opcodes", func(t *testing.T) {
+ 			name = "new step must append"
+ 
+-			mw := middleware.NewMiddlewareManager()
+-			mgr := sdkrequest.NewManager(nil, mw, cancel, req, "")
++			mw := middleware.New()
++			mgr := sdkrequest.NewManager(nil, mw, cancel, req, "", sdkrequest.StepModeBackground)
+ 			ctx = sdkrequest.SetManager(ctx, mgr)
+-			ctx = internal.ContextWithMiddlewareManager(ctx, mw)
++			ctx = internal.ContextWithMiddleware(ctx, mw)
+ 
+ 			func() {
+ 				defer func() {
+ 					rcv := recover()
+-					require.Equal(t, ControlHijack{}, rcv)
++					require.Equal(t, sdkrequest.ControlHijack{}, rcv)
+ 				}()
+ 
+ 				require.False(t, IsWithinStep(ctx))
+@@ -224,12 +224,12 @@ func TestStep(t *testing.T) {
+ 	})
+ 
+ 	t.Run("It doesn't do anything with a cancelled context", func(t *testing.T) {
+-		mgr.Cancel()
++		cancel() // Cancel the context directly
+ 
+ 		func() {
+ 			defer func() {
+ 				rcv := recover()
+-				require.Equal(t, ControlHijack{}, rcv)
++				require.Equal(t, sdkrequest.ControlHijack{}, rcv)
+ 			}()
+ 			val, err := Run(ctx, "new", func(ctx context.Context) (response, error) {
+ 				return expected, nil
+diff --git a/step/sleep.go b/step/sleep.go
+index 072c786..20db323 100644
+--- a/step/sleep.go
++++ b/step/sleep.go
+@@ -2,7 +2,6 @@ package step
+ 
+ import (
+ 	"context"
+-	"fmt"
+ 	"time"
+ 
+ 	"github.com/inngest/inngest/pkg/enums"
+@@ -29,15 +28,12 @@ func Sleep(ctx context.Context, id string, duration time.Duration) {
+ 	if targetID != nil && *targetID != op.MustHash() {
+ 		// Don't report this step since targeting is happening and it isn't
+ 		// targeted
+-		panic(ControlHijack{})
++		panic(sdkrequest.ControlHijack{})
+ 	}
+ 
+-	mw, ok := internal.MiddlewareManagerFromContext(ctx)
+-	if !ok {
+-		mgr.SetErr(fmt.Errorf("no middleware manager found in context"))
+-		panic(ControlHijack{})
+-	}
+-	mw.BeforeExecution(ctx, mgr.MiddlewareCallCtx())
++	mw := internal.MiddlewareFromContext(ctx)
++	mw.BeforeExecution(ctx, mgr.CallContext())
++
+ 	plannedOp := sdkrequest.GeneratorOpcode{
+ 		ID:   op.MustHash(),
+ 		Op:   enums.OpcodeSleep,
+@@ -49,7 +45,7 @@ func Sleep(ctx context.Context, id string, duration time.Duration) {
+ 	plannedOp.SetParallelMode(parallelMode(ctx))
+ 	mgr.AppendOp(plannedOp)
+ 
+-	panic(ControlHijack{})
++	panic(sdkrequest.ControlHijack{})
+ }
+ 
+ // SleepUntil sleeps until a given time.  This halts function execution entirely,
+diff --git a/step/sleep_test.go b/step/sleep_test.go
+index dc219a0..1851b4e 100644
+--- a/step/sleep_test.go
++++ b/step/sleep_test.go
+@@ -16,12 +16,12 @@ import (
+ 
+ func TestSleepUntil(t *testing.T) {
+ 	ctx, cancel := context.WithCancel(t.Context())
+-	mw := middleware.NewMiddlewareManager()
++	mw := middleware.New()
+ 	mgr := sdkrequest.NewManager(nil, mw, cancel, &sdkrequest.Request{
+ 		Steps: map[string]json.RawMessage{},
+-	}, "")
++	}, "", sdkrequest.StepModeBackground)
+ 	ctx = sdkrequest.SetManager(ctx, mgr)
+-	ctx = internal.ContextWithMiddlewareManager(ctx, mw)
++	ctx = internal.ContextWithMiddleware(ctx, mw)
+ 
+ 	assertions := func(until time.Time) {
+ 		ops := mgr.Ops()
+@@ -45,7 +45,7 @@ func TestSleepUntil(t *testing.T) {
+ 		func() {
+ 			defer func() {
+ 				rcv := recover()
+-				require.Equal(t, ControlHijack{}, rcv)
++				require.Equal(t, sdkrequest.ControlHijack{}, rcv)
+ 			}()
+ 
+ 			require.False(t, IsWithinStep(ctx))
+diff --git a/step/step.go b/step/step.go
+index ad13027..8b79efc 100644
+--- a/step/step.go
++++ b/step/step.go
+@@ -7,8 +7,6 @@ import (
+ 	"github.com/inngest/inngestgo/internal/sdkrequest"
+ )
+ 
+-type ControlHijack struct{}
+-
+ type ctxKey string
+ 
+ const (
+@@ -18,14 +16,12 @@ const (
+ 	isWithinStepKey = ctxKey("in-step")
+ )
+ 
+-var (
+-	// ErrNotInFunction is called when a step tool is executed outside of an Inngest
+-	// function call context.
+-	//
+-	// If this is thrown, you're likely executing an Inngest function manually instead
+-	// of it being invoked by the scheduler.
+-	ErrNotInFunction = &errNotInFunction{}
+-)
++// ErrNotInFunction is called when a step tool is executed outside of an Inngest
++// function call context.
++//
++// If this is thrown, you're likely executing an Inngest function manually instead
++// of it being invoked by the scheduler.
++var ErrNotInFunction = &errNotInFunction{}
+ 
+ type errNotInFunction struct{}
+ 
+@@ -63,7 +59,7 @@ func preflight(ctx context.Context) sdkrequest.InvocationManager {
+ 	if ctx.Err() != nil {
+ 		// Another tool has already ran and the context is closed.  Return
+ 		// and do nothing.
+-		panic(ControlHijack{})
++		panic(sdkrequest.ControlHijack{})
+ 	}
+ 	mgr, ok := sdkrequest.Manager(ctx)
+ 	if !ok {
+diff --git a/step/wait_for_event.go b/step/wait_for_event.go
+index 381e3c5..e3f70c4 100644
+--- a/step/wait_for_event.go
++++ b/step/wait_for_event.go
+@@ -61,7 +61,7 @@ func WaitForEvent[T any](ctx context.Context, stepID string, opts WaitForEventOp
+ 		}
+ 		if err := json.Unmarshal(val, &output); err != nil {
+ 			mgr.SetErr(fmt.Errorf("error unmarshalling wait for event value in '%s': %w", opts.Event, err))
+-			panic(ControlHijack{})
++			panic(sdkrequest.ControlHijack{})
+ 		}
+ 		return output, nil
+ 	}
+@@ -69,7 +69,7 @@ func WaitForEvent[T any](ctx context.Context, stepID string, opts WaitForEventOp
+ 	if targetID != nil && *targetID != hashedID {
+ 		// Don't report this step since targeting is happening and it isn't
+ 		// targeted
+-		panic(ControlHijack{})
++		panic(sdkrequest.ControlHijack{})
+ 	}
+ 
+ 	plannedOp := sdkrequest.GeneratorOpcode{
+@@ -80,5 +80,6 @@ func WaitForEvent[T any](ctx context.Context, stepID string, opts WaitForEventOp
+ 	}
+ 	plannedOp.SetParallelMode(parallelMode(ctx))
+ 	mgr.AppendOp(plannedOp)
+-	panic(ControlHijack{})
++	// This cannot resolve.  It must always hand control back to the handler.
++	panic(sdkrequest.ControlHijack{})
+ }
+diff --git a/step/wait_for_signal.go b/step/wait_for_signal.go
+index ea63a54..010143f 100644
+--- a/step/wait_for_signal.go
++++ b/step/wait_for_signal.go
+@@ -79,7 +79,7 @@ func WaitForSignal[T any](ctx context.Context, stepID string, opts WaitForSignal
+ 		}
+ 		if err := json.Unmarshal(val, &output); err != nil {
+ 			mgr.SetErr(fmt.Errorf("error unmarshalling wait for signal value in '%s': %w", opts.Signal, err))
+-			panic(ControlHijack{})
++			panic(sdkrequest.ControlHijack{})
+ 		}
+ 		return output.Data, nil
+ 	}
+@@ -87,7 +87,7 @@ func WaitForSignal[T any](ctx context.Context, stepID string, opts WaitForSignal
+ 	if targetID != nil && *targetID != hashedID {
+ 		// Don't report this step since targeting is happening and it isn't
+ 		// targeted
+-		panic(ControlHijack{})
++		panic(sdkrequest.ControlHijack{})
+ 	}
+ 
+ 	plannedOp := sdkrequest.GeneratorOpcode{
+@@ -99,5 +99,5 @@ func WaitForSignal[T any](ctx context.Context, stepID string, opts WaitForSignal
+ 	}
+ 	plannedOp.SetParallelMode(parallelMode(ctx))
+ 	mgr.AppendOp(plannedOp)
+-	panic(ControlHijack{})
++	panic(sdkrequest.ControlHijack{})
+ }
+diff --git a/stephttp/README.md b/stephttp/README.md
+new file mode 100644
+index 0000000..4cc64de
+--- /dev/null
++++ b/stephttp/README.md
+@@ -0,0 +1,11 @@
++# Inngest API Functions
++
++This package enables using Inngest's step tooling within synchronous API handlers, providing full observability and tracing for your HTTP endpoints.
++
++## Features
++
++- **Full step observability**: Every `step.Run()` call is automatically traced and logged
++- **Background checkpointing**: Step data is sent to Inngest in the background without blocking your API
++- **Seamless integration**: Use existing `step.Run()` functions in API handlers
++- **APM out of the box**: Get metrics, traces, and monitoring for every API endpoint
++- **Event triggering**: Send events from API handlers that trigger async workflows
+diff --git a/stephttp/api_client.go b/stephttp/api_client.go
+new file mode 100644
+index 0000000..6b251a9
+--- /dev/null
++++ b/stephttp/api_client.go
+@@ -0,0 +1,158 @@
++package stephttp
++
++import (
++	"bytes"
++	"context"
++	"encoding/json"
++	"fmt"
++	"net/http"
++	"time"
++
++	"github.com/inngest/inngestgo"
++	"github.com/inngest/inngestgo/internal/sdkrequest"
++	"github.com/oklog/ulid/v2"
++)
++
++// checkpointAPI handles API function runs and step checkpointing
++type checkpointAPI interface {
++	CheckpointNewRun(ctx context.Context, input NewAPIRunData) error
++	CheckpointSteps(ctx context.Context, runID ulid.ULID, steps []sdkrequest.GeneratorOpcode) error
++	CheckpointResponse(ctx context.Context, runID ulid.ULID, result APIResult) error
++}
++
++// NewAPIRunRequest represents the entire request payload used to create new
++// API-based runs.
++type CheckpointNewRunRequest struct {
++	// Seed allows us to construct a deterministic run ID from this data and the
++	// event TS.
++	Seed string `json:"seed"`
++
++	// Idempotency allows the customization of an idempotency key, allowing us to
++	// handle API idempotency using Inngest.
++	Idempotency string `json:"idempotency"`
++
++	// Event embeds the key request information which is used as the triggering
++	// event for API-based runs.
++	Event inngestgo.GenericEvent[NewAPIRunData] `json:"event"`
++}
++
++// NewAPIRunData represents event data stored and used to create new API-based
++// runs.
++type NewAPIRunData struct {
++	// Domain is the domain that served the incoming request.
++	Domain string `json:"domain"`
++	// Method is the incoming request method.  This is used for RESTful
++	// API endpoints.
++	Method string `json:"method"`
++	// Path is the path for the incoming request.
++	Path string `json:"path"` // request path
++	// Fn is the optional function slug.  If not present, this is created
++	// using a combination of the method and the path: "POST /v1/runs"
++	Fn string `json:"fn"`
++
++	// IP is the IP that created the request.
++	IP string `json:"ip"` // incoming IP
++	// ContentType is the content type for the request.
++	ContentType string `json:"content_type"`
++	// QueryParams are the query parameters for the request, as a single string
++	// without the leading "?".
++	//
++	// NOTE: This is optional;  we do not require that users store the query params
++	// for every request, as this may contain data that users choose not to log.
++	QueryParams string `json:"query_params"`
++	// Body is the incoming request body.
++	//
++	// NOTE: This is optional;  we do not require that users store the body for
++	// every request, as this may contain data that users choose not to log.
++	Body json.RawMessage `json:"body"`
++}
++
++// APIResult represents the final result of an API function call
++type APIResult struct {
++	// StatusCode represents the status code for the API result
++	StatusCode int `json:"status_code"`
++	// Headers represents any response headers sent in the server response
++	Headers map[string]string `json:"headers"`
++	// Body represents the API response.  This may be nil by default.  It is only
++	// captured when you manually specify that you want to track the result.
++	Body []byte `json:"body,omitempty"`
++	// Duration represents the duration
++	Duration time.Duration `json:"duration"`
++	// Error represents any error from the API.  This is only for internal errors,
++	// eg. when a step permanently fails
++	Error string `json:"error,omitempty"`
++}
++
++// APIClient handles HTTP requests to the checkpoint API
++type APIClient struct {
++	baseURL    string
++	signingKey string
++	httpClient *http.Client
++}
++
++// NewAPIClient creates a new API client with the given domain and signing key
++func NewAPIClient(domain, signingKey string) *APIClient {
++	baseURL := fmt.Sprintf("https://%s", domain)
++	return &APIClient{
++		baseURL:    baseURL,
++		signingKey: signingKey,
++		httpClient: &http.Client{Timeout: 30 * time.Second},
++	}
++}
++
++// CheckpointNewRun creates a new API run checkpoint
++func (c *APIClient) CheckpointNewRun(ctx context.Context, input NewAPIRunData) error {
++	payload := CheckpointNewRunRequest{
++		Event: inngestgo.GenericEvent[NewAPIRunData]{
++			Name: "api/run.created",
++			Data: input,
++		},
++	}
++
++	return c.makeRequest(ctx, "POST", "/v1/runs", payload)
++}
++
++// CheckpointSteps saves step execution state
++func (c *APIClient) CheckpointSteps(ctx context.Context, runID ulid.ULID, steps []sdkrequest.GeneratorOpcode) error {
++	payload := map[string]interface{}{
++		"run_id": runID.String(),
++		"steps":  steps,
++	}
++
++	return c.makeRequest(ctx, "POST", fmt.Sprintf("/v1/runs/%s/steps", runID.String()), payload)
++}
++
++// CheckpointResponse saves the final API response
++func (c *APIClient) CheckpointResponse(ctx context.Context, runID ulid.ULID, result APIResult) error {
++	return c.makeRequest(ctx, "POST", fmt.Sprintf("/v1/runs/%s/response", runID.String()), result)
++}
++
++// makeRequest performs an authenticated HTTP request to the API
++func (c *APIClient) makeRequest(ctx context.Context, method, path string, payload interface{}) error {
++	var body bytes.Buffer
++	if payload != nil {
++		if err := json.NewEncoder(&body).Encode(payload); err != nil {
++			return fmt.Errorf("failed to encode request body: %w", err)
++		}
++	}
++
++	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, &body)
++	if err != nil {
++		return fmt.Errorf("failed to create request: %w", err)
++	}
++
++	req.Header.Set("Content-Type", "application/json")
++	req.Header.Set("Authorization", "Bearer "+c.signingKey)
++
++	resp, err := c.httpClient.Do(req)
++	if err != nil {
++		return fmt.Errorf("request failed: %w", err)
++	}
++	defer resp.Body.Close()
++
++	if resp.StatusCode >= 400 {
++		return fmt.Errorf("API request failed with status %d", resp.StatusCode)
++	}
++
++	return nil
++}
+diff --git a/stephttp/provider.go b/stephttp/provider.go
+new file mode 100644
+index 0000000..3a595ae
+--- /dev/null
++++ b/stephttp/provider.go
+@@ -0,0 +1,203 @@
++package stephttp
++
++import (
++	"fmt"
++	"net/http"
++	"runtime/debug"
++	"time"
++
++	"github.com/davecgh/go-spew/spew"
++	"github.com/inngest/inngestgo/internal/middleware"
++	"github.com/inngest/inngestgo/internal/sdkrequest"
++)
++
++const (
++	headerRunID     = "x-inngest-run-id"
++	headerStack     = "x-inngest-stack"
++	headerSignature = "x-inngest-signature"
++)
++
++// SetupOpts contains configuration for the API middleware
++type SetupOpts struct {
++	// SigningKey is the Inngest signing key for authentication
++	SigningKey string
++	// AppID is the application identifier
++	AppID string
++	// Domain is the domain for this API (e.g., "api.mycompany.com")
++	Domain string
++}
++
++// provuder wraps HTTP handlers to provide Inngest step tooling for API functions.
++// This creates a new manager which handles the associated step and request lifecycles.
++type provider struct {
++	opts SetupOpts
++	api  checkpointAPI
++	mw   *middleware.MiddlewareManager
++
++	maxRequestReadLimit int
++	baseURL             string
++}
++
++type SetupOpt func(p *provider)
++
++func WithRequestReadLimit(limit int) SetupOpt {
++	return func(mw *provider) {
++		mw.maxRequestReadLimit = limit
++	}
++}
++
++func WithBaseURL(url string) SetupOpt {
++	return func(mw *provider) {
++		mw.baseURL = url
++	}
++}
++
++func WithInngestMiddleware(mw func() middleware.Middleware) SetupOpt {
++	return func(httpmw *provider) {
++		httpmw.mw.Add(mw)
++	}
++}
++
++// Setup creates a new API provider instance
++func Setup(opts SetupOpts, optionalOpts ...SetupOpt) *provider {
++	// Create a middleware manager for step execution hooks
++	mw := middleware.New()
++
++	p := &provider{
++		opts: opts,
++		mw:   mw,
++	}
++
++	for _, o := range optionalOpts {
++		o(p)
++	}
++
++	return p
++}
++
++// Handler wraps an HTTP handler to provide Inngest step tooling
++func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
++	return func(w http.ResponseWriter, r *http.Request) {
++		ctx := r.Context()
++
++		startTime := time.Now()
++
++		var (
++			mode = sdkrequest.StepModeBackground
++
++			runID string
++			mgr   sdkrequest.InvocationManager
++		)
++
++		_, _ = runID, mode
++
++		if _, ok := getExistingRun(r); ok {
++			// This request is being resumed and is a re-entry.
++			mode = sdkrequest.StepModeBackground
++			// TODO: Validate signature
++			// TODO: Use API to fetch run data, then resume.
++		} else {
++			p.handleNewRun(r)
++		}
++
++		mgr = sdkrequest.NewManager(
++			nil, // NOTE: We do not have servable functions here;  this is the next HTTP handler in the chain.
++			p.mw,
++			func() {},             // Cancel is currently a noop.
++			&sdkrequest.Request{}, // TODO
++			p.opts.SigningKey,
++			mode,
++		)
++		ctx = sdkrequest.SetManager(ctx, mgr)
++
++		// Execute either the next step (if this is a reentry) or all next steps until the
++		// API response or a hijack.
++
++		var (
++			panicErr error
++			result   APIResult
++		)
++
++		func() {
++			defer func() {
++				if r := recover(); r != nil {
++					callCtx := mgr.CallContext()
++
++					// Was this us attepmting to prevent functions from continuing, using
++					// panic as a crappy control flow because go doesn't have generators?
++					if _, ok := r.(sdkrequest.ControlHijack); ok {
++						// Step attempt ended (completed or errored).
++						//
++						// NOTE: In this case, for API-based functions, we only get ControlHijack
++						// panics when we need to checkpoint via a blocking call.
++						//
++						// For example, when you `step.sleep` or `step.waitForEvent`, the function
++						// turns from a synchronous API to an asynchronous background function
++						// automatically.
++						mgr.SetStepMode(sdkrequest.StepModeCheckpoint)
++						p.mw.AfterExecution(ctx, callCtx, nil, nil)
++						return
++					}
++
++					// TODO: How many retries does this function have?  If zero, we can ignore
++					// any retries and show the error directly to the user, keeping StepModeBackground
++					// checkpointing.
++
++					panicStack := string(debug.Stack())
++					panicErr = fmt.Errorf("function panicked: %v.  stack:\n%s", r, panicStack)
++
++					p.mw.AfterExecution(ctx, callCtx, nil, nil)
++					p.mw.OnPanic(ctx, callCtx, r, panicStack)
++				}
++			}()
++
++			// Wrap response writer to capture output
++			rw := newResponseWriter(w)
++			// Execute the handler with step tooling available
++			next(rw, r.WithContext(ctx))
++			duration := time.Since(startTime)
++
++			// Store the API result
++			result = APIResult{
++				StatusCode: rw.statusCode,
++				Headers:    flattenHeaders(rw.Header()),
++				Body:       rw.body.Bytes(),
++				Duration:   duration,
++			}
++		}()
++
++		// TODO: Handle panics and errors separately.
++		if panicErr != nil {
++			result.Error = panicErr.Error()
++		}
++		if mgr.Err() != nil {
++			result.Error = mgr.Err().Error()
++		}
++
++		// Handle the result of the API as expected.  If this is a step error, we must retry
++		// the step by changing the checkpoint to a blocking operation, then redirecting on the
++		// client side.
++
++		spew.Dump(result)
++		spew.Dump(mgr.Ops())
++	}
++}
++
++// handleNewRun creates a new run with the given request information.  This automatically upserts
++// the requried apps and functions via the same API request whilst creating a new run.
++func (p *provider) handleNewRun(r *http.Request) {
++	// // This is a new request - create a new API run
++	// requestBody, err := m.readRequestBody(r)
++	// if err != nil {
++	// 	http.Error(w, "Failed to read request body", http.StatusInternalServerError)
++	// 	return
++	// }
++
++	// // Create new API run
++	// newRunID, err := m.api.CreateAPIRun(r.Context(), m.opts.Domain, r.URL.Path, r.Method, requestBody, nil)
++	// if err != nil {
++	// 	http.Error(w, "Failed to create API run", http.StatusInternalServerError)
++	// 	return
++	// }
++	// runID = newRunID
++}
+diff --git a/stephttp/util.go b/stephttp/util.go
+new file mode 100644
+index 0000000..8c7a6e9
+--- /dev/null
++++ b/stephttp/util.go
+@@ -0,0 +1,106 @@
++package stephttp
++
++import (
++	"bytes"
++	"encoding/json"
++	"io"
++	"net/http"
++
++	"github.com/oklog/ulid/v2"
++)
++
++type existingRun struct {
++	RunID     ulid.ULID
++	Stack     []string
++	Signature string
++}
++
++// responseWriter captures the response for storing as the API result
++type responseWriter struct {
++	http.ResponseWriter
++	statusCode int
++	body       *bytes.Buffer
++}
++
++func newResponseWriter(w http.ResponseWriter) *responseWriter {
++	return &responseWriter{
++		ResponseWriter: w,
++		statusCode:     http.StatusOK,
++		body:           &bytes.Buffer{},
++	}
++}
++
++func (rw *responseWriter) WriteHeader(code int) {
++	rw.statusCode = code
++	rw.ResponseWriter.WriteHeader(code)
++}
++
++func (rw *responseWriter) Write(data []byte) (int, error) {
++	rw.body.Write(data)
++	return rw.ResponseWriter.Write(data)
++}
++
++// readRequestBody reads and restores the request body
++func readRequestBody(r *http.Request) ([]byte, error) {
++	if r.Body == nil {
++		return nil, nil
++	}
++
++	requestBody, err := io.ReadAll(r.Body)
++	if err != nil {
++		return nil, err
++	}
++
++	// Restore body for the handler
++	r.Body = io.NopCloser(bytes.NewReader(requestBody))
++	return requestBody, nil
++}
++
++func getExistingRun(r *http.Request) (existingRun, bool) {
++	// Check if this is a resume request with Inngest headers
++	runIDHeader := r.Header.Get(headerRunID)
++	stackHeader := r.Header.Get(headerStack)
++	signatureHeader := r.Header.Get(headerSignature)
++
++	if runIDHeader == "" || stackHeader == "" || signatureHeader == "" {
++		return existingRun{}, false
++	}
++
++	var err error
++	er := existingRun{
++		Signature: signatureHeader,
++	}
++	if er.RunID, err = ulid.Parse(runIDHeader); err != nil {
++		return existingRun{}, false
++	}
++	if err = json.Unmarshal([]byte(stackHeader), &er.Stack); err != nil {
++		return existingRun{}, false
++	}
++	return er, true
++}
++
++// createResumeManager creates a manager for resumed API requests
++// getClientIP extracts the client IP from the request.
++func getClientIP(r *http.Request) string {
++	// Check X-Forwarded-For header first
++	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
++		return xff
++	}
++	// Check X-Real-IP header
++	if xri := r.Header.Get("X-Real-IP"); xri != "" {
++		return xri
++	}
++	// Fall back to RemoteAddr
++	return r.RemoteAddr
++}
++
++// flattenHeaders converts http.Header to map[string]string
++func flattenHeaders(headers http.Header) map[string]string {
++	result := make(map[string]string)
++	for key, values := range headers {
++		if len(values) > 0 {
++			result[key] = values[0]
++		}
++	}
++	return result
++}
+diff --git a/tests/step_run_test.go b/tests/step_run_test.go
+index e71ff25..c8a7e6a 100644
+--- a/tests/step_run_test.go
++++ b/tests/step_run_test.go
+@@ -38,12 +38,14 @@ func TestStepRun(t *testing.T) {
+ 			inngestgo.EventTrigger(eventName, nil),
+ 			func(ctx context.Context, input inngestgo.Input[any]) (any, error) {
+ 				runID.Store(input.InputCtx.RunID)
++
+ 				_, stepError = step.Run(ctx,
+ 					"a",
+ 					func(ctx context.Context) (any, error) {
+ 						return nil, fmt.Errorf("oh no")
+ 					},
+ 				)
++
+ 				return nil, stepError
+ 			},
+ 		)

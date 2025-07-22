@@ -151,7 +151,7 @@ func (h *handler) InvokeFunction(ctx context.Context, slug string, stepId *strin
 	if !ok {
 		return nil, nil, fmt.Errorf("invalid client")
 	}
-	mw := middleware.NewMiddlewareManager().Add(cImpl.Middleware...)
+	mw := middleware.New().Add(cImpl.Middleware...)
 
 	// Invoke function, always complete regardless of
 	resp, ops, err := invoke(

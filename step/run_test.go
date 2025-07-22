@@ -20,8 +20,8 @@ func TestStep(t *testing.T) {
 		Steps: map[string]json.RawMessage{},
 	}
 
-	mw := middleware.NewMiddlewareManager()
-	mgr := sdkrequest.NewManager(nil, mw, cancel, req, "")
+	mw := middleware.New()
+	mgr := sdkrequest.NewManager(nil, mw, cancel, req, "", sdkrequest.StepModeBackground)
 	ctx = sdkrequest.SetManager(ctx, mgr)
 
 	type response struct {
@@ -183,15 +183,15 @@ func TestStep(t *testing.T) {
 		t.Run("Appends opcodes", func(t *testing.T) {
 			name = "new step must append"
 
-			mw := middleware.NewMiddlewareManager()
-			mgr := sdkrequest.NewManager(nil, mw, cancel, req, "")
+			mw := middleware.New()
+			mgr := sdkrequest.NewManager(nil, mw, cancel, req, "", sdkrequest.StepModeBackground)
 			ctx = sdkrequest.SetManager(ctx, mgr)
-			ctx = internal.ContextWithMiddlewareManager(ctx, mw)
+			ctx = internal.ContextWithMiddleware(ctx, mw)
 
 			func() {
 				defer func() {
 					rcv := recover()
-					require.Equal(t, ControlHijack{}, rcv)
+					require.Equal(t, sdkrequest.ControlHijack{}, rcv)
 				}()
 
 				require.False(t, IsWithinStep(ctx))
@@ -224,12 +224,12 @@ func TestStep(t *testing.T) {
 	})
 
 	t.Run("It doesn't do anything with a cancelled context", func(t *testing.T) {
-		mgr.Cancel()
+		cancel() // Cancel the context directly
 
 		func() {
 			defer func() {
 				rcv := recover()
-				require.Equal(t, ControlHijack{}, rcv)
+				require.Equal(t, sdkrequest.ControlHijack{}, rcv)
 			}()
 			val, err := Run(ctx, "new", func(ctx context.Context) (response, error) {
 				return expected, nil

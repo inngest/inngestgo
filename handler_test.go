@@ -85,7 +85,7 @@ func TestRegister(t *testing.T) {
 // TestInvoke asserts that invoking a function with both the correct and incorrect type
 // works as expected.
 func TestInvoke(t *testing.T) {
-	mw := middleware.NewMiddlewareManager()
+	mw := middleware.New()
 
 	t.Run("With a struct value event type", func(t *testing.T) {
 		ctx := context.Background()

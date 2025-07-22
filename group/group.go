@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/inngest/inngest/pkg/enums"
+	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/step"
 )
 
@@ -56,7 +57,7 @@ func ParallelWithOpts(
 		go func(fn func(ctx context.Context) (any, error)) {
 			defer func() {
 				if r := recover(); r != nil {
-					if _, ok := r.(step.ControlHijack); ok {
+					if _, ok := r.(sdkrequest.ControlHijack); ok {
 						isPlanned = true
 					} else {
 						unexpectedPanic = r
@@ -77,7 +78,7 @@ func ParallelWithOpts(
 	}
 
 	if isPlanned {
-		panic(step.ControlHijack{})
+		panic(sdkrequest.ControlHijack{})
 	}
 
 	return results
