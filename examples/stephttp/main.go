@@ -14,9 +14,8 @@ import (
 func main() {
 	// Create Inngest API middleware
 	provider := stephttp.Setup(stephttp.SetupOpts{
-		SigningKey: "your-signing-key", // TODO: Load from environment
-		AppID:      "my-api-app",
-		Domain:     "api.mycompany.com",
+		// SigningKey: "your-signing-key", // TODO: Load from environment, remove from here.
+		Domain: "api.mycompany.com",
 	})
 
 	// Create HTTP server with step tooling
@@ -30,19 +29,32 @@ func main() {
 
 // handleUsers demonstrates API function with step tooling
 func handleUsers(w http.ResponseWriter, r *http.Request) {
+	// stephttp.Function(
+	// 	stephttp.Config{
+	// 		Slug: "/users/{id}",
+	// 	},
+	// 	func () {
+	// 		// everything in the API is in this func.
+	// 	},
+	// })
+
+	// stephttp.SetRetries(r.Context(), 10)
+	// stephttp.SetFnSlug(r.Context(), "/users/{id}")
+	// stephttp.SetAsyncResponse(r.Context(), stephttp.AsyncRedirect|stephttp.AsyncToken|stephttp.Custom)
+
+	var req CreateUserRequest
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	var req CreateUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
-		return
-	}
-
 	// Step 1: Authenticate (with full observability)
 	auth, err := step.Run(r.Context(), "authenticate", func(ctx context.Context) (*AuthResult, error) {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			return nil, err
+		}
+
 		// Simulate auth check
 		time.Sleep(50 * time.Millisecond)
 		return &AuthResult{

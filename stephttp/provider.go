@@ -36,8 +36,6 @@ type Provider interface {
 type SetupOpts struct {
 	// SigningKey is the Inngest signing key for authentication
 	SigningKey string
-	// AppID is the application identifier
-	AppID string
 	// Domain is the domain for this API (e.g., "api.mycompany.com")
 	Domain string
 }
@@ -168,6 +166,11 @@ func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
 			// TODO: Are we retrying?  If so, handle this.
 		}
 
+		// Attempt to flush the response directly to the client immediately, reducing TTFB
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+
 		go func() {
 			// Decrease the in-flight counter once done.
 			defer func() { p.inflight.Add(-1) }()
@@ -249,11 +252,6 @@ func (p *provider) call(w http.ResponseWriter, r *http.Request, mgr sdkrequest.I
 	// Execute the handler with step tooling available
 	next(rw, r.WithContext(ctx))
 	duration := time.Since(startTime)
-
-	// Attempt to flush the response directly to the client immediately, reducing TTFB
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
 
 	return APIResult{
 		StatusCode: rw.statusCode,
