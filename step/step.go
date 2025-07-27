@@ -63,6 +63,7 @@ func preflight(ctx context.Context) sdkrequest.InvocationManager {
 	}
 	mgr, ok := sdkrequest.Manager(ctx)
 	if !ok {
+		// TODO: Make this NOT panic.
 		panic(ErrNotInFunction)
 	}
 	return mgr

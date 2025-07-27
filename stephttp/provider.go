@@ -121,6 +121,9 @@ func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
 			created = make(chan CheckpointRun, 1)
 		)
 
+		// Always add the run ID to the header.
+		w.Header().Add("inn-run-id", runID.String())
+
 		mgr := sdkrequest.NewManager(
 			nil, // NOTE: We do not have servable functions here;  this is the next HTTP handler in the chain.
 			p.mw,
@@ -133,6 +136,10 @@ func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
 		ctx := sdkrequest.SetManager(r.Context(), mgr)
 
 		if _, ok := p.getExistingRun(r, created); ok {
+			// 1 of 2 things:
+			// - executor request
+			// - client request, blocking on async resolution
+
 			// This request is being resumed and is a re-entry.  This always means that we
 			// switch from background checkpointing to returning after each invocation.
 			mgr.SetStepMode(sdkrequest.StepModeReturn)
@@ -166,6 +173,8 @@ func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
 			// TODO: Are we retrying?  If so, handle this.
 		}
 
+		// TODO: Did we panic with an async op?  If so, handle that switch to async.
+
 		// Attempt to flush the response directly to the client immediately, reducing TTFB
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
@@ -184,6 +193,8 @@ func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
 				p.logger.Error("cannot checkpoint steps to unsynced run", "run_id", runID)
 				return
 			}
+
+			// TODO: Add the function complete op.
 
 			// Checkpoint the steps AFTER the run has finished creating.
 			if err := p.api.CheckpointSteps(ctx, run, mgr.Ops()); err != nil {
