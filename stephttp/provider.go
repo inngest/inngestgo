@@ -153,27 +153,24 @@ func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
 		// Execute either the next step (if this is a reentry) or all next steps until the
 		// API response or a hijack.
 		r = r.WithContext(ctx)
-		result, panicErr := p.call(w, r, mgr, next, startTime)
-
-		if panicErr != nil {
-			result.Error = panicErr.Error()
-		}
-		if mgr.Err() != nil {
-			result.Error = mgr.Err().Error()
-		}
+		result := p.call(w, r, mgr, next, startTime)
 
 		// At this point, either:
-		// 1. The API endpoint has already returned data to the client and now we're finishing up.
-		// 2. A step errored, and we must recover, retry, and redirect the user to the retry attempt.
+		//
+		// 1. The sync API finished and has written data to the ResponseWriter, and we need
+		//    to clean up.
+		//
+		// 2, We're switching from sync -> async (a step errored, we used sleeps / waits, etc)
+		//    and we need to:
+		//    * Communicate with the Inngest executor to switch modes
+		//    * Handle the sync -> async response to the ResponseWriter
 		//
 		// Whatever happens here will unfortunately still block the client, so we need to handle the
 		// checkpointing in a goroutine on success.
 
-		if result.Error != "" {
-			// TODO: Are we retrying?  If so, handle this.
+		if sdkrequest.HasAsyncOps(mgr.Ops()) {
+			// TODO
 		}
-
-		// TODO: Did we panic with an async op?  If so, handle that switch to async.
 
 		// Attempt to flush the response directly to the client immediately, reducing TTFB
 		if f, ok := w.(http.Flusher); ok {
@@ -220,11 +217,10 @@ func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
 //
 // It is the callers responsibility to handle the generated opcodes added to the invocation
 // manager.
-func (p *provider) call(w http.ResponseWriter, r *http.Request, mgr sdkrequest.InvocationManager, next http.HandlerFunc, startTime time.Time) (APIResult, error) {
-	var (
-		panicErr error
-		ctx      = r.Context()
-	)
+func (p *provider) call(w http.ResponseWriter, r *http.Request, mgr sdkrequest.InvocationManager, next http.HandlerFunc, startTime time.Time) APIResult {
+	ctx := r.Context()
+
+	var panicErr error
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -264,12 +260,21 @@ func (p *provider) call(w http.ResponseWriter, r *http.Request, mgr sdkrequest.I
 	next(rw, r.WithContext(ctx))
 	duration := time.Since(startTime)
 
-	return APIResult{
+	result := APIResult{
 		StatusCode: rw.statusCode,
 		Headers:    flattenHeaders(rw.Header()),
 		Body:       rw.body.Bytes(),
 		Duration:   duration,
-	}, panicErr
+	}
+
+	if panicErr != nil {
+		result.Error = panicErr.Error()
+	}
+	if mgr.Err() != nil {
+		result.Error = mgr.Err().Error()
+	}
+
+	return result
 }
 
 // handleNewRun creates a new run with the given request information.  This automatically upserts

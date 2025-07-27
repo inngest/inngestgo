@@ -168,13 +168,20 @@ func (r *requestCtxManager) AppendOp(op GeneratorOpcode) {
 		r.ops = append(r.ops, op)
 	}
 
+	// If this op is async, we need to panic and return control to the handler
+	// (either the http handler or the async handler) as the executor must take
+	// over from here.
+	if enums.OpcodeIsAsync(op.Op) {
+		r.cancel()
+		panic(ControlHijack{})
+	}
+
 	switch r.StepMode() {
 	case StepModeReturn:
-		// Auto-cancel for async functions (StepModeReturn) after appending an op
+		// Auto-cancel for async functions (StepModeReturn) after appending an op,
+		// then return control to the handler.
 		r.cancel()
-		// return control to executor after step
 		panic(ControlHijack{})
-
 	case StepModeBackground:
 		// Trigger batch checkpointing in the background with delay
 	case StepModeCheckpoint:
@@ -377,4 +384,15 @@ func (i Interval) Start() time.Time {
 
 func (i Interval) End() time.Time {
 	return i.Start().Add(time.Nanosecond * time.Duration(i.B))
+}
+
+// HasAsyncOps is a utility that checks whether the slice of GeneratorOpcdodes
+// has at least one async op.
+func HasAsyncOps(ops []GeneratorOpcode) bool {
+	for _, o := range ops {
+		if enums.OpcodeIsAsync(o.Op) {
+			return true
+		}
+	}
+	return false
 }

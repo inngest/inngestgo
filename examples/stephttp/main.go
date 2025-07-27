@@ -20,7 +20,6 @@ func main() {
 
 	// Create HTTP server with step tooling
 	http.HandleFunc("/users", provider.ServeHTTP(handleUsers))
-	http.HandleFunc("/orders", provider.ServeHTTP(handleOrders))
 
 	fmt.Println("API server with Inngest step tooling running on :8080")
 	fmt.Println("Try: curl -X POST http://localhost:8080/users -d '{\"email\":\"user@example.com\"}'")
@@ -29,6 +28,8 @@ func main() {
 
 // handleUsers demonstrates API function with step tooling
 func handleUsers(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	// stephttp.Function(
 	// 	stephttp.Config{
 	// 		Slug: "/users/{id}",
@@ -38,9 +39,9 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 	// 	},
 	// })
 
-	// stephttp.SetRetries(r.Context(), 10)
-	// stephttp.SetFnSlug(r.Context(), "/users/{id}")
-	// stephttp.SetAsyncResponse(r.Context(), stephttp.AsyncRedirect|stephttp.AsyncToken|stephttp.Custom)
+	// stephttp.SetRetries(ctx, 10)
+	// stephttp.SetFnSlug(ctx, "/users/{id}")
+	// stephttp.SetAsyncResponse(ctx, stephttp.AsyncRedirect|stephttp.AsyncToken|stephttp.Custom)
 
 	var req CreateUserRequest
 
@@ -50,7 +51,7 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 1: Authenticate (with full observability)
-	auth, err := step.Run(r.Context(), "authenticate", func(ctx context.Context) (*AuthResult, error) {
+	auth, err := step.Run(ctx, "authenticate", func(ctx context.Context) (*AuthResult, error) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			return nil, err
 		}
@@ -67,8 +68,10 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	step.Sleep(ctx, "sleep", time.Second)
+
 	// Step 2: Validate user data
-	validation, err := step.Run(r.Context(), "validate-user", func(ctx context.Context) (*ValidationResult, error) {
+	validation, err := step.Run(ctx, "validate-user", func(ctx context.Context) (*ValidationResult, error) {
 		// Simulate validation
 		time.Sleep(5 * time.Millisecond)
 		if req.Email == "" {
@@ -85,7 +88,7 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 3: Create user in database
-	user, err := step.Run(r.Context(), "create-user", func(ctx context.Context) (*User, error) {
+	user, err := step.Run(ctx, "create-user", func(ctx context.Context) (*User, error) {
 		// Simulate database insert
 		time.Sleep(100 * time.Millisecond)
 		return &User{
@@ -100,7 +103,7 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 4: Send welcome email (this could trigger background jobs)
-	_, err = step.Run(r.Context(), "send-welcome-email", func(ctx context.Context) (*EmailResult, error) {
+	_, err = step.Run(ctx, "send-welcome-email", func(ctx context.Context) (*EmailResult, error) {
 		// This step is fully traced and can trigger background events
 		// step.SendEvent() could be called here to trigger async workflows
 		time.Sleep(200 * time.Millisecond)
@@ -123,46 +126,6 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 		Valid:   validation.Valid,
 		Message: "User created successfully",
 	})
-}
-
-// handleOrders demonstrates another API endpoint with step tooling
-func handleOrders(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Step 1: Process payment
-	payment, err := step.Run(r.Context(), "process-payment", func(ctx context.Context) (*PaymentResult, error) {
-		// Simulate payment processing with retries built-in
-		time.Sleep(300 * time.Millisecond)
-		return &PaymentResult{
-			TransactionID: "txn_123",
-			Amount:        9999, // $99.99
-			Status:        "completed",
-		}, nil
-	})
-	if err != nil {
-		http.Error(w, "Payment failed", http.StatusPaymentRequired)
-		return
-	}
-
-	// Step 2: Create order
-	order, err := step.Run(r.Context(), "create-order", func(ctx context.Context) (*Order, error) {
-		return &Order{
-			ID:            "order_" + payment.TransactionID,
-			TransactionID: payment.TransactionID,
-			Amount:        payment.Amount,
-			Status:        "confirmed",
-		}, nil
-	})
-	if err != nil {
-		http.Error(w, "Order creation failed", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(order)
 }
 
 // Request/Response types
@@ -197,17 +160,4 @@ type User struct {
 type EmailResult struct {
 	Sent      bool   `json:"sent"`
 	MessageID string `json:"message_id"`
-}
-
-type PaymentResult struct {
-	TransactionID string `json:"transaction_id"`
-	Amount        int    `json:"amount"`
-	Status        string `json:"status"`
-}
-
-type Order struct {
-	ID            string `json:"id"`
-	TransactionID string `json:"transaction_id"`
-	Amount        int    `json:"amount"`
-	Status        string `json:"status"`
 }

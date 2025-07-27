@@ -18,3 +18,19 @@ const (
 	OpcodeGateway   // Gateway call
 	OpcodeWaitForSignal
 )
+
+// opcodeSyncMap explicitly represents the sync opcodes that can be checkpointed.
+// Every other opcode is async by default, and this is always a subset.
+var opcodeSyncMap = map[Opcode]struct{}{
+	OpcodeStep:    {},
+	OpcodeStepRun: {},
+}
+
+func OpcodeIsSync(o Opcode) bool {
+	_, ok := opcodeSyncMap[o]
+	return ok
+}
+
+func OpcodeIsAsync(o Opcode) bool {
+	return !OpcodeIsSync(o)
+}
