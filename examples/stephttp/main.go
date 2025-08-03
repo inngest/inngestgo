@@ -39,11 +39,10 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 	// 	},
 	// })
 
+	// stephttp.OmitBody()
 	// stephttp.SetRetries(ctx, 10)
 	// stephttp.SetFnSlug(ctx, "/users/{id}")
 	// stephttp.SetAsyncResponse(ctx, stephttp.AsyncRedirect|stephttp.AsyncToken|stephttp.Custom)
-
-	var req CreateUserRequest
 
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -52,6 +51,7 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 
 	// Step 1: Authenticate (with full observability)
 	auth, err := step.Run(ctx, "authenticate", func(ctx context.Context) (*AuthResult, error) {
+		var req CreateUserRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			return nil, err
 		}
@@ -60,6 +60,8 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(50 * time.Millisecond)
 		return &AuthResult{
 			UserID: "user_123",
+			Email:  req.Email,
+			Name:   req.Name,
 			Valid:  true,
 		}, nil
 	})
@@ -68,14 +70,18 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	step.Sleep(ctx, "sleep", time.Second)
+	step.Run(ctx, "whatever", func(ctx context.Context) (any, error) {
+		return "yea", nil
+	})
+
+	// step.Sleep(ctx, "sleep", time.Second)
 
 	// Step 2: Validate user data
 	validation, err := step.Run(ctx, "validate-user", func(ctx context.Context) (*ValidationResult, error) {
 		// Simulate validation
 		time.Sleep(5 * time.Millisecond)
-		if req.Email == "" {
-			return nil, fmt.Errorf("email is required")
+		if auth.UserID == "" {
+			return nil, fmt.Errorf("user ID is required")
 		}
 		return &ValidationResult{
 			Valid:  true,
@@ -93,8 +99,8 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(100 * time.Millisecond)
 		return &User{
 			ID:    "user_" + fmt.Sprintf("%d", time.Now().Unix()),
-			Email: req.Email,
-			Name:  req.Name,
+			Email: auth.Email,
+			Name:  auth.Name,
 		}, nil
 	})
 	if err != nil {
@@ -119,7 +125,6 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 
 	// Response
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(CreateUserResponse{
 		User:    *user,
 		AuthID:  auth.UserID,
@@ -143,6 +148,8 @@ type CreateUserResponse struct {
 
 type AuthResult struct {
 	UserID string `json:"user_id"`
+	Email  string `json:"email"`
+	Name   string `json:"name"`
 	Valid  bool   `json:"valid"`
 }
 

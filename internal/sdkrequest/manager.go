@@ -58,7 +58,7 @@ type InvocationManager interface {
 	ReplayedStep(hashedID string) bool
 	// NewOp generates a new unhashed op for creating a GeneratorOpcode.  This
 	// is required for future execution of a step.
-	NewOp(op enums.Opcode, id string, opts map[string]any) UnhashedOp
+	NewOp(op enums.Opcode, id string) UnhashedOp
 	// SigningKey returns the signing key used for this request.  This lets us
 	// retrieve creds for eg. publishing or API alls.
 	SigningKey() string
@@ -68,6 +68,8 @@ type InvocationManager interface {
 	StepMode() StepMode
 	// SetStepMode overrides the step mode.
 	SetStepMode(m StepMode)
+	// SetSteps sets step data, eg. from the API call when loading state via an API call.
+	SetSteps(steps map[string]json.RawMessage)
 }
 
 // NewManager returns an InvocationManager to manage the incoming executor request.  This
@@ -243,7 +245,18 @@ func (r *requestCtxManager) ReplayedStep(hashedID string) bool {
 	return ok
 }
 
-func (r *requestCtxManager) NewOp(op enums.Opcode, id string, opts map[string]any) UnhashedOp {
+func (r *requestCtxManager) SetSteps(steps map[string]json.RawMessage) {
+	r.l.Lock()
+	defer r.l.Unlock()
+
+	if r.request == nil {
+		r.request = &Request{}
+	}
+
+	r.request.Steps = steps
+}
+
+func (r *requestCtxManager) NewOp(op enums.Opcode, id string) UnhashedOp {
 	r.l.Lock()
 	defer r.l.Unlock()
 
@@ -258,19 +271,17 @@ func (r *requestCtxManager) NewOp(op enums.Opcode, id string, opts map[string]an
 	r.indexes[id] = n
 
 	return UnhashedOp{
-		ID:   id,
-		Op:   op,
-		Opts: opts,
-		Pos:  uint(n),
+		ID:  id,
+		Op:  op,
+		Pos: uint(n),
 	}
 }
 
 type UnhashedOp struct {
-	Op   enums.Opcode   `json:"op"`
-	ID   string         `json:"id"`
-	Name string         `json:"name"`
-	Opts map[string]any `json:"opts"`
-	Pos  uint           `json:"-"`
+	Op   enums.Opcode `json:"op"`
+	ID   string       `json:"id"`
+	Name string       `json:"name"`
+	Pos  uint         `json:"-"`
 }
 
 func (u UnhashedOp) Hash() (string, error) {

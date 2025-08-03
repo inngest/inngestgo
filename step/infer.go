@@ -31,7 +31,7 @@ func Infer[InputT any, OutputT any](
 ) (out OutputT, err error) {
 	targetID := getTargetStepID(ctx)
 	mgr := preflight(ctx)
-	op := mgr.NewOp(enums.OpcodeAIGateway, id, nil)
+	op := mgr.NewOp(enums.OpcodeAIGateway, id)
 	hashedID := op.MustHash()
 
 	if val, ok := mgr.Step(ctx, op); ok {

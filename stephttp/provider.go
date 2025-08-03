@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngestgo"
 	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
@@ -18,8 +20,7 @@ import (
 )
 
 const (
-	headerRunID     = "x-inngest-run-id"
-	headerStack     = "x-inngest-stack"
+	headerRunID     = "x-run-id"
 	headerSignature = "x-inngest-signature"
 )
 
@@ -122,7 +123,8 @@ func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
 		)
 
 		// Always add the run ID to the header.
-		w.Header().Add("inn-run-id", runID.String())
+		w.Header().Add("x-run-id", runID.String())
+		w.Header().Add("X-Inngest-SDK", "go:1.5")
 
 		mgr := sdkrequest.NewManager(
 			nil, // NOTE: We do not have servable functions here;  this is the next HTTP handler in the chain.
@@ -135,7 +137,9 @@ func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
 		)
 		ctx := sdkrequest.SetManager(r.Context(), mgr)
 
-		if _, ok := p.getExistingRun(r, created); ok {
+		var resume bool
+
+		if _, ok := p.getExistingRun(r, mgr, created); ok {
 			// 1 of 2 things:
 			// - executor request
 			// - client request, blocking on async resolution
@@ -143,6 +147,11 @@ func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
 			// This request is being resumed and is a re-entry.  This always means that we
 			// switch from background checkpointing to returning after each invocation.
 			mgr.SetStepMode(sdkrequest.StepModeReturn)
+
+			// NOTE: IF THIS IS RESUMING, WE ALWAYS RETURN OPCODES TO THE HTTP WRITER, AS THIS
+			// IS AN EXECUTOR THREAD.
+			resume = true
+
 		} else {
 			// We're creating a net-new run.  In this case, ensure that we hit the API for
 			// starting new runs.  We only block on this when checkpointing steps in the
@@ -168,8 +177,41 @@ func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
 		// Whatever happens here will unfortunately still block the client, so we need to handle the
 		// checkpointing in a goroutine on success.
 
+		if resume {
+			if len(mgr.Ops()) > 0 {
+				// Write the ops to the response writer.
+				byt, err := json.Marshal(mgr.Ops())
+				_ = err
+				w.WriteHeader(206)
+				w.Write(byt)
+			}
+
+			return
+		}
+
 		if sdkrequest.HasAsyncOps(mgr.Ops()) {
-			// TODO
+			run, err := p.waitForRunCreated(ctx, created)
+			if err != nil {
+				p.logger.Error("critical error handling async http run", "error", err, "run_id", runID)
+				// TODO: What API response do we do?
+				return
+			}
+
+			// Checkpoint, but NOT in the background.
+			if err := p.api.CheckpointSteps(ctx, run, mgr.Ops()); err != nil {
+				p.logger.Error("critical error checkpointing async ops", "error", err, "run_id", runID)
+				// TODO: What API response do we do?
+				return
+			}
+
+			// TODO: Return an async response to the browser.
+			json.NewEncoder(w).Encode(AsyncResponse{
+				RunID: runID,
+				Mode:  "async",
+				Token: runID.String(),
+				URL:   "example.com/api/v1/lol",
+			})
+			return
 		}
 
 		// Attempt to flush the response directly to the client immediately, reducing TTFB
@@ -185,13 +227,20 @@ func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
 			// context is cancelled.  Stop this from breaking our API calls.
 			ctx = context.WithoutCancel(ctx)
 
-			run := <-created
-			if bytes.Equal(run.RunID[:], (ulid.ULID{}).Bytes()) {
-				p.logger.Error("cannot checkpoint steps to unsynced run", "run_id", runID)
+			run, err := p.waitForRunCreated(ctx, created)
+			if err != nil {
+				p.logger.Error("cannot checkpoint steps to missing run", "run_id", runID)
 				return
 			}
 
-			// TODO: Add the function complete op.
+			// Append the run complete result to the ops, which finalizes the run in
+			// a single call.
+			if err := p.appendResult(mgr, result); err != nil {
+				p.logger.Error("error appending run complete op",
+					"error", err,
+					"run_id", runID,
+				)
+			}
 
 			// Checkpoint the steps AFTER the run has finished creating.
 			if err := p.api.CheckpointSteps(ctx, run, mgr.Ops()); err != nil {
@@ -200,15 +249,16 @@ func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
 					"run_id", runID,
 				)
 			}
-
-			if err := p.api.CheckpointResponse(ctx, run, result); err != nil {
-				p.logger.Error("error checkpointing result",
-					"error", err,
-					"run_id", runID,
-				)
-			}
 		}()
 	}
+}
+
+func (p *provider) waitForRunCreated(ctx context.Context, created chan CheckpointRun) (CheckpointRun, error) {
+	run := <-created
+	if bytes.Equal(run.RunID[:], (ulid.ULID{}).Bytes()) {
+		return run, fmt.Errorf("run not created")
+	}
+	return run, nil
 }
 
 // call initializes the hijacking control flow, then executes the API-based Inngest function.
@@ -297,8 +347,9 @@ func (p *provider) handleNewRun(r *http.Request, runID ulid.ULID, created chan C
 			return
 		}
 
-		scheme := r.URL.Scheme
-		if scheme == "" {
+		// TODO: Verify
+		scheme := "http://"
+		if r.TLS != nil {
 			scheme = "https://"
 		}
 
@@ -312,11 +363,28 @@ func (p *provider) handleNewRun(r *http.Request, runID ulid.ULID, created chan C
 			Body:        requestBody,
 		})
 		if err != nil {
-			p.logger.Error("error creating new api-based inngest run", "error", err)
+			p.logger.Error("error creating new api-based inngest run", "error", err, "run_id", runID)
 			// lol
 			created <- CheckpointRun{}
 			return
 		}
 		created <- *resp
 	}()
+}
+
+func (p *provider) appendResult(mgr sdkrequest.InvocationManager, res APIResult) error {
+	// Append the fn complete opcode.
+	byt, err := json.Marshal(map[string]any{"data": res})
+	if err != nil {
+		return err
+	}
+
+	op := sdkrequest.GeneratorOpcode{
+		ID:   mgr.NewOp(enums.OpcodeRunComplete, "complete").MustHash(),
+		Op:   enums.OpcodeRunComplete,
+		Data: byt,
+	}
+
+	mgr.AppendOp(op)
+	return nil
 }

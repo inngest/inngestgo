@@ -51,7 +51,7 @@ func WaitForEvent[T any](ctx context.Context, stepID string, opts WaitForEventOp
 	if opts.Name == "" {
 		opts.Name = stepID
 	}
-	op := mgr.NewOp(enums.OpcodeWaitForEvent, stepID, args)
+	op := mgr.NewOp(enums.OpcodeWaitForEvent, stepID)
 	hashedID := op.MustHash()
 
 	if val, ok := mgr.Step(ctx, op); ok {
@@ -76,7 +76,7 @@ func WaitForEvent[T any](ctx context.Context, stepID string, opts WaitForEventOp
 		ID:   hashedID,
 		Op:   op.Op,
 		Name: opts.Name,
-		Opts: op.Opts,
+		Opts: opts,
 	}
 	plannedOp.SetParallelMode(parallelMode(ctx))
 	mgr.AppendOp(plannedOp)

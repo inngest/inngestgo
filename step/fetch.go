@@ -45,7 +45,7 @@ func Fetch[OutputT any](
 ) (out FetchResponse[OutputT], err error) {
 	targetID := getTargetStepID(ctx)
 	mgr := preflight(ctx)
-	op := mgr.NewOp(enums.OpcodeGateway, id, nil)
+	op := mgr.NewOp(enums.OpcodeGateway, id)
 	hashedID := op.MustHash()
 
 	if val, ok := mgr.Step(ctx, op); ok {

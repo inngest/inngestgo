@@ -40,6 +40,8 @@ type checkpointAPI interface {
 	CheckpointNewRun(ctx context.Context, runID ulid.ULID, input NewAPIRunData) (*CheckpointRun, error)
 	CheckpointSteps(ctx context.Context, run CheckpointRun, steps []sdkrequest.GeneratorOpcode) error
 	CheckpointResponse(ctx context.Context, run CheckpointRun, result APIResult) error
+
+	GetSteps(ctx context.Context, runID ulid.ULID) (map[string]json.RawMessage, error)
 }
 
 // NewAPIRunRequest represents the entire request payload used to create new
@@ -158,31 +160,21 @@ func (c *APIClient) CheckpointResponse(ctx context.Context, run CheckpointRun, r
 	return c.makeRequest(ctx, "POST", fmt.Sprintf("/v1/http/runs/%s/response", run.RunID.String()), payload, nil)
 }
 
+func (c *APIClient) GetSteps(ctx context.Context, runID ulid.ULID) (map[string]json.RawMessage, error) {
+	byt, err := c.do(ctx, "GET", fmt.Sprintf("/v0/runs/%s/actions", runID.String()), nil)
+	if err != nil {
+		return nil, fmt.Errorf("error making api request: %w", err)
+	}
+	steps := map[string]json.RawMessage{}
+	err = json.Unmarshal(byt, &steps)
+	return steps, err
+}
+
 // makeRequest performs an authenticated HTTP request to the API
 func (c *APIClient) makeRequest(ctx context.Context, method, path string, payload any, response any) error {
-	var body bytes.Buffer
-	if payload != nil {
-		if err := json.NewEncoder(&body).Encode(payload); err != nil {
-			return fmt.Errorf("failed to encode request body: %w", err)
-		}
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, &body)
+	byt, err := c.do(ctx, method, path, payload)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.signingKey)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
-	}
-
-	byt, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("error reading response: %w", err)
+		return fmt.Errorf("error making api request: %w", err)
 	}
 
 	if response != nil {
@@ -193,14 +185,44 @@ func (c *APIClient) makeRequest(ctx context.Context, method, path string, payloa
 		}
 	}
 
-	_ = resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("API request failed with status %d (%s)", resp.StatusCode, byt)
-	}
-
 	return nil
 }
 
 type wrapper struct {
 	Data any `json:"data"`
+}
+
+// makeRequest performs an authenticated HTTP request to the API
+func (c *APIClient) do(ctx context.Context, method, path string, payload any) ([]byte, error) {
+	var body bytes.Buffer
+	if payload != nil {
+		if err := json.NewEncoder(&body).Encode(payload); err != nil {
+			return nil, fmt.Errorf("failed to encode request body: %w", err)
+		}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, &body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.signingKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	byt, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return byt, fmt.Errorf("API request failed with status %d (%s)", resp.StatusCode, byt)
+	}
+
+	return byt, err
 }

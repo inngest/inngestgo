@@ -2,11 +2,11 @@ package stephttp
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 
+	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -51,13 +51,12 @@ func readRequestBody(r *http.Request) ([]byte, error) {
 	return requestBody, nil
 }
 
-func (p *provider) getExistingRun(r *http.Request, created chan CheckpointRun) (CheckpointRun, bool) {
+func (p *provider) getExistingRun(r *http.Request, mgr sdkrequest.InvocationManager, created chan CheckpointRun) (CheckpointRun, bool) {
 	// Check if this is a resume request with Inngest headers
 	runIDHeader := r.Header.Get(headerRunID)
-	stackHeader := r.Header.Get(headerStack)
 	signatureHeader := r.Header.Get(headerSignature)
 
-	if runIDHeader == "" || stackHeader == "" || signatureHeader == "" {
+	if runIDHeader == "" {
 		return CheckpointRun{}, false
 	}
 
@@ -70,11 +69,17 @@ func (p *provider) getExistingRun(r *http.Request, created chan CheckpointRun) (
 	if run.RunID, err = ulid.Parse(runIDHeader); err != nil {
 		return CheckpointRun{}, false
 	}
-	if err = json.Unmarshal([]byte(stackHeader), &run.Stack); err != nil {
+
+	// TODO: Use API to fetch run data, then resume.
+	steps, err := p.api.GetSteps(r.Context(), run.RunID)
+	if err != nil {
+		// TODO: log
 		return CheckpointRun{}, false
 	}
 
-	// TODO: Use API to fetch run data, then resume.
+	// This is now always async.
+	mgr.SetSteps(steps)
+	mgr.SetStepMode(sdkrequest.StepModeReturn)
 
 	// Ensure we signal that the run is created in a goroutine, such that we do not blcok
 	// checkpointing.

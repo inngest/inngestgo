@@ -68,7 +68,7 @@ func WaitForSignal[T any](ctx context.Context, stepID string, opts WaitForSignal
 	if opts.OnConflict != "" {
 		args["conflict"] = opts.OnConflict
 	}
-	op := mgr.NewOp(enums.OpcodeWaitForSignal, stepID, args)
+	op := mgr.NewOp(enums.OpcodeWaitForSignal, stepID)
 	hashedID := op.MustHash()
 
 	// Check if this exists already.
@@ -95,7 +95,7 @@ func WaitForSignal[T any](ctx context.Context, stepID string, opts WaitForSignal
 		Op:          op.Op,
 		Name:        opts.Name,
 		DisplayName: &opts.Name,
-		Opts:        op.Opts,
+		Opts:        opts,
 	}
 	plannedOp.SetParallelMode(parallelMode(ctx))
 	mgr.AppendOp(plannedOp)

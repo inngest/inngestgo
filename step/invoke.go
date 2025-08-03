@@ -42,7 +42,7 @@ func Invoke[T any](ctx context.Context, id string, opts InvokeOpts) (T, error) {
 	if opts.Timeout > 0 {
 		args["timeout"] = str2duration.String(opts.Timeout)
 	}
-	op := mgr.NewOp(enums.OpcodeInvokeFunction, id, args)
+	op := mgr.NewOp(enums.OpcodeInvokeFunction, id)
 	hashedID := op.MustHash()
 
 	if val, ok := mgr.Step(ctx, op); ok {
@@ -89,7 +89,7 @@ func Invoke[T any](ctx context.Context, id string, opts InvokeOpts) (T, error) {
 		ID:   hashedID,
 		Op:   op.Op,
 		Name: id,
-		Opts: op.Opts,
+		Opts: opts,
 	}
 	plannedOp.SetParallelMode(parallelMode(ctx))
 	mgr.AppendOp(plannedOp)
