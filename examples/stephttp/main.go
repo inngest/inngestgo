@@ -14,8 +14,8 @@ import (
 func main() {
 	// Create Inngest API middleware
 	provider := stephttp.Setup(stephttp.SetupOpts{
-		// SigningKey: "your-signing-key", // TODO: Load from environment, remove from here.
-		Domain: "api.mycompany.com",
+		SigningKey: "abcd", // TODO: Load from environment, remove from here.
+		Domain:     "api.mycompany.com",
 	})
 
 	// Create HTTP server with step tooling
@@ -74,7 +74,7 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 		return "yea", nil
 	})
 
-	// step.Sleep(ctx, "sleep", time.Second)
+	step.Sleep(ctx, "sleep", time.Second)
 
 	// Step 2: Validate user data
 	validation, err := step.Run(ctx, "validate-user", func(ctx context.Context) (*ValidationResult, error) {
