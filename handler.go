@@ -1199,13 +1199,15 @@ func invoke(
 	fVal := reflect.ValueOf(sf.Func())
 	inputVal := reflect.New(fVal.Type().In(1)).Elem()
 
-	updateInput(
-		mgr,
+	err := updateInput(
 		sf,
 		inputVal,
 		input.Event,
 		types.ToAnySlice(input.Events),
 	)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// Set InputCtx
 	callCtx := InputCtx{
@@ -1280,13 +1282,16 @@ func invoke(
 			fCtx = mwInput.Context()
 
 			// Update the input we're passing to the Inngest function.
-			updateInput(
-				mgr,
+			err := updateInput(
 				sf,
 				inputVal,
 				mwInput.Event,
 				types.ToAnySlice(mwInput.Events),
 			)
+			if err != nil {
+				mgr.SetErr(err)
+				panic(step.ControlHijack{})
+			}
 		}
 
 		if len(input.Steps) == 0 {
@@ -1339,13 +1344,12 @@ func invoke(
 
 // updateInput applies the middleware input to the function input.
 func updateInput(
-	mgr sdkrequest.InvocationManager,
 	fn ServableFunction,
 	fnInput reflect.Value,
 	// mwInput *middleware.TransformableInput,
 	event any,
 	events []any,
-) {
+) error {
 	// If we have an actual value to add to the event, vs `Input[any]`, set it.
 	if fn.ZeroEvent() != nil {
 		eventType := reflect.TypeOf(fn.ZeroEvent())
@@ -1355,16 +1359,14 @@ func updateInput(
 			// byt, err := json.Marshal(mwInput.Event)
 			byt, err := json.Marshal(event)
 			if err != nil {
-				mgr.SetErr(fmt.Errorf("error marshalling event for function: %w", err))
-				panic(step.ControlHijack{})
+				return fmt.Errorf("error marshalling event for function: %w", err)
 			}
 
 			// The same type as the event.
 			newEvent := reflect.New(eventType).Interface()
 
 			if err := json.Unmarshal(byt, newEvent); err != nil {
-				mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
-				panic(step.ControlHijack{})
+				return fmt.Errorf("error unmarshalling event for function: %w", err)
 			}
 			fnInput.FieldByName("Event").Set(reflect.ValueOf(newEvent).Elem())
 		}
@@ -1378,15 +1380,13 @@ func updateInput(
 				// for _, evt := range mwInput.Events {
 				byt, err := json.Marshal(evt)
 				if err != nil {
-					mgr.SetErr(fmt.Errorf("error marshalling event for function: %w", err))
-					panic(step.ControlHijack{})
+					return fmt.Errorf("error marshalling event for function: %w", err)
 				}
 
 				// The same type as the event.
 				newEvent := reflect.New(eventType).Interface()
 				if err := json.Unmarshal(byt, newEvent); err != nil {
-					mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
-					panic(step.ControlHijack{})
+					return fmt.Errorf("error unmarshalling event for function: %w", err)
 				}
 
 				newEvents = reflect.Append(newEvents, reflect.ValueOf(newEvent).Elem())
@@ -1398,14 +1398,12 @@ func updateInput(
 		{
 			byt, err := json.Marshal(event)
 			if err != nil {
-				mgr.SetErr(fmt.Errorf("error marshalling event for function: %w", err))
-				panic(step.ControlHijack{})
+				return fmt.Errorf("error marshalling event for function: %w", err)
 			}
 
 			newEvent := map[string]any{}
 			if err := json.Unmarshal(byt, &newEvent); err != nil {
-				mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
-				panic(step.ControlHijack{})
+				return fmt.Errorf("error unmarshalling event for function: %w", err)
 			}
 			fnInput.FieldByName("Event").Set(reflect.ValueOf(newEvent))
 		}
@@ -1416,14 +1414,12 @@ func updateInput(
 			for i, evt := range events {
 				byt, err := json.Marshal(evt)
 				if err != nil {
-					mgr.SetErr(fmt.Errorf("error marshalling event for function: %w", err))
-					panic(step.ControlHijack{})
+					return fmt.Errorf("error marshalling event for function: %w", err)
 				}
 
 				var newEvent map[string]any
 				if err := json.Unmarshal(byt, &newEvent); err != nil {
-					mgr.SetErr(fmt.Errorf("error unmarshalling event for function: %w", err))
-					panic(step.ControlHijack{})
+					return fmt.Errorf("error unmarshalling event for function: %w", err)
 				}
 
 				newEvents[i] = newEvent
@@ -1431,4 +1427,6 @@ func updateInput(
 			fnInput.FieldByName("Events").Set(reflect.ValueOf(newEvents))
 		}
 	}
+
+	return nil
 }
