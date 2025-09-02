@@ -6,9 +6,18 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/oklog/ulid/v2"
 )
+
+func redirectToken(runID ulid.ULID) string {
+	// TODO: SIGN WITH A KEY OR RANDOM TOKEN
+	return runID.String()
+}
+
+func defaultRedirectURL(runID ulid.ULID) string {
+	// TODO: Dev server
+	return "https://api.inngest.com/v2/public/runs/" + redirectToken(runID)
+}
 
 // responseWriter captures the response for storing as the API result
 type responseWriter struct {
@@ -49,43 +58,6 @@ func readRequestBody(r *http.Request) ([]byte, error) {
 	// Restore body for the handler
 	r.Body = io.NopCloser(bytes.NewReader(requestBody))
 	return requestBody, nil
-}
-
-func (p *provider) getExistingRun(r *http.Request, mgr sdkrequest.InvocationManager, created chan CheckpointRun) (CheckpointRun, bool) {
-	// Check if this is a resume request with Inngest headers
-	runIDHeader := r.Header.Get(headerRunID)
-	signatureHeader := r.Header.Get(headerSignature)
-
-	if runIDHeader == "" {
-		return CheckpointRun{}, false
-	}
-
-	// TODO: Validate signature
-
-	var err error
-	run := CheckpointRun{
-		Signature: signatureHeader,
-	}
-	if run.RunID, err = ulid.Parse(runIDHeader); err != nil {
-		return CheckpointRun{}, false
-	}
-
-	// TODO: Use API to fetch run data, then resume.
-	steps, err := p.api.GetSteps(r.Context(), run.RunID)
-	if err != nil {
-		// TODO: log
-		return CheckpointRun{}, false
-	}
-
-	// This is now always async.
-	mgr.SetSteps(steps)
-	mgr.SetStepMode(sdkrequest.StepModeReturn)
-
-	// Ensure we signal that the run is created in a goroutine, such that we do not blcok
-	// checkpointing.
-	go func() { created <- run }()
-
-	return run, true
 }
 
 // createResumeManager creates a manager for resumed API requests

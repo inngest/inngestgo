@@ -27,11 +27,10 @@ const (
 	// StepModeCheckpoint checkpoints each step via an API then continues execution after
 	// acknowledgement of the step data.
 	StepModeCheckpoint
-	// StepModeBackground continues execution, checkpointing in the background.  Note
-	// that this doesn't wait for checkpoints to finish before continuing, leading to
-	// potentially unsynced steps.  This is only intended for HTTP endpoints in which
-	// steps are treated as enhanced tracing spans.
-	StepModeBackground
+	// StepModeManual indactes that the manager should neither return nor checkpoint the
+	// ops as they happen, and that we should instead leave handling opcodes to the owner
+	// of the manager.
+	StepModeManual
 )
 
 type requestCtxKeyType struct{}
@@ -72,33 +71,50 @@ type InvocationManager interface {
 	SetSteps(steps map[string]json.RawMessage)
 }
 
+type Opts struct {
+	SigningKey string
+	// Mode represents the mode of execution, eg. sync steps, or async steps.
+	Mode StepMode
+	// Fn represents the function being executed, if this is an async
+	// function.
+	Fn fn.ServableFunction
+	// Request represents the incoming SDK request.  Note that this may be
+	// entirely empty for sync runs.
+	Request *Request
+	// Middleware represents any middleware for the execution.
+	Middleware *middleware.MiddlewareManager
+	// Cancel, when executed cancels the context that is passed to the
+	// sync or async function.
+	Cancel context.CancelFunc
+}
+
 // NewManager returns an InvocationManager to manage the incoming executor request.  This
 // is required for step tooling to process.
-func NewManager(
-	fn fn.ServableFunction,
-	mw *middleware.MiddlewareManager,
-	cancel context.CancelFunc,
-	request *Request,
-	signingKey string,
-	mode StepMode,
-) InvocationManager {
+func NewManager(opts Opts) InvocationManager {
+	if opts.Request == nil {
+		opts.Request = &Request{}
+	}
+	if opts.Middleware == nil {
+		opts.Middleware = middleware.New()
+	}
+
 	unseen := types.Set[string]{}
-	for k := range request.Steps {
+	for k := range opts.Request.Steps {
 		unseen.Add(k)
 	}
 
 	return &requestCtxManager{
-		fn:         fn,
-		cancel:     cancel,
-		request:    request,
+		fn:         opts.Fn,
+		cancel:     opts.Cancel,
+		request:    opts.Request,
 		indexes:    map[string]int{},
 		l:          &sync.RWMutex{},
-		signingKey: signingKey,
+		signingKey: opts.SigningKey,
 		seen:       map[string]struct{}{},
 		seenLock:   &sync.RWMutex{},
 		unseen:     &unseen,
-		mw:         mw,
-		mode:       mode,
+		mw:         opts.Middleware,
+		mode:       opts.Mode,
 	}
 }
 
@@ -184,10 +200,8 @@ func (r *requestCtxManager) AppendOp(op GeneratorOpcode) {
 		// then return control to the handler.
 		r.cancel()
 		panic(ControlHijack{})
-	case StepModeBackground:
-		// Trigger batch checkpointing in the background with delay
-	case StepModeCheckpoint:
-		// Block on checkpointing, only resuming the next step once checkpointing has finished.
+	default:
+		// Do nothing else.
 	}
 }
 

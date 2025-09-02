@@ -1190,7 +1190,14 @@ func invoke(
 	}
 
 	// This must be a pointer so that it can be mutated from within function tools.
-	mgr := sdkrequest.NewManager(sf, mw, cancel, input, signingKey, sdkrequest.StepModeReturn)
+	mgr := sdkrequest.NewManager(sdkrequest.Opts{
+		Fn:         sf,
+		Middleware: mw,
+		Cancel:     cancel,
+		Request:    input,
+		SigningKey: signingKey,
+		Mode:       sdkrequest.StepModeReturn,
+	})
 	fCtx = sdkrequest.SetManager(fCtx, mgr)
 
 	// Create a new Input type.  We don't know ahead of time the type signature as

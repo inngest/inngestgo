@@ -30,19 +30,13 @@ func main() {
 func handleUsers(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// stephttp.Function(
-	// 	stephttp.Config{
-	// 		Slug: "/users/{id}",
-	// 	},
-	// 	func () {
-	// 		// everything in the API is in this func.
-	// 	},
-	// })
-
-	// stephttp.OmitBody()
-	// stephttp.SetRetries(ctx, 10)
-	// stephttp.SetFnSlug(ctx, "/users/{id}")
-	// stephttp.SetAsyncResponse(ctx, stephttp.AsyncRedirect|stephttp.AsyncToken|stephttp.Custom)
+	ctx = stephttp.Configure(ctx, stephttp.FnOpts{
+		ID:      "/users/{id}",
+		Retries: 2,
+		AsyncResponse: stephttp.AsyncResponseCustom(func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte("allo ms lightspeed!!!"))
+		}),
+	})
 
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -70,12 +64,6 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	step.Run(ctx, "whatever", func(ctx context.Context) (any, error) {
-		return "yea", nil
-	})
-
-	step.Sleep(ctx, "sleep", time.Second)
-
 	// Step 2: Validate user data
 	validation, err := step.Run(ctx, "validate-user", func(ctx context.Context) (*ValidationResult, error) {
 		// Simulate validation
@@ -92,6 +80,8 @@ func handleUsers(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Validation failed: %v", err), http.StatusBadRequest)
 		return
 	}
+
+	step.Sleep(ctx, "sleep", 5*time.Second)
 
 	// Step 3: Create user in database
 	user, err := step.Run(ctx, "create-user", func(ctx context.Context) (*User, error) {

@@ -1,3 +1,5 @@
 package inngestgo
 
-const SDKVersion = "0.13.0"
+import "github.com/inngest/inngestgo/pkg/version"
+
+const SDKVersion = version.SDKVersion

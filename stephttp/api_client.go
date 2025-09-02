@@ -37,10 +37,9 @@ type CheckpointRun struct {
 
 // checkpointAPI handles API function runs and step checkpointing
 type checkpointAPI interface {
-	CheckpointNewRun(ctx context.Context, runID ulid.ULID, input NewAPIRunData) (*CheckpointRun, error)
+	CheckpointNewRun(ctx context.Context, runID ulid.ULID, input NewAPIRunData, steps ...sdkrequest.GeneratorOpcode) (*CheckpointRun, error)
 	CheckpointSteps(ctx context.Context, run CheckpointRun, steps []sdkrequest.GeneratorOpcode) error
 	CheckpointResponse(ctx context.Context, run CheckpointRun, result APIResult) error
-
 	GetSteps(ctx context.Context, runID ulid.ULID) (map[string]json.RawMessage, error)
 }
 
@@ -58,6 +57,9 @@ type CheckpointNewRunRequest struct {
 	// Event embeds the key request information which is used as the triggering
 	// event for API-based runs.
 	Event inngestgo.GenericEvent[NewAPIRunData] `json:"event"`
+
+	// Steps are optional steps to send when creating the request.
+	Steps []sdkrequest.GeneratorOpcode `json:"steps,omitempty,omitzero"`
 }
 
 // NewAPIRunData represents event data stored and used to create new API-based
@@ -124,13 +126,14 @@ func NewAPIClient(baseURL, signingKey string) *APIClient {
 }
 
 // CheckpointNewRun creates a new API run checkpoint
-func (c *APIClient) CheckpointNewRun(ctx context.Context, runID ulid.ULID, input NewAPIRunData) (*CheckpointRun, error) {
+func (c *APIClient) CheckpointNewRun(ctx context.Context, runID ulid.ULID, input NewAPIRunData, steps ...sdkrequest.GeneratorOpcode) (*CheckpointRun, error) {
 	payload := CheckpointNewRunRequest{
 		RunID: runID,
 		Event: inngestgo.GenericEvent[NewAPIRunData]{
 			Name: "http/run.started",
 			Data: input,
 		},
+		Steps: steps,
 	}
 
 	resp := &CheckpointRun{}
