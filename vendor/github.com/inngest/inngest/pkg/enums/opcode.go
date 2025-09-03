@@ -17,7 +17,7 @@ const (
 	OpcodeAIGateway // AI gateway inference call
 	OpcodeGateway   // Gateway call
 	OpcodeWaitForSignal
-	OpcodeRunComplete // A run has completed successfully
+	OpcodeRunComplete
 )
 
 // opcodeSyncMap explicitly represents the sync opcodes that can be checkpointed.
