@@ -7,13 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngestgo/experimental"
 	"github.com/inngest/inngestgo/internal/fn"
 	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/types"
+	"github.com/inngest/inngestgo/pkg/interval"
 )
 
 type ControlHijack struct{}
@@ -340,7 +340,7 @@ type GeneratorOpcode struct {
 	// SDK versions < 3.?.? don't respond with the display name.
 	DisplayName *string `json:"displayName"`
 	// Timing represents the start and end time for the opcode, in terms of processing.
-	Timing Interval `json:"timing"`
+	Timing interval.Interval `json:"timing"`
 }
 
 func (g *GeneratorOpcode) SetParallelMode(mode enums.ParallelMode) {
@@ -383,33 +383,6 @@ type UserError struct {
 	Cause *UserError `json:"cause,omitempty"`
 }
 
-func NewInterval(start, end time.Time) Interval {
-	return Interval{
-		A: start.UnixNano(),
-		B: end.Sub(start).Nanoseconds(),
-	}
-}
-
-// Interval represents an interval between a start and end time.
-//
-// In order to minimize space, the start time is represented as UnixNano(), and the duration
-// is represented as the number of nanoseconds after the start.
-// the nanosecond
-type Interval struct {
-	// A represents the start of the interval, taken as the nanoseconds after the unix epoch
-	// (eg. via time.Now().UnixNano())
-	A int64 `json:"a"`
-	// B represents the duration, as nanoseconds.
-	B int64 `json:"b"`
-}
-
-func (i Interval) Start() time.Time {
-	return time.Unix(0, i.A)
-}
-
-func (i Interval) End() time.Time {
-	return i.Start().Add(time.Nanosecond * time.Duration(i.B))
-}
 
 // HasAsyncOps is a utility that checks whether the slice of GeneratorOpcdodes
 // has at least one async op.

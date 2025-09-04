@@ -12,6 +12,7 @@ import (
 	"github.com/inngest/inngestgo/internal"
 	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
+	"github.com/inngest/inngestgo/pkg/interval"
 )
 
 type RunOpts struct {
@@ -100,7 +101,7 @@ func Run[T any](
 				Message: err.Error(),
 				Data:    marshalled,
 			},
-			Timing: sdkrequest.NewInterval(pre, post),
+			Timing: interval.New(pre, post),
 		})
 
 		// API functions: return the error without panic
@@ -119,7 +120,7 @@ func Run[T any](
 		Op:     enums.OpcodeStepRun,
 		Name:   id,
 		Data:   byt,
-		Timing: sdkrequest.NewInterval(pre, post),
+		Timing: interval.New(pre, post),
 	})
 
 	return result, nil
