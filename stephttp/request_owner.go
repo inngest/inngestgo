@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/inngest/inngest/pkg/enums"
+	"github.com/inngest/inngestgo"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
+	"github.com/inngest/inngestgo/pkg/env"
 	"github.com/inngest/inngestgo/pkg/version"
 	"github.com/oklog/ulid/v2"
 )
@@ -185,15 +187,14 @@ func (o *requestOwner) handleAsyncConversion(ctx context.Context) error {
 }
 
 func (o *requestOwner) getExistingRun(ctx context.Context) bool {
-	// Check if this is a resume request with Inngest headers
-	runIDHeader := o.r.Header.Get(headerRunID)
-	signatureHeader := o.r.Header.Get(headerSignature)
-
-	if runIDHeader == "" {
+	// Validate signature and extract run information
+	if !validateResumeRequestSignature(ctx, o.r, o.provider.opts.signingKey(), o.provider.opts.signingKeyFallback()) {
 		return false
 	}
 
-	// TODO: Validate signature
+	// Extract headers after validation passes
+	runIDHeader := o.r.Header.Get(headerRunID)
+	signatureHeader := o.r.Header.Get(headerSignature)
 
 	var err error
 	o.run = CheckpointRun{
@@ -330,6 +331,40 @@ func (o *requestOwner) handleFirstCheckpoint(ctx context.Context) {
 	}
 
 	o.run = *resp
+}
+
+// validateResumeRequestSignature validates the signature for resume requests.
+// The signature is computed over the X-Run-ID header value, not the request body.
+// Returns true if validation passes or if in dev mode, false otherwise.
+func validateResumeRequestSignature(ctx context.Context, r *http.Request, signingKey, signingKeyFallback string) bool {
+	// Skip validation in dev mode
+	if env.IsDev() {
+		return true
+	}
+	
+	// Extract required headers
+	signatureHeader := r.Header.Get(headerSignature)
+	runIDHeader := r.Header.Get(headerRunID)
+	
+	// Require both headers in non-dev mode
+	if signatureHeader == "" || runIDHeader == "" {
+		return false
+	}
+	
+	// Validate signature with primary and fallback keys using the run ID as the payload
+	valid, _, err := inngestgo.ValidateRequestSignature(
+		ctx,
+		signatureHeader,
+		signingKey,
+		signingKeyFallback,
+		[]byte(runIDHeader),
+		false, // not dev mode
+	)
+	if err != nil {
+		return false
+	}
+	
+	return valid
 }
 
 func (o *requestOwner) appendResult(res APIResult) error {

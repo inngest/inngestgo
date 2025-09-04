@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -201,5 +202,69 @@ func TestAPIClient_NoFallbackKey(t *testing.T) {
 	// Should have made exactly 5 calls (no key rotation, just retries)
 	if callCount.Load() != 5 {
 		t.Errorf("Expected 5 calls, got %d", callCount.Load())
+	}
+}
+
+func TestValidateResumeRequestSignature_DevMode(t *testing.T) {
+	// Set dev mode
+	originalDev := os.Getenv("INNGEST_DEV")
+	os.Setenv("INNGEST_DEV", "1")
+	defer func() {
+		if originalDev == "" {
+			os.Unsetenv("INNGEST_DEV")
+		} else {
+			os.Setenv("INNGEST_DEV", originalDev)
+		}
+	}()
+
+	// Create test request
+	req := httptest.NewRequest("POST", "/test", nil)
+	
+	// Should return true in dev mode regardless of signature or headers
+	result := validateResumeRequestSignature(context.Background(), req, "key", "fallback")
+	if !result {
+		t.Error("Expected validation to pass in dev mode")
+	}
+}
+
+func TestValidateResumeRequestSignature_MissingSignature(t *testing.T) {
+	// Ensure not in dev mode
+	originalDev := os.Getenv("INNGEST_DEV")
+	os.Unsetenv("INNGEST_DEV")
+	defer func() {
+		if originalDev != "" {
+			os.Setenv("INNGEST_DEV", originalDev)
+		}
+	}()
+
+	// Create test request with run ID header but no signature
+	req := httptest.NewRequest("POST", "/test", nil)
+	req.Header.Set("x-run-id", "01HW5N8XQZJ9V2M3K4L5P6Q7R8")
+	
+	// Should return false when signature is missing
+	result := validateResumeRequestSignature(context.Background(), req, "key", "fallback")
+	if result {
+		t.Error("Expected validation to fail with missing signature")
+	}
+}
+
+func TestValidateResumeRequestSignature_MissingRunID(t *testing.T) {
+	// Ensure not in dev mode
+	originalDev := os.Getenv("INNGEST_DEV")
+	os.Unsetenv("INNGEST_DEV")
+	defer func() {
+		if originalDev != "" {
+			os.Setenv("INNGEST_DEV", originalDev)
+		}
+	}()
+
+	// Create test request with signature but no run ID header
+	req := httptest.NewRequest("POST", "/test", nil)
+	req.Header.Set("x-inngest-signature", "t=123&s=abc")
+	
+	// Should return false when run ID header is missing
+	result := validateResumeRequestSignature(context.Background(), req, "key", "fallback")
+	if result {
+		t.Error("Expected validation to fail with missing run ID header")
 	}
 }
