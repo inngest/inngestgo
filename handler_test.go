@@ -80,6 +80,16 @@ func TestRegister(t *testing.T) {
 		},
 	)
 	r.NoError(err)
+
+	_, err = CreateFunction(
+		c,
+		FunctionOpts{ID: "conditional-batch-func", BatchEvents: &ifn.EventBatchConfig{MaxSize: 20, Timeout: 10 * time.Second, If: toPtr("has(event.data.somefield)")}},
+		EventTrigger("test/batch.a", nil),
+		func(ctx context.Context, input Input[map[string]any]) (any, error) {
+			return nil, nil
+		},
+	)
+	r.NoError(err)
 }
 
 // TestInvoke asserts that invoking a function with both the correct and incorrect type
