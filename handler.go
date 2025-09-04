@@ -1303,7 +1303,7 @@ func invoke(
 			)
 			if err != nil {
 				mgr.SetErr(err)
-				panic(step.ControlHijack{})
+				panic(sdkrequest.ControlHijack{})
 			}
 		}
 
