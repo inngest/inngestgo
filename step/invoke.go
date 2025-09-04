@@ -89,7 +89,7 @@ func Invoke[T any](ctx context.Context, id string, opts InvokeOpts) (T, error) {
 		ID:   hashedID,
 		Op:   op.Op,
 		Name: id,
-		Opts: opts,
+		Opts: args,
 	}
 	plannedOp.SetParallelMode(parallelMode(ctx))
 	mgr.AppendOp(plannedOp)
