@@ -22,13 +22,13 @@ func TestAPIClient_RetryLogic(t *testing.T) {
 		if count <= 4 {
 			// Fail the first 4 attempts
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(`{"error": "server error"}`))
+			_, _ = w.Write([]byte(`{"error": "server error"}`))
 			return
 		}
 		
 		// Succeed on the 5th attempt
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"data": {"success": true}}`))
+		_, _ = w.Write([]byte(`{"data": {"success": true}}`))
 	}))
 	defer server.Close()
 
@@ -85,7 +85,7 @@ func TestAPIClient_RetryFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error": "server error"}`))
+		_, _ = w.Write([]byte(`{"error": "server error"}`))
 	}))
 	defer server.Close()
 
@@ -117,20 +117,20 @@ func TestAPIClient_SigningKeyRotation(t *testing.T) {
 		if authHeader == "Bearer primary-key" {
 			// Fail with 401 for primary key
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"error": "unauthorized"}`))
+			_, _ = w.Write([]byte(`{"error": "unauthorized"}`))
 			return
 		}
 		
 		if authHeader == "Bearer fallback-key" {
 			// Succeed for fallback key
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"data": {"success": true}}`))
+			_, _ = w.Write([]byte(`{"data": {"success": true}}`))
 			return
 		}
 		
 		// Unexpected key
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error": "invalid key"}`))
+		_, _ = w.Write([]byte(`{"error": "invalid key"}`))
 	}))
 	defer server.Close()
 
@@ -186,7 +186,7 @@ func TestAPIClient_NoFallbackKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount.Add(1)
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error": "unauthorized"}`))
+		_, _ = w.Write([]byte(`{"error": "unauthorized"}`))
 	}))
 	defer server.Close()
 
@@ -208,12 +208,12 @@ func TestAPIClient_NoFallbackKey(t *testing.T) {
 func TestValidateResumeRequestSignature_DevMode(t *testing.T) {
 	// Set dev mode
 	originalDev := os.Getenv("INNGEST_DEV")
-	os.Setenv("INNGEST_DEV", "1")
+	_ = os.Setenv("INNGEST_DEV", "1")
 	defer func() {
 		if originalDev == "" {
-			os.Unsetenv("INNGEST_DEV")
+			_ = os.Unsetenv("INNGEST_DEV")
 		} else {
-			os.Setenv("INNGEST_DEV", originalDev)
+			_ = os.Setenv("INNGEST_DEV", originalDev)
 		}
 	}()
 
@@ -230,10 +230,10 @@ func TestValidateResumeRequestSignature_DevMode(t *testing.T) {
 func TestValidateResumeRequestSignature_MissingSignature(t *testing.T) {
 	// Ensure not in dev mode
 	originalDev := os.Getenv("INNGEST_DEV")
-	os.Unsetenv("INNGEST_DEV")
+	_ = os.Unsetenv("INNGEST_DEV")
 	defer func() {
 		if originalDev != "" {
-			os.Setenv("INNGEST_DEV", originalDev)
+			_ = os.Setenv("INNGEST_DEV", originalDev)
 		}
 	}()
 
@@ -251,10 +251,10 @@ func TestValidateResumeRequestSignature_MissingSignature(t *testing.T) {
 func TestValidateResumeRequestSignature_MissingRunID(t *testing.T) {
 	// Ensure not in dev mode
 	originalDev := os.Getenv("INNGEST_DEV")
-	os.Unsetenv("INNGEST_DEV")
+	_ = os.Unsetenv("INNGEST_DEV")
 	defer func() {
 		if originalDev != "" {
-			os.Setenv("INNGEST_DEV", originalDev)
+			_ = os.Setenv("INNGEST_DEV", originalDev)
 		}
 	}()
 
