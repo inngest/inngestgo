@@ -17,9 +17,14 @@ import (
 func TestSleepUntil(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	mw := middleware.New()
-	mgr := sdkrequest.NewManager(nil, mw, cancel, &sdkrequest.Request{
-		Steps: map[string]json.RawMessage{},
-	}, "", sdkrequest.StepModeBackground)
+	mgr := sdkrequest.NewManager(sdkrequest.Opts{
+		Middleware: mw,
+		Cancel:     cancel,
+		Request: &sdkrequest.Request{
+			Steps: map[string]json.RawMessage{},
+		},
+		Mode: sdkrequest.StepModeManual,
+	})
 	ctx = sdkrequest.SetManager(ctx, mgr)
 	ctx = internal.ContextWithMiddleware(ctx, mw)
 

@@ -14,8 +14,7 @@ import (
 func main() {
 	// Create Inngest API middleware
 	provider := stephttp.Setup(stephttp.SetupOpts{
-		SigningKey: "abcd", // TODO: Load from environment, remove from here.
-		Domain:     "api.mycompany.com",
+		Domain: "api.mycompany.com",
 	})
 
 	// Create HTTP server with step tooling
@@ -28,20 +27,9 @@ func main() {
 
 // handleUsers demonstrates API function with step tooling
 func handleUsers(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	ctx = stephttp.Configure(ctx, stephttp.FnOpts{
-		ID:      "/users/{id}",
-		Retries: 2,
-		AsyncResponse: stephttp.AsyncResponseCustom(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("allo ms lightspeed!!!"))
-		}),
+	ctx := stephttp.Configure(r.Context(), stephttp.FnOpts{
+		AsyncResponse: stephttp.AsyncResponseRedirect{},
 	})
-
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 
 	// Step 1: Authenticate (with full observability)
 	auth, err := step.Run(ctx, "authenticate", func(ctx context.Context) (*AuthResult, error) {

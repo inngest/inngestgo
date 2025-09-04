@@ -3,10 +3,11 @@ package stephttp
 import (
 	"log/slog"
 	"net/http"
+	"os"
 	"sync/atomic"
 
-	"github.com/inngest/inngestgo"
 	"github.com/inngest/inngestgo/internal/middleware"
+	"github.com/inngest/inngestgo/pkg/env"
 )
 
 const (
@@ -22,13 +23,46 @@ type Provider interface {
 	Wait() chan bool
 }
 
-// SetupOpts contains required configuration for the API middleware.  Optional
+// SetupOpts contains configuration for the API middleware.  Optional
 // configuration is supplied via SetupOpt adapters.
 type SetupOpts struct {
-	// SigningKey is the Inngest signing key for authentication
-	SigningKey string
 	// Domain is the domain for this API (e.g., "api.mycompany.com")
 	Domain string
+	// Optional represents optional setup options that you can confgure.
+	Optional OptionalSetupOpts
+}
+
+type OptionalSetupOpts struct {
+	// SigningKey is the Inngest signing key for authentication.  If empty, this defaults
+	// to os.Getenv("INNGEST_SIGNING_KEY").
+	SigningKey string
+	// SigningKeyFallback is the optional signing key fallback. If empty, this defaults
+	// to os.Getenv("INNGEST_SIGNING_KEY_FALLBACK").
+	SigningKeyFallback string
+	// BaseURL is the URL of the Inngest API.  If empty, this:
+	//
+	//   1. Checks to see if INNGEST_DEV is set, indicating dev mode.  If set, we
+	//      attempt to use the INNGEST_DEV env var as the base URL if set to a URL,
+	//      or default to "http://127.0.0.1:8288" for dev mode.
+	//   2. If INNGEST_DEV is not set, we default to the production URL:
+	//      "https://api.inngest.com".
+	BaseURL string
+	// Middleware represents optional middleware to run before and after processing.
+	Middleware []func() middleware.Middleware
+}
+
+func (o SetupOpts) signingKey() string {
+	if o.Optional.SigningKey == "" {
+		return os.Getenv("INNGEST_SIGNING_KEY")
+	}
+	return o.Optional.SigningKey
+}
+
+func (o SetupOpts) baseURL() string {
+	if o.Optional.BaseURL != "" {
+		return o.Optional.BaseURL
+	}
+	return env.APIServerURL()
 }
 
 // provider wraps HTTP handlers to provide Inngest step tooling for API functions.
@@ -41,53 +75,24 @@ type provider struct {
 
 	// inflight records the total number of in flight requests.
 	inflight *atomic.Int32
-
-	maxRequestSizeLimit int
-	baseURL             string
-}
-
-type SetupOpt func(p *provider)
-
-// SetupRequestSizeLimit specifies the maximum request size for the input request.  By default,
-// this is set to 4MB.
-func SetupRequestSizeLimit(limit int) SetupOpt {
-	return func(mw *provider) {
-		mw.maxRequestSizeLimit = limit
-	}
-}
-
-// SetupBaseURL changes the API URL used for step HTTP operations such as checkpointing.
-func SetupBaseURL(url string) SetupOpt {
-	return func(mw *provider) {
-		mw.baseURL = url
-	}
-}
-
-// SetupInngestMiddleware adds Inngest middleware to run whenever steps and functions execute.
-func SetupInngestMiddleware(mw func() middleware.Middleware) SetupOpt {
-	return func(httpmw *provider) {
-		httpmw.mw.Add(mw)
-	}
 }
 
 // Setup creates a new API provider instance
-func Setup(opts SetupOpts, optionalOpts ...SetupOpt) *provider {
+func Setup(opts SetupOpts) *provider {
 	// Create a middleware manager for step execution hooks
 	mw := middleware.New()
+	for _, m := range opts.Optional.Middleware {
+		mw.Add(m)
+	}
 
 	p := &provider{
 		opts:     opts,
 		mw:       mw,
 		inflight: &atomic.Int32{},
 		logger:   slog.Default(),
-		baseURL:  inngestgo.APIServerURL(),
 	}
 
-	for _, o := range optionalOpts {
-		o(p)
-	}
-
-	p.api = NewAPIClient(p.baseURL, p.opts.SigningKey)
+	p.api = NewAPIClient(p.opts.baseURL(), p.opts.signingKey())
 
 	return p
 }

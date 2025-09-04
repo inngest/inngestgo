@@ -21,7 +21,12 @@ func TestStep(t *testing.T) {
 	}
 
 	mw := middleware.New()
-	mgr := sdkrequest.NewManager(nil, mw, cancel, req, "", sdkrequest.StepModeBackground)
+	mgr := sdkrequest.NewManager(sdkrequest.Opts{
+		Middleware: mw,
+		Cancel:     cancel,
+		Request:    req,
+		Mode:       sdkrequest.StepModeManual,
+	})
 	ctx = sdkrequest.SetManager(ctx, mgr)
 
 	type response struct {
@@ -184,7 +189,12 @@ func TestStep(t *testing.T) {
 			name = "new step must append"
 
 			mw := middleware.New()
-			mgr := sdkrequest.NewManager(nil, mw, cancel, req, "", sdkrequest.StepModeBackground)
+			mgr := sdkrequest.NewManager(sdkrequest.Opts{
+		Middleware: mw,
+		Cancel:     cancel,
+		Request:    req,
+		Mode:       sdkrequest.StepModeManual,
+	})
 			ctx = sdkrequest.SetManager(ctx, mgr)
 			ctx = internal.ContextWithMiddleware(ctx, mw)
 

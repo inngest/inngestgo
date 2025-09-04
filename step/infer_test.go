@@ -20,7 +20,12 @@ func TestInferTypes(t *testing.T) {
 		}
 
 		mw := middleware.New()
-		mgr := sdkrequest.NewManager(nil, mw, cancel, req, "", sdkrequest.StepModeBackground)
+		mgr := sdkrequest.NewManager(sdkrequest.Opts{
+			Middleware: mw,
+			Cancel:     cancel,
+			Request:    req,
+			Mode:       sdkrequest.StepModeManual,
+		})
 		ctx = sdkrequest.SetManager(ctx, mgr)
 
 		resp, err := Infer[openai.ChatCompletionRequest, openai.ChatCompletionResponse](

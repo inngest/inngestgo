@@ -22,7 +22,7 @@ func processRequest(p *provider, r *http.Request, w http.ResponseWriter, next ht
 		next:     next,
 		provider: p,
 		mgr: sdkrequest.NewManager(sdkrequest.Opts{
-			SigningKey: p.opts.SigningKey,
+			SigningKey: p.opts.signingKey(),
 			Mode:       sdkrequest.StepModeManual,
 		}),
 
@@ -203,7 +203,7 @@ func (o *requestOwner) getExistingRun(ctx context.Context) bool {
 		return false
 	}
 
-	// TODO: Use V2 API
+	// XXX: Use V2 API when created.
 	steps, err := o.provider.api.GetSteps(ctx, o.run.RunID)
 	if err != nil {
 		return false
@@ -213,7 +213,7 @@ func (o *requestOwner) getExistingRun(ctx context.Context) bool {
 	o.mgr.SetSteps(steps)
 	o.mgr.SetStepMode(sdkrequest.StepModeReturn)
 
-	// TODO: SET RUN.
+	// XXX: When using the V2 API, we should update o.run with the new run context.
 
 	return true
 }

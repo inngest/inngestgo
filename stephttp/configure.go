@@ -23,7 +23,7 @@ type FnOpts struct {
 	//
 	// Note that retries will happen async, and the API will respond based off
 	// of the AsyncResponse type defined in the function configuration.
-	Retries int32
+	// Retries int32
 
 	// OmitBody prevents the incoming request from being stored.
 	OmitBody bool

@@ -9,6 +9,7 @@ import (
 	"github.com/inngest/inngestgo/connect"
 	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
+	"github.com/inngest/inngestgo/pkg/env"
 )
 
 const (
@@ -111,7 +112,7 @@ func Connect(ctx context.Context, opts ConnectOpts) (connect.WorkerConnection, e
 		MaxConcurrency:           concurrency,
 		APIBaseUrl:               defaultClient.h.GetAPIBaseURL(),
 		IsDev:                    defaultClient.h.isDev(),
-		DevServerUrl:             DevServerURL(),
+		DevServerUrl:             env.DevServerURL(),
 		InstanceID:               opts.InstanceID,
 		Platform:                 Ptr(platform()),
 		SDKVersion:               SDKVersion,

@@ -13,6 +13,7 @@ import (
 	"os"
 	"reflect"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/internal/types"
+	"github.com/inngest/inngestgo/pkg/env"
 	"github.com/inngest/inngestgo/step"
 )
 
@@ -45,6 +47,10 @@ var (
 		TrustProbe: types.TrustProbeV1,
 		Connect:    types.ConnectV1,
 	}
+)
+
+const (
+	envKeyAllowInBandSync = "INNGEST_ALLOW_IN_BAND_SYNC"
 )
 
 type handlerOpts struct {
@@ -151,7 +157,7 @@ func (h handlerOpts) GetAPIBaseURL() string {
 	}
 
 	if h.isDev() {
-		return DevServerURL()
+		return env.DevServerURL()
 	}
 
 	return defaultAPIOrigin
@@ -174,7 +180,7 @@ func (h handlerOpts) GetEventAPIBaseURL() string {
 	}
 
 	if h.isDev() {
-		return DevServerURL()
+		return env.DevServerURL()
 	}
 
 	return defaultEventAPIOrigin
@@ -234,7 +240,7 @@ func (h handlerOpts) isDev() bool {
 		return *h.Dev
 	}
 
-	return IsDev()
+	return env.IsDev()
 }
 
 // newHandler returns a new Handler for serving Inngest functions.
@@ -961,8 +967,8 @@ func (h *handler) createSecureInspection() (*secureInspection, error) {
 	apiOrigin := defaultAPIOrigin
 	eventAPIOrigin := defaultEventAPIOrigin
 	if h.isDev() {
-		apiOrigin = DevServerURL()
-		eventAPIOrigin = DevServerURL()
+		apiOrigin = env.DevServerURL()
+		eventAPIOrigin = env.DevServerURL()
 	}
 
 	var eventKeyHash *string
@@ -1438,4 +1444,12 @@ func updateInput(
 			fnInput.FieldByName("Events").Set(reflect.ValueOf(newEvents))
 		}
 	}
+}
+
+func isTrue(val string) bool {
+	val = strings.ToLower(val)
+	if val == "true" || val == "1" {
+		return true
+	}
+	return false
 }

@@ -1,13 +1,14 @@
-package inngestgo
+package env
 
 import (
 	"net/url"
 	"os"
-	"strings"
 )
 
 const (
-	envKeyAllowInBandSync = "INNGEST_ALLOW_IN_BAND_SYNC"
+	DevServerOrigin       = "http://127.0.0.1:8288"
+	DefaultAPIOrigin      = "https://api.inngest.com"
+	DefaultEventAPIOrigin = "https://inn.gs"
 )
 
 // IsDev returns whether to use the dev server, by checking the presence of the INNGEST_DEV
@@ -31,16 +32,7 @@ func DevServerURL() string {
 			return dev
 		}
 	}
-	return devServerOrigin
-}
-
-func isTrue(val string) bool {
-	val = strings.ToLower(val)
-	if val == "true" || val == "1" {
-		return true
-	}
-
-	return false
+	return DevServerOrigin
 }
 
 // APIServerURL returns the URL used to access the Inngest API.  This uses the INNGEST_DEV
