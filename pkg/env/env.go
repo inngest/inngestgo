@@ -38,8 +38,8 @@ func DevServerURL() string {
 // APIServerURL returns the URL used to access the Inngest API.  This uses the INNGEST_DEV
 // environment variable, or defaults to 'https://api.inngest.com' (production) if unset.
 func APIServerURL() string {
-	if url := DevServerURL(); url != "" {
-		return url
+	if IsDev() {
+		return DevServerURL()
 	}
 	return "https://api.inngest.com"
 }
