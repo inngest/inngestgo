@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -111,17 +112,22 @@ type APIResult struct {
 
 // APIClient handles HTTP requests to the checkpoint API
 type APIClient struct {
-	baseURL    string
-	signingKey string
-	httpClient *http.Client
+	baseURL         string
+	primaryKey      string
+	fallbackKey     string
+	httpClient      *http.Client
+	// useFallback tracks whether to use the fallback key (1) or primary key (0)
+	useFallback     *atomic.Bool
 }
 
-// NewAPIClient creates a new API client with the given domain and signing key
-func NewAPIClient(baseURL, signingKey string) *APIClient {
+// NewAPIClient creates a new API client with the given domain and signing keys
+func NewAPIClient(baseURL, primaryKey, fallbackKey string) *APIClient {
 	return &APIClient{
-		baseURL:    baseURL,
-		signingKey: signingKey,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		baseURL:     baseURL,
+		primaryKey:  primaryKey,
+		fallbackKey: fallbackKey,
+		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		useFallback: &atomic.Bool{},
 	}
 }
 
@@ -210,7 +216,7 @@ func (c *APIClient) do(ctx context.Context, method, path string, payload any) ([
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.signingKey)
+	req.Header.Set("Authorization", "Bearer "+c.getCurrentSigningKey())
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -226,8 +232,22 @@ func (c *APIClient) do(ctx context.Context, method, path string, payload any) ([
 	}
 
 	if resp.StatusCode >= 400 {
+		// If we get a 401 and have a fallback key, try switching to it
+		if resp.StatusCode == 401 && c.fallbackKey != "" && !c.useFallback.Load() {
+			c.useFallback.Store(true)
+			// Retry the request with the fallback key
+			return c.do(ctx, method, path, payload)
+		}
 		return byt, fmt.Errorf("API request failed with status %d (%s)", resp.StatusCode, byt)
 	}
 
 	return byt, err
+}
+
+// getCurrentSigningKey returns the appropriate signing key based on rotation state
+func (c *APIClient) getCurrentSigningKey() string {
+	if c.useFallback.Load() {
+		return c.fallbackKey
+	}
+	return c.primaryKey
 }

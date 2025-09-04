@@ -177,7 +177,7 @@ func (o *requestOwner) handleAsyncConversion(ctx context.Context) error {
 	}
 
 	if url == "" {
-		url = defaultRedirectURL(o.run.RunID)
+		url = defaultRedirectURL(o.provider.opts, o.run.RunID)
 	}
 
 	http.Redirect(o.w, o.r, url, http.StatusSeeOther)

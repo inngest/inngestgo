@@ -58,6 +58,13 @@ func (o SetupOpts) signingKey() string {
 	return o.Optional.SigningKey
 }
 
+func (o SetupOpts) signingKeyFallback() string {
+	if o.Optional.SigningKeyFallback == "" {
+		return os.Getenv("INNGEST_SIGNING_KEY_FALLBACK")
+	}
+	return o.Optional.SigningKeyFallback
+}
+
 func (o SetupOpts) baseURL() string {
 	if o.Optional.BaseURL != "" {
 		return o.Optional.BaseURL
@@ -92,7 +99,7 @@ func Setup(opts SetupOpts) *provider {
 		logger:   slog.Default(),
 	}
 
-	p.api = NewAPIClient(p.opts.baseURL(), p.opts.signingKey())
+	p.api = NewAPIClient(p.opts.baseURL(), p.opts.signingKey(), p.opts.signingKeyFallback())
 
 	return p
 }

@@ -14,9 +14,8 @@ func redirectToken(runID ulid.ULID) string {
 	return runID.String()
 }
 
-func defaultRedirectURL(runID ulid.ULID) string {
-	// TODO: Dev server
-	return "https://api.inngest.com/v2/public/runs/" + redirectToken(runID)
+func defaultRedirectURL(o SetupOpts, runID ulid.ULID) string {
+	return o.baseURL() + "/v2/public/runs" + redirectToken(runID)
 }
 
 // responseWriter captures the response for storing as the API result
