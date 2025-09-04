@@ -15,7 +15,7 @@ func redirectToken(runID ulid.ULID) string {
 }
 
 func defaultRedirectURL(o SetupOpts, runID ulid.ULID) string {
-	return o.baseURL() + "/v2/public/runs" + redirectToken(runID)
+	return o.baseURL() + "/v2/public/runs/" + redirectToken(runID)
 }
 
 // responseWriter captures the response for storing as the API result

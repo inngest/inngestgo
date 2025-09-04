@@ -193,16 +193,13 @@ func (o *requestOwner) getExistingRun(ctx context.Context) bool {
 	}
 
 	// Extract headers after validation passes
-	runIDHeader := o.r.Header.Get(headerRunID)
-	signatureHeader := o.r.Header.Get(headerSignature)
-
-	var err error
-	o.run = CheckpointRun{
-		Signature: signatureHeader,
-	}
-	if o.run.RunID, err = ulid.Parse(runIDHeader); err != nil {
+	runID, err := ulid.Parse(o.r.Header.Get(headerRunID))
+	if err != nil {
 		return false
 	}
+
+	o.run.RunID = runID
+	o.run.Signature = o.r.Header.Get(headerSignature)
 
 	// XXX: Use V2 API when created.
 	steps, err := o.provider.api.GetSteps(ctx, o.run.RunID)

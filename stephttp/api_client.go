@@ -112,12 +112,12 @@ type APIResult struct {
 
 // APIClient handles HTTP requests to the checkpoint API
 type APIClient struct {
-	baseURL         string
-	primaryKey      string
-	fallbackKey     string
-	httpClient      *http.Client
+	baseURL     string
+	primaryKey  string
+	fallbackKey string
+	httpClient  *http.Client
 	// useFallback tracks whether to use the fallback key (1) or primary key (0)
-	useFallback     *atomic.Bool
+	useFallback *atomic.Bool
 }
 
 // NewAPIClient creates a new API client with the given domain and signing keys
@@ -206,16 +206,16 @@ type wrapper struct {
 // Returns the response body on success, or the last error encountered on failure.
 func (c *APIClient) do(ctx context.Context, method, path string, payload any) ([]byte, error) {
 	var lastErr error
-	
+
 	// Retry up to 5 times with exponential backoff, capped at 400ms
 	for attempt := 0; attempt < 5; attempt++ {
 		byt, err := c.doSingle(ctx, method, path, payload)
 		if err == nil {
 			return byt, nil
 		}
-		
+
 		lastErr = err
-		
+
 		// If not the last attempt, wait and retry
 		if attempt < 4 {
 			backoff := time.Duration(50*(1<<attempt)) * time.Millisecond
@@ -225,7 +225,7 @@ func (c *APIClient) do(ctx context.Context, method, path string, payload any) ([
 			time.Sleep(backoff)
 		}
 	}
-	
+
 	return nil, lastErr
 }
 
