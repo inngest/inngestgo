@@ -1,0 +1,105 @@
+package stephttp
+
+import (
+	"context"
+	"net/http"
+
+	"github.com/oklog/ulid/v2"
+)
+
+type AsyncResponse interface {
+	isAsyncResponse()
+}
+
+// FnOpts allows you to define function configuration options for your API-based
+// Inngest function.
+type FnOpts struct {
+	// ID represents the function ID.  You should always set this, and must
+	// set this when the URL contains values or identifiers, eg /users/123.
+	ID string
+
+	// Retries indicates the number of retries in each step.  By default,
+	// for API-based synchronous functions this is zero.
+	//
+	// Note that retries will happen async, and the API will respond based off
+	// of the AsyncResponse type defined in the function configuration.
+	// Retries int32
+
+	// OmitBody prevents the incoming request from being stored.
+	OmitBody bool
+
+	// AsyncResponse determines how we respond to a user when an API hits an
+	// async step (eg. step.sleep, step.waitForEvent) or if a step errors.
+	//
+	// Mot of the time, AsyncResponseRedirect allows for seamless handling of
+	// step errors and sleeping steps.
+	//
+	// For more information, see the Inngest docs.
+	//
+	// By default, this uses the AsyncResponseRedirect response type, redirecting
+	// the user to a URL that will block and return the API result automatically
+	// once the API finishes.
+	AsyncResponse AsyncResponse
+}
+
+func Configure(ctx context.Context, opts FnOpts) context.Context {
+	if _, ok := ctx.Value(fnConfigCtx).(FnOpts); ok {
+		// Here, we should ideally warn, if we have a logger available.
+		return ctx
+	}
+
+	if set, ok := ctx.Value(fnSetterCtx).(func(FnOpts)); ok {
+		set(opts)
+	}
+
+	return context.WithValue(ctx, fnConfigCtx, opts)
+}
+
+// AsyncResponseRedirect redirects the user to a URL which will block until the async
+// function completes, then return the output to the user.
+//
+// This is seamless, and as long as the function executes within a specific period the
+// user will not know that the API finished asynchronously.
+type AsyncResponseRedirect struct {
+	// URL is the optional URL to redirect to.  If empty, we will redirect to
+	// the Inngest API which will automatically block until the function completes.
+	//
+	// Note that this accepts a token which can be used to hit the Inngest API to
+	// block for the API result.
+	URL func(token string) string
+}
+
+func (a AsyncResponseRedirect) isAsyncResponse() {}
+
+// AsyncResponseCustom allows you to configure custom HTTP responses when a sync
+// function hits an async step.
+//
+// When you use eg. `step.sleep`, the function pauses and you must return a response
+// to the user.
+type AsyncResponseCustom http.HandlerFunc
+
+func (AsyncResponseCustom) isAsyncResponse() {}
+
+// AsyncResponseToken responds with the Token format, allowing clients to
+// wait for the function to finish by hitting our V2 API with the given token.
+type AsyncResponseToken struct{}
+
+func (a AsyncResponseToken) isAsyncResponse() {}
+
+// asyncResponseToken is the response type that we return in the AsyncResponseToken
+// response method.
+type asyncResponseToken struct {
+	RunID ulid.ULID `json:"run_id"`
+	Token string    `json:"token"`
+}
+
+//
+// context setters and getters
+//
+
+type fnConfigKeyType string
+
+const (
+	fnConfigCtx = fnConfigKeyType("inngest-fn-opts")
+	fnSetterCtx = fnConfigKeyType("inngest-fn-setter")
+)

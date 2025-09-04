@@ -16,12 +16,17 @@ import (
 
 func TestSleepUntil(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
-	mw := middleware.NewMiddlewareManager()
-	mgr := sdkrequest.NewManager(nil, mw, cancel, &sdkrequest.Request{
-		Steps: map[string]json.RawMessage{},
-	}, "")
+	mw := middleware.New()
+	mgr := sdkrequest.NewManager(sdkrequest.Opts{
+		Middleware: mw,
+		Cancel:     cancel,
+		Request: &sdkrequest.Request{
+			Steps: map[string]json.RawMessage{},
+		},
+		Mode: sdkrequest.StepModeYield,
+	})
 	ctx = sdkrequest.SetManager(ctx, mgr)
-	ctx = internal.ContextWithMiddlewareManager(ctx, mw)
+	ctx = internal.ContextWithMiddleware(ctx, mw)
 
 	assertions := func(until time.Time) {
 		ops := mgr.Ops()
@@ -45,7 +50,7 @@ func TestSleepUntil(t *testing.T) {
 		func() {
 			defer func() {
 				rcv := recover()
-				require.Equal(t, ControlHijack{}, rcv)
+				require.Equal(t, sdkrequest.ControlHijack{}, rcv)
 			}()
 
 			require.False(t, IsWithinStep(ctx))
