@@ -5,7 +5,6 @@ import (
 
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
-	"github.com/inngest/inngestgo/step"
 )
 
 type Result struct {
@@ -45,13 +44,14 @@ func ParallelWithOpts(
 	opts ParallelOpts,
 	fns ...func(ctx context.Context) (any, error),
 ) Results {
-	ctx = context.WithValue(ctx, step.ParallelKey, true)
-	ctx = context.WithValue(ctx, step.ParallelModeKey, opts.ParallelMode)
+	ctx = context.WithValue(ctx, sdkrequest.ParallelKey, true)
+	ctx = context.WithValue(ctx, sdkrequest.ParallelModeKey, opts.ParallelMode)
 
 	results := Results{}
 	isPlanned := false
 	ch := make(chan struct{}, 1)
 	var unexpectedPanic any
+
 	for _, fn := range fns {
 		fn := fn
 		go func(fn func(ctx context.Context) (any, error)) {
@@ -80,6 +80,5 @@ func ParallelWithOpts(
 	if isPlanned {
 		panic(sdkrequest.ControlHijack{})
 	}
-
 	return results
 }

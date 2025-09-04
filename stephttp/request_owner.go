@@ -131,7 +131,7 @@ func (o *requestOwner) handle(ctx context.Context) error {
 	//
 	// Append the run complete result to the ops, which finalizes the run in
 	// a single call.
-	if err := o.appendResult(result); err != nil {
+	if err := o.appendResult(ctx, result); err != nil {
 		o.provider.logger.Error("error appending run complete op",
 			"error", err,
 			"run_id", o.run.RunID,
@@ -341,16 +341,16 @@ func validateResumeRequestSignature(ctx context.Context, r *http.Request, signin
 	if env.IsDev() {
 		return true
 	}
-	
+
 	// Extract required headers
 	signatureHeader := r.Header.Get(headerSignature)
 	runIDHeader := r.Header.Get(headerRunID)
-	
+
 	// Require both headers in non-dev mode
 	if signatureHeader == "" || runIDHeader == "" {
 		return false
 	}
-	
+
 	// Validate signature with primary and fallback keys using the run ID as the payload
 	valid, _, err := inngestgo.ValidateRequestSignature(
 		ctx,
@@ -363,11 +363,11 @@ func validateResumeRequestSignature(ctx context.Context, r *http.Request, signin
 	if err != nil {
 		return false
 	}
-	
+
 	return valid
 }
 
-func (o *requestOwner) appendResult(res APIResult) error {
+func (o *requestOwner) appendResult(ctx context.Context, res APIResult) error {
 	// Append the fn complete opcode.
 	byt, err := json.Marshal(map[string]any{"data": res})
 	if err != nil {
@@ -380,7 +380,7 @@ func (o *requestOwner) appendResult(res APIResult) error {
 		Data: byt,
 	}
 
-	o.mgr.AppendOp(op)
+	o.mgr.AppendOp(ctx, op)
 	return nil
 }
 

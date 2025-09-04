@@ -23,7 +23,7 @@ func TestSleepUntil(t *testing.T) {
 		Request: &sdkrequest.Request{
 			Steps: map[string]json.RawMessage{},
 		},
-		Mode: sdkrequest.StepModeManual,
+		Mode: sdkrequest.StepModeYield,
 	})
 	ctx = sdkrequest.SetManager(ctx, mgr)
 	ctx = internal.ContextWithMiddleware(ctx, mw)

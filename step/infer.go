@@ -115,8 +115,7 @@ func Infer[InputT any, OutputT any](
 		},
 		Data: reqBytes,
 	}
-	plannedOp.SetParallelMode(parallelMode(ctx))
-	mgr.AppendOp(plannedOp)
+	mgr.AppendOp(ctx, plannedOp)
 	panic(sdkrequest.ControlHijack{})
 }
 

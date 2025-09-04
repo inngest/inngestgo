@@ -76,10 +76,9 @@ func WaitForEvent[T any](ctx context.Context, stepID string, opts WaitForEventOp
 		ID:   hashedID,
 		Op:   op.Op,
 		Name: opts.Name,
-		Opts: opts,
+		Opts: args,
 	}
-	plannedOp.SetParallelMode(parallelMode(ctx))
-	mgr.AppendOp(plannedOp)
+	mgr.AppendOp(ctx, plannedOp)
 	// This cannot resolve.  It must always hand control back to the handler.
 	panic(sdkrequest.ControlHijack{})
 }

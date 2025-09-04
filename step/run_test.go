@@ -25,7 +25,7 @@ func TestStep(t *testing.T) {
 		Middleware: mw,
 		Cancel:     cancel,
 		Request:    req,
-		Mode:       sdkrequest.StepModeManual,
+		Mode:       sdkrequest.StepModeYield,
 	})
 	ctx = sdkrequest.SetManager(ctx, mgr)
 

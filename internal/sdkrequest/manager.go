@@ -46,7 +46,7 @@ type InvocationManager interface {
 	// SetErr sets the invocation's error.
 	SetErr(err error)
 	// AppendOp pushes a new generator op to the stack for future execution.
-	AppendOp(op GeneratorOpcode)
+	AppendOp(ctx context.Context, op GeneratorOpcode)
 	// Ops returns all pushed generator ops to the stack for future execution.
 	// These represent new steps that have not been previously memoized.
 	Ops() []GeneratorOpcode
@@ -176,14 +176,23 @@ func (r *requestCtxManager) Err() error {
 	return r.err
 }
 
-func (r *requestCtxManager) AppendOp(op GeneratorOpcode) {
+func (r *requestCtxManager) AppendOp(ctx context.Context, op GeneratorOpcode) {
 	r.l.Lock()
 	defer r.l.Unlock()
+
+	op.SetParallelMode(ParallelMode(ctx))
 
 	if r.ops == nil {
 		r.ops = []GeneratorOpcode{op}
 	} else {
 		r.ops = append(r.ops, op)
+	}
+
+	// If we're planning multiple steps, append and continue on without any hijacking
+	// in every case.  Without this, we won't continue to plan the next set of parallel
+	// steps.
+	if IsParallel(ctx) {
+		return
 	}
 
 	// If this op is async, we need to panic and return control to the handler
@@ -382,7 +391,6 @@ type UserError struct {
 	// Cause allows nested errors to be passed back to the SDK.
 	Cause *UserError `json:"cause,omitempty"`
 }
-
 
 // HasAsyncOps is a utility that checks whether the slice of GeneratorOpcdodes
 // has at least one async op.

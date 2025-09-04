@@ -3,7 +3,6 @@ package step
 import (
 	"context"
 
-	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 )
 
@@ -11,8 +10,6 @@ type ctxKey string
 
 const (
 	targetStepIDKey = ctxKey("stepID")
-	ParallelKey     = ctxKey("parallelKey")
-	ParallelModeKey = ctxKey("parallelModeKey")
 	isWithinStepKey = ctxKey("in-step")
 )
 
@@ -46,15 +43,6 @@ func SetTargetStepID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, targetStepIDKey, id)
 }
 
-func isParallel(ctx context.Context) bool {
-	if v := ctx.Value(ParallelKey); v != nil {
-		if c, ok := v.(bool); ok {
-			return c
-		}
-	}
-	return false
-}
-
 func preflight(ctx context.Context) sdkrequest.InvocationManager {
 	if ctx.Err() != nil {
 		// Another tool has already ran and the context is closed.  Return
@@ -63,7 +51,6 @@ func preflight(ctx context.Context) sdkrequest.InvocationManager {
 	}
 	mgr, ok := sdkrequest.Manager(ctx)
 	if !ok {
-		// TODO: Make this NOT panic.
 		panic(ErrNotInFunction)
 	}
 	return mgr
@@ -78,13 +65,4 @@ func IsWithinStep(ctx context.Context) bool {
 
 func setWithinStep(ctx context.Context) context.Context {
 	return context.WithValue(ctx, isWithinStepKey, &struct{}{})
-}
-
-func parallelMode(ctx context.Context) enums.ParallelMode {
-	if v := ctx.Value(ParallelModeKey); v != nil {
-		if c, ok := v.(enums.ParallelMode); ok {
-			return c
-		}
-	}
-	return enums.ParallelModeNone
 }

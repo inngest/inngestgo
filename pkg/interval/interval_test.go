@@ -121,3 +121,89 @@ func TestInterval_JSONTags(t *testing.T) {
 		t.Errorf("Expected B to be 456, got %d", interval.B)
 	}
 }
+
+func TestMeasure(t *testing.T) {
+	sleepDuration := 10 * time.Millisecond
+	
+	interval := Measure(func() {
+		time.Sleep(sleepDuration)
+	})
+	
+	if interval.Duration() < sleepDuration {
+		t.Errorf("Expected duration to be at least %v, got %v", sleepDuration, interval.Duration())
+	}
+	
+	// Allow some tolerance for timing variations
+	if interval.Duration() > sleepDuration+5*time.Millisecond {
+		t.Errorf("Expected duration to be close to %v, got %v", sleepDuration, interval.Duration())
+	}
+}
+
+func TestMeasureT(t *testing.T) {
+	expectedResult := 42
+	sleepDuration := 10 * time.Millisecond
+	
+	result, interval := MeasureT(func() int {
+		time.Sleep(sleepDuration)
+		return expectedResult
+	})
+	
+	if result != expectedResult {
+		t.Errorf("Expected result %d, got %d", expectedResult, result)
+	}
+	
+	if interval.Duration() < sleepDuration {
+		t.Errorf("Expected duration to be at least %v, got %v", sleepDuration, interval.Duration())
+	}
+}
+
+func TestMeasureTT(t *testing.T) {
+	expectedResult1 := "hello"
+	expectedResult2 := 42
+	sleepDuration := 10 * time.Millisecond
+	
+	result1, result2, interval := MeasureTT(func() (string, int) {
+		time.Sleep(sleepDuration)
+		return expectedResult1, expectedResult2
+	})
+	
+	if result1 != expectedResult1 {
+		t.Errorf("Expected result1 %s, got %s", expectedResult1, result1)
+	}
+	
+	if result2 != expectedResult2 {
+		t.Errorf("Expected result2 %d, got %d", expectedResult2, result2)
+	}
+	
+	if interval.Duration() < sleepDuration {
+		t.Errorf("Expected duration to be at least %v, got %v", sleepDuration, interval.Duration())
+	}
+}
+
+func TestMeasureTTT(t *testing.T) {
+	expectedResult1 := "hello"
+	expectedResult2 := 42
+	expectedResult3 := true
+	sleepDuration := 10 * time.Millisecond
+	
+	result1, result2, result3, interval := MeasureTTT(func() (string, int, bool) {
+		time.Sleep(sleepDuration)
+		return expectedResult1, expectedResult2, expectedResult3
+	})
+	
+	if result1 != expectedResult1 {
+		t.Errorf("Expected result1 %s, got %s", expectedResult1, result1)
+	}
+	
+	if result2 != expectedResult2 {
+		t.Errorf("Expected result2 %d, got %d", expectedResult2, result2)
+	}
+	
+	if result3 != expectedResult3 {
+		t.Errorf("Expected result3 %t, got %t", expectedResult3, result3)
+	}
+	
+	if interval.Duration() < sleepDuration {
+		t.Errorf("Expected duration to be at least %v, got %v", sleepDuration, interval.Duration())
+	}
+}

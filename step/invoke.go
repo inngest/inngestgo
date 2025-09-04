@@ -91,7 +91,6 @@ func Invoke[T any](ctx context.Context, id string, opts InvokeOpts) (T, error) {
 		Name: id,
 		Opts: args,
 	}
-	plannedOp.SetParallelMode(parallelMode(ctx))
-	mgr.AppendOp(plannedOp)
+	mgr.AppendOp(ctx, plannedOp)
 	panic(sdkrequest.ControlHijack{})
 }

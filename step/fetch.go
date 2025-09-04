@@ -90,7 +90,6 @@ func Fetch[OutputT any](
 		Name: id,
 		Opts: in,
 	}
-	plannedOp.SetParallelMode(parallelMode(ctx))
-	mgr.AppendOp(plannedOp)
+	mgr.AppendOp(ctx, plannedOp)
 	panic(sdkrequest.ControlHijack{})
 }

@@ -51,7 +51,7 @@ func Run[T any](
 		panic(sdkrequest.ControlHijack{})
 	}
 
-	planParallel := targetID == nil && isParallel(ctx)
+	planParallel := targetID == nil && sdkrequest.IsParallel(ctx)
 	planBeforeRun := targetID == nil && mgr.Request().CallCtx.DisableImmediateExecution
 	if planParallel || planBeforeRun {
 		plannedOp := sdkrequest.GeneratorOpcode{
@@ -59,8 +59,7 @@ func Run[T any](
 			Op:   enums.OpcodeStepPlanned,
 			Name: id,
 		}
-		plannedOp.SetParallelMode(parallelMode(ctx))
-		mgr.AppendOp(plannedOp)
+		mgr.AppendOp(ctx, plannedOp)
 		panic(sdkrequest.ControlHijack{})
 	}
 
@@ -92,7 +91,7 @@ func Run[T any](
 
 		// Implement per-step errors.
 		mgr.SetErr(err)
-		mgr.AppendOp(sdkrequest.GeneratorOpcode{
+		mgr.AppendOp(ctx, sdkrequest.GeneratorOpcode{
 			ID:   hashedID,
 			Op:   enums.OpcodeStepError,
 			Name: id,
@@ -115,7 +114,7 @@ func Run[T any](
 
 	// Depending on the manager's step mode, this will either return control to the handler
 	// to prevent function execution or checkpoint the step immediately.
-	mgr.AppendOp(sdkrequest.GeneratorOpcode{
+	mgr.AppendOp(ctx, sdkrequest.GeneratorOpcode{
 		ID:     hashedID,
 		Op:     enums.OpcodeStepRun,
 		Name:   id,
