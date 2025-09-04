@@ -27,7 +27,7 @@ const (
 	// StepModeCheckpoint checkpoints each step via an API then continues execution after
 	// acknowledgement of the step data.
 	StepModeCheckpoint
-	// StepModeManual indactes that the manager should neither return nor checkpoint the
+	// StepModeManual indicates that the manager should neither return nor checkpoint the
 	// ops as they happen, and that we should instead leave handling opcodes to the owner
 	// of the manager.
 	StepModeManual
