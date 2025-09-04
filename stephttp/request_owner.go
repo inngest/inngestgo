@@ -88,7 +88,7 @@ func (o *requestOwner) handle(ctx context.Context) error {
 		//
 		// In this case, we always want to start returning opcodes to the HTTP request
 		// directly so that the async engine can take over.
-		o.mgr.SetStepMode(sdkrequest.StepModeReturn)
+		o.mgr.SetStepMode(sdkrequest.StepModeYield)
 
 		// Call the handler to execute the next steps.
 		_ = o.call(ctx)
@@ -212,7 +212,7 @@ func (o *requestOwner) getExistingRun(ctx context.Context) bool {
 
 	// This is now always async.
 	o.mgr.SetSteps(steps)
-	o.mgr.SetStepMode(sdkrequest.StepModeReturn)
+	o.mgr.SetStepMode(sdkrequest.StepModeYield)
 
 	// XXX: When using the V2 API, we should update o.run with the new run context.
 
@@ -243,7 +243,7 @@ func (o *requestOwner) call(ctx context.Context) APIResult {
 				// For example, when you `step.sleep` or `step.waitForEvent`, the function
 				// turns from a synchronous API to an asynchronous background function
 				// automatically.
-				o.mgr.SetStepMode(sdkrequest.StepModeReturn)
+				o.mgr.SetStepMode(sdkrequest.StepModeYield)
 				o.provider.mw.AfterExecution(ctx, callCtx, nil, nil)
 				return
 			}

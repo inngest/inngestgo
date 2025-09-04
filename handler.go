@@ -1202,7 +1202,7 @@ func invoke(
 		Cancel:     cancel,
 		Request:    input,
 		SigningKey: signingKey,
-		Mode:       sdkrequest.StepModeReturn,
+		Mode:       sdkrequest.StepModeYield,
 	})
 	fCtx = sdkrequest.SetManager(fCtx, mgr)
 

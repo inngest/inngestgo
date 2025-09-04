@@ -22,8 +22,8 @@ type ControlHijack struct{}
 type StepMode int
 
 const (
-	// StepModeReturn returns control to executor after each step (async functions)
-	StepModeReturn StepMode = iota
+	// StepModeYield returns control to executor after each step (async functions)
+	StepModeYield StepMode = iota
 	// StepModeCheckpoint checkpoints each step via an API then continues execution after
 	// acknowledgement of the step data.
 	StepModeCheckpoint
@@ -195,8 +195,8 @@ func (r *requestCtxManager) AppendOp(op GeneratorOpcode) {
 	}
 
 	switch r.StepMode() {
-	case StepModeReturn:
-		// Auto-cancel for async functions (StepModeReturn) after appending an op,
+	case StepModeYield:
+		// Auto-cancel for async functions (StepModeYield) after appending an op,
 		// then return control to the handler.
 		r.cancel()
 		panic(ControlHijack{})

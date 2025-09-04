@@ -194,7 +194,7 @@ func TestStep(t *testing.T) {
 				Cancel:     cancel,
 				Request:    req,
 				// send ControlHijack as we return on each opcode
-				Mode: sdkrequest.StepModeReturn,
+				Mode: sdkrequest.StepModeYield,
 			})
 			ctx = sdkrequest.SetManager(ctx, mgr)
 			ctx = internal.ContextWithMiddleware(ctx, mw)
