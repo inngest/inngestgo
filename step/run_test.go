@@ -190,11 +190,12 @@ func TestStep(t *testing.T) {
 
 			mw := middleware.New()
 			mgr := sdkrequest.NewManager(sdkrequest.Opts{
-		Middleware: mw,
-		Cancel:     cancel,
-		Request:    req,
-		Mode:       sdkrequest.StepModeManual,
-	})
+				Middleware: mw,
+				Cancel:     cancel,
+				Request:    req,
+				// send ControlHijack as we return on each opcode
+				Mode: sdkrequest.StepModeReturn,
+			})
 			ctx = sdkrequest.SetManager(ctx, mgr)
 			ctx = internal.ContextWithMiddleware(ctx, mw)
 
@@ -225,10 +226,11 @@ func TestStep(t *testing.T) {
 			require.NotEmpty(t, mgr.Ops())
 			require.Equal(t, 1, len(mgr.Ops()))
 			require.Equal(t, []sdkrequest.GeneratorOpcode{{
-				ID:   op.MustHash(),
-				Op:   enums.OpcodeStepRun,
-				Name: name,
-				Data: opData,
+				ID:     op.MustHash(),
+				Op:     enums.OpcodeStepRun,
+				Name:   name,
+				Data:   opData,
+				Timing: mgr.Ops()[0].Timing,
 			}}, mgr.Ops())
 		})
 	})
