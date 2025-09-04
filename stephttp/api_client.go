@@ -201,8 +201,36 @@ type wrapper struct {
 	Data any `json:"data"`
 }
 
-// makeRequest performs an authenticated HTTP request to the API
+// do performs an authenticated HTTP request to the API with automatic retries.
+// Retries up to 5 times with exponential backoff (50ms, 100ms, 200ms, 400ms, 400ms).
+// Returns the response body on success, or the last error encountered on failure.
 func (c *APIClient) do(ctx context.Context, method, path string, payload any) ([]byte, error) {
+	var lastErr error
+	
+	// Retry up to 5 times with exponential backoff, capped at 400ms
+	for attempt := 0; attempt < 5; attempt++ {
+		byt, err := c.doSingle(ctx, method, path, payload)
+		if err == nil {
+			return byt, nil
+		}
+		
+		lastErr = err
+		
+		// If not the last attempt, wait and retry
+		if attempt < 4 {
+			backoff := time.Duration(50*(1<<attempt)) * time.Millisecond
+			if backoff > 400*time.Millisecond {
+				backoff = 400 * time.Millisecond
+			}
+			time.Sleep(backoff)
+		}
+	}
+	
+	return nil, lastErr
+}
+
+// doSingle performs a single authenticated HTTP request to the API
+func (c *APIClient) doSingle(ctx context.Context, method, path string, payload any) ([]byte, error) {
 	var body bytes.Buffer
 	if payload != nil {
 		if err := json.NewEncoder(&body).Encode(payload); err != nil {
@@ -236,7 +264,7 @@ func (c *APIClient) do(ctx context.Context, method, path string, payload any) ([
 		if resp.StatusCode == 401 && c.fallbackKey != "" && !c.useFallback.Load() {
 			c.useFallback.Store(true)
 			// Retry the request with the fallback key
-			return c.do(ctx, method, path, payload)
+			return c.doSingle(ctx, method, path, payload)
 		}
 		return byt, fmt.Errorf("API request failed with status %d (%s)", resp.StatusCode, byt)
 	}

@@ -301,7 +301,6 @@ func (o *requestOwner) handleFirstCheckpoint(ctx context.Context) {
 	//
 	// Note that it is important that this finishes before we begin to checkpoint step data.
 	//
-	// TODO: Retry this up to 3 times.
 	// TODO: End to end encryption, if enabled.
 	scheme := "http://"
 	if o.r.TLS != nil {
@@ -327,7 +326,6 @@ func (o *requestOwner) handleFirstCheckpoint(ctx context.Context) {
 	}, o.mgr.Ops()...)
 	if err != nil {
 		o.provider.logger.Error("error creating new api-based inngest run", "error", err, "run_id", o.run.RunID)
-		// lol
 		return
 	}
 
