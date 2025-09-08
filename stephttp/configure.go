@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/inngest/inngestgo/internal/fn"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -103,3 +104,44 @@ const (
 	fnConfigCtx = fnConfigKeyType("inngest-fn-opts")
 	fnSetterCtx = fnConfigKeyType("inngest-fn-setter")
 )
+
+type servableRestFn struct {
+	opts FnOpts
+}
+
+func (f servableRestFn) FullyQualifiedID() string {
+	return f.opts.ID
+}
+
+func (f servableRestFn) ID() string {
+	return f.opts.ID
+}
+
+// Name returns the function name.
+func (f servableRestFn) Name() string {
+	return f.opts.ID
+}
+
+func (f servableRestFn) Config() fn.FunctionOpts {
+	return fn.FunctionOpts{
+		ID: f.opts.ID,
+	}
+}
+
+// Trigger returns the event names or schedules that triggers the function.
+func (f servableRestFn) Trigger() fn.Triggerable {
+	return nil
+}
+
+// ZeroEvent returns the zero event type to marshal the event into, given an
+// event name.
+func (f servableRestFn) ZeroEvent() any {
+	return nil
+}
+
+// Func returns the SDK function to call.  This must alawys be of type SDKFunction,
+// but has an any type as we register many functions of different types into a
+// type-agnostic handler; this is a generic implementation detail, unfortunately.
+func (f servableRestFn) Func() any {
+	return nil
+}

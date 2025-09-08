@@ -34,6 +34,8 @@ type CheckpointRun struct {
 	Stack []string
 	// Signature is the signature used when resuming requests.
 	Signature string
+	// Attempt is the attempt number
+	Attempt int
 }
 
 // checkpointAPI handles API function runs and step checkpointing
@@ -266,7 +268,7 @@ func (c *APIClient) doSingle(ctx context.Context, method, path string, payload a
 			// Retry the request with the fallback key
 			return c.doSingle(ctx, method, path, payload)
 		}
-		return byt, fmt.Errorf("API request failed with status %d (%s)", resp.StatusCode, byt)
+		return byt, fmt.Errorf("API request to '%s' failed with status %d (%s)", req.URL, resp.StatusCode, byt)
 	}
 
 	return byt, err

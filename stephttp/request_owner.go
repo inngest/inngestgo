@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"runtime/debug"
@@ -80,7 +81,7 @@ func (o *requestOwner) handle(ctx context.Context) error {
 	ctx = sdkrequest.SetManager(ctx, o.mgr)
 	// and add a setter which is invoked to update the function config via
 	// ctx during an API call (by calling stephttp.FnConfig)
-	ctx = o.withConfigSetter(ctx)
+	ctx = o.withConfigSetter(ctx, o.mgr)
 
 	if o.getExistingRun(ctx) {
 		// In this case, we're re-entering an existing run, which means we're now
@@ -112,11 +113,20 @@ func (o *requestOwner) handle(ctx context.Context) error {
 	// step.run calls until either an error, an async step, or the fn finishes.
 	result := o.call(ctx)
 
+	// After calling the API, check if we have nil function config;  if so, `stephttp.FnConfig`
+	// wasn't called.  In this case, use defaults.
+	if o.config == nil {
+		o.config = &FnOpts{
+			// Use the global provider default (which may be nil)
+			AsyncResponse: o.provider.opts.Optional.DefaultAsyncResponse,
+		}
+	}
+
 	// Note that at this point the request would typically have finished, therefore the
 	// context could be cancelled.  Stop this from breaking our API calls.
 	ctx = context.WithoutCancel(ctx)
 
-	if sdkrequest.HasAsyncOps(o.mgr.Ops()) {
+	if sdkrequest.HasAsyncOps(o.mgr.Ops(), o.run.Attempt, 0) {
 		// Always checkpoint first, then handle the async conversion.
 		o.handleFirstCheckpoint(ctx)
 		return o.handleAsyncConversion(ctx)
@@ -125,6 +135,12 @@ func (o *requestOwner) handle(ctx context.Context) error {
 	// Attempt to flush the response directly to the client immediately, reducing TTFB
 	if f, ok := o.w.(http.Flusher); ok {
 		f.Flush()
+	}
+
+	if len(o.mgr.Ops()) == 0 && !o.provider.opts.Optional.TrackAllEndpoints {
+		// If there are no steps and TrackAllEndpoints is disabled, we don't actually
+		// need to do anbything.
+		return nil
 	}
 
 	// In this case, the run must have finished - as no async conversion happened.
@@ -150,15 +166,21 @@ func (o *requestOwner) handle(ctx context.Context) error {
 // We also need to handle the API response to our user, which is either a token,
 // a redirect, or a custom response.
 func (o *requestOwner) handleAsyncConversion(ctx context.Context) error {
-	if !sdkrequest.HasAsyncOps(o.mgr.Ops()) {
+	if sdkrequest.HasAsyncOps(o.mgr.Ops(), o.run.Attempt, 0) {
 		return nil
 	}
 
 	// Then handle the response to our user.
 	if o.config == nil {
 		o.config = &FnOpts{
-			AsyncResponse: AsyncResponseRedirect{},
+			// Use the global provider default (which may be nil)
+			AsyncResponse: o.provider.opts.Optional.DefaultAsyncResponse,
 		}
+	}
+
+	// Assign defaults if not set in provider config;  use redirect.
+	if o.config.AsyncResponse == nil {
+		o.config.AsyncResponse = AsyncResponseRedirect{}
 	}
 
 	var url string
@@ -291,7 +313,11 @@ func (o *requestOwner) call(ctx context.Context) APIResult {
 func (o *requestOwner) handleFirstCheckpoint(ctx context.Context) {
 	requestBody, err := readRequestBody(o.r)
 	if err != nil {
-		o.provider.logger.Error("error reading request body creating new run", "error", err)
+		if errors.Is(err, http.ErrBodyReadAfterClose) {
+			o.provider.logger.Warn("attempted to read request body twice")
+		} else {
+			o.provider.logger.Error("error reading request body creating new run", "error", err)
+		}
 	}
 
 	// Create new API-based run in a goroutine.  This can always happen in the background whilst
@@ -365,6 +391,20 @@ func validateResumeRequestSignature(ctx context.Context, r *http.Request, signin
 }
 
 func (o *requestOwner) appendResult(ctx context.Context, res APIResult) error {
+	// When appending API results, never yield (panic).
+	o.mgr.SetStepMode(sdkrequest.StepModeManual)
+
+	defer func() {
+		// Always ignore any control hijacks, just in case.
+		if r := recover(); r != nil {
+			if _, ok := r.(sdkrequest.ControlHijack); ok {
+				return
+			}
+			// Repanic.
+			panic(r)
+		}
+	}()
+
 	// Append the fn complete opcode.
 	byt, err := json.Marshal(map[string]any{"data": res})
 	if err != nil {
@@ -383,8 +423,14 @@ func (o *requestOwner) appendResult(ctx context.Context, res APIResult) error {
 
 // withConfigSetter allows a caller to update the request's function config from a nested
 // call via ctx.
-func (o *requestOwner) withConfigSetter(ctx context.Context) context.Context {
+func (o *requestOwner) withConfigSetter(ctx context.Context, mgr sdkrequest.InvocationManager) context.Context {
 	return context.WithValue(ctx, fnSetterCtx, func(cfg FnOpts) {
-		o.config = &cfg
+		o.setConfig(cfg, mgr)
 	})
+}
+
+func (o *requestOwner) setConfig(cfg FnOpts, mgr sdkrequest.InvocationManager) {
+	o.config = &cfg
+	// Set the servable function in our manager now that it exists.
+	mgr.SetFn(servableRestFn{cfg})
 }

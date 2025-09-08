@@ -69,6 +69,9 @@ type InvocationManager interface {
 	SetStepMode(m StepMode)
 	// SetSteps sets step data, eg. from the API call when loading state via an API call.
 	SetSteps(steps map[string]json.RawMessage)
+	// SetFn updates the servable function.  This is necessary because functions are discovered
+	// before the first step execution in REST-based sync functions.
+	SetFn(fn.ServableFunction)
 }
 
 type Opts struct {
@@ -96,6 +99,9 @@ func NewManager(opts Opts) InvocationManager {
 	}
 	if opts.Middleware == nil {
 		opts.Middleware = middleware.New()
+	}
+	if opts.Cancel == nil {
+		opts.Cancel = func() {}
 	}
 
 	unseen := types.Set[string]{}
@@ -180,6 +186,7 @@ func (r *requestCtxManager) AppendOp(ctx context.Context, op GeneratorOpcode) {
 	r.l.Lock()
 	defer r.l.Unlock()
 
+	// Always add the current parallelism mode to the opcode we're appending.
 	op.SetParallelMode(ParallelMode(ctx))
 
 	if r.ops == nil {
@@ -198,8 +205,11 @@ func (r *requestCtxManager) AppendOp(ctx context.Context, op GeneratorOpcode) {
 	// If this op is async, we need to panic and return control to the handler
 	// (either the http handler or the async handler) as the executor must take
 	// over from here.
-	if enums.OpcodeIsAsync(op.Op) {
-		r.cancel()
+	if r.isAsyncOp(op.Op) {
+		if r.cancel != nil {
+			r.cancel()
+		}
+
 		panic(ControlHijack{})
 	}
 
@@ -279,6 +289,12 @@ func (r *requestCtxManager) SetSteps(steps map[string]json.RawMessage) {
 	r.request.Steps = steps
 }
 
+// SetFn updates the servable function.  This is necessary because functions are discovered
+// before the first step execution in REST-based sync functions.
+func (r *requestCtxManager) SetFn(f fn.ServableFunction) {
+	r.fn = f
+}
+
 func (r *requestCtxManager) NewOp(op enums.Opcode, id string) UnhashedOp {
 	r.l.Lock()
 	defer r.l.Unlock()
@@ -298,6 +314,35 @@ func (r *requestCtxManager) NewOp(op enums.Opcode, id string) UnhashedOp {
 		Op:  op,
 		Pos: uint(n),
 	}
+}
+
+func (r *requestCtxManager) isAsyncOp(op enums.Opcode) bool {
+	if !enums.OpcodeIsAsync(op) {
+		// sync opcodes are never async.
+		return false
+	}
+
+	// This must be async.
+	//
+	// NOTE: The OpcodeStepError opcode is ONLY async if the attempt < total attempts;
+	// if the step fails, we can happily continue without panicking.
+	if op != enums.OpcodeStepError {
+		// all other async ops are always async.
+		return true
+	}
+
+	return r.request.CallCtx.Attempt < r.retries()
+}
+
+func (r *requestCtxManager) retries() int {
+	if r.fn == nil {
+		return 0
+	}
+	retries := r.fn.Config().Retries
+	if retries == nil {
+		return 0
+	}
+	return *retries
 }
 
 type UnhashedOp struct {
@@ -394,8 +439,17 @@ type UserError struct {
 
 // HasAsyncOps is a utility that checks whether the slice of GeneratorOpcdodes
 // has at least one async op.
-func HasAsyncOps(ops []GeneratorOpcode) bool {
+//
+// NOTE: Step errors are only async if the attempt is less than the max.
+// For example, with zero retries, we can happily re-throw the step error
+// to see if it's caught, then continue to the next step if so.
+func HasAsyncOps(ops []GeneratorOpcode, attempt, retries int) bool {
 	for _, o := range ops {
+		if o.Op == enums.OpcodeStepError && attempt == retries {
+			// This is not async due to the attempt being the same as the retry
+			// count;  we can return the error and continue on.
+			continue
+		}
 		if enums.OpcodeIsAsync(o.Op) {
 			return true
 		}
