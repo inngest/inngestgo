@@ -33,6 +33,16 @@ type SetupOpts struct {
 }
 
 type OptionalSetupOpts struct {
+	// TrackAllEndpoints, if set to true, will track all requests to all API endpoints,
+	// even if they don't use steps.
+	//
+	// By default, only API endpoints that use steps will be tracked.
+	TrackAllEndpoints bool
+
+	// DefaultAsyncResponse defines the default async response type.  Each function
+	// can override the async repsonse type using function configuration.
+	DefaultAsyncResponse AsyncResponse
+
 	// SigningKey is the Inngest signing key for authentication.  If empty, this defaults
 	// to os.Getenv("INNGEST_SIGNING_KEY").
 	SigningKey string
@@ -104,7 +114,13 @@ func Setup(opts SetupOpts) *provider {
 	return p
 }
 
-// Handler wraps an HTTP handler to provide Inngest step tooling directly inside of
+// Middleware returns an HTTP middleware handler that accepts an http.Handler and
+// returns an http.Handler.
+func (p *provider) Middleware(next http.Handler) http.Handler {
+	return p.ServeHTTP(next.ServeHTTP)
+}
+
+// Handler wraps an HTTP HandlerFunc to provide Inngest step tooling directly inside of
 // your APIs.
 func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
