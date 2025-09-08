@@ -400,6 +400,8 @@ func (o *requestOwner) appendResult(ctx context.Context, res APIResult) error {
 			if _, ok := r.(sdkrequest.ControlHijack); ok {
 				return
 			}
+			// Repanic.
+			panic(r)
 		}
 	}()
 
