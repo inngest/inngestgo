@@ -28,6 +28,7 @@ import (
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/internal/types"
 	"github.com/inngest/inngestgo/pkg/env"
+	"github.com/inngest/inngestgo/pkg/httputil"
 	"github.com/inngest/inngestgo/step"
 )
 
@@ -595,7 +596,7 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 	h.l.Lock()
 	defer h.l.Unlock()
 
-	scheme := getScheme(r)
+	scheme := httputil.GetScheme(r)
 	host := r.Host
 
 	// Get the sync ID from the URL and then remove it, since we don't want the
@@ -1444,18 +1445,4 @@ func isTrue(val string) bool {
 		return true
 	}
 	return false
-}
-
-func getScheme(r *http.Request) string {
-	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
-	    if proto == "https" || proto == "http" {
-	        return proto
-	    }
-	}
-
-	if r.TLS != nil {
-	    return "https"
-	}
-
-	return "http"
 }

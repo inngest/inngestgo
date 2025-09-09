@@ -14,6 +14,7 @@ import (
 	"github.com/inngest/inngestgo"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/pkg/env"
+	"github.com/inngest/inngestgo/pkg/httputil"
 	"github.com/inngest/inngestgo/pkg/version"
 	"github.com/oklog/ulid/v2"
 )
@@ -82,6 +83,8 @@ func (o *requestOwner) handle(ctx context.Context) error {
 	// and add a setter which is invoked to update the function config via
 	// ctx during an API call (by calling stephttp.FnConfig)
 	ctx = o.withConfigSetter(ctx, o.mgr)
+	// Add a getter, allowing us to fetch config to update values (eg. in UpdateOmitResponseBody)
+	ctx = o.withConfigGetter(ctx)
 
 	if o.getExistingRun(ctx) {
 		// In this case, we're re-entering an existing run, which means we're now
@@ -311,25 +314,30 @@ func (o *requestOwner) call(ctx context.Context) APIResult {
 //
 // This is a blocking operation;  to run this in the background use a goroutine.
 func (o *requestOwner) handleFirstCheckpoint(ctx context.Context) {
-	requestBody, err := readRequestBody(o.r)
-	if err != nil {
-		if errors.Is(err, http.ErrBodyReadAfterClose) {
-			o.provider.logger.Warn("attempted to read request body twice")
-		} else {
-			o.provider.logger.Error("error reading request body creating new run", "error", err)
+	var (
+		requestBody []byte
+		err         error
+	)
+
+	// Only read the request body if the config specifies so.
+	if o.config == nil || !o.config.OmitRequestBody {
+		requestBody, err = readRequestBody(o.r)
+		if err != nil {
+			if errors.Is(err, http.ErrBodyReadAfterClose) {
+				o.provider.logger.Warn("attempted to read request body twice")
+			} else {
+				o.provider.logger.Error("error reading request body creating new run", "error", err)
+			}
 		}
+
+		// TODO: End to end encryption, if enabled.
 	}
 
 	// Create new API-based run in a goroutine.  This can always happen in the background whilst
 	// the API is executing.
 	//
 	// Note that it is important that this finishes before we begin to checkpoint step data.
-	//
-	// TODO: End to end encryption, if enabled.
-	scheme := "http://"
-	if o.r.TLS != nil {
-		scheme = "https://"
-	}
+	scheme := httputil.GetScheme(o.r)
 
 	// fnID is the optional function slug to use.  If this is undefined, a slug will be generated
 	// using the URL and method directly in our API.
@@ -405,16 +413,23 @@ func (o *requestOwner) appendResult(ctx context.Context, res APIResult) error {
 		}
 	}()
 
-	// Append the fn complete opcode.
-	byt, err := json.Marshal(map[string]any{"data": res})
-	if err != nil {
-		return err
+	var (
+		responseBody []byte
+		err          error
+	)
+
+	if o.config == nil || !o.config.OmitResponseBody {
+		// Append the fn complete opcode.
+		responseBody, err = json.Marshal(map[string]any{"data": res})
+		if err != nil {
+			return err
+		}
 	}
 
 	op := sdkrequest.GeneratorOpcode{
 		ID:   o.mgr.NewOp(enums.OpcodeRunComplete, "complete").MustHash(),
 		Op:   enums.OpcodeRunComplete,
-		Data: byt,
+		Data: responseBody,
 	}
 
 	o.mgr.AppendOp(ctx, op)
@@ -426,6 +441,15 @@ func (o *requestOwner) appendResult(ctx context.Context, res APIResult) error {
 func (o *requestOwner) withConfigSetter(ctx context.Context, mgr sdkrequest.InvocationManager) context.Context {
 	return context.WithValue(ctx, fnSetterCtx, func(cfg FnOpts) {
 		o.setConfig(cfg, mgr)
+	})
+}
+
+func (o *requestOwner) withConfigGetter(ctx context.Context) context.Context {
+	return context.WithValue(ctx, fnGetterCtx, func() FnOpts {
+		if o.config == nil {
+			o.config = &FnOpts{}
+		}
+		return *o.config
 	})
 }
 
