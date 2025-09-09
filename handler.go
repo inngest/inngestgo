@@ -701,7 +701,7 @@ func (h *handler) url(r *http.Request) *url.URL {
 	}
 
 	// Get the current URL.
-	scheme := getScheme(r)
+	scheme := httputil.GetScheme(r)
 	u, _ := url.Parse(fmt.Sprintf("%s://%s%s", scheme, r.Host, r.RequestURI))
 	return u
 }

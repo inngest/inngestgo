@@ -27,7 +27,9 @@ func main() {
 
 // handleUsers demonstrates API function with step tooling
 func handleUsers(w http.ResponseWriter, r *http.Request) {
-	ctx := stephttp.Configure(r.Context(), stephttp.FnOpts{
+	ctx := r.Context()
+
+	stephttp.Configure(ctx, stephttp.FnOpts{
 		AsyncResponse: stephttp.AsyncResponseRedirect{},
 	})
 

@@ -169,7 +169,7 @@ func (o *requestOwner) handle(ctx context.Context) error {
 // We also need to handle the API response to our user, which is either a token,
 // a redirect, or a custom response.
 func (o *requestOwner) handleAsyncConversion(ctx context.Context) error {
-	if sdkrequest.HasAsyncOps(o.mgr.Ops(), o.run.Attempt, 0) {
+	if !sdkrequest.HasAsyncOps(o.mgr.Ops(), o.run.Attempt, 0) {
 		return nil
 	}
 
@@ -347,7 +347,7 @@ func (o *requestOwner) handleFirstCheckpoint(ctx context.Context) {
 	}
 
 	resp, err := o.provider.api.CheckpointNewRun(ctx, o.run.RunID, NewAPIRunData{
-		Domain:      scheme + o.r.Host,
+		Domain:      scheme + "://" + o.r.Host,
 		Method:      o.r.Method,
 		Path:        o.r.URL.Path,
 		IP:          getClientIP(o.r),
