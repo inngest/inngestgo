@@ -19,6 +19,9 @@ type Provider interface {
 	// ServeHTTP is the middleware that allows the Inngest handler to work.
 	ServeHTTP(next http.HandlerFunc) http.HandlerFunc
 
+	// Middleware returns stdlib-style middleware to wrap other HTTP handlers
+	Middleware(next http.Handler) http.Handler
+
 	// Wait provides a mechanism to wait for all cehckpoints to finish before shutting down.
 	Wait() chan bool
 }

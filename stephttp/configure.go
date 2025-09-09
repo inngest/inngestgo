@@ -26,8 +26,16 @@ type FnOpts struct {
 	// of the AsyncResponse type defined in the function configuration.
 	// Retries int32
 
-	// OmitBody prevents the incoming request from being stored.
-	OmitBody bool
+	// OmitRequestBody prevents the incoming request from being stored every time.
+	OmitRequestBody bool
+
+	// OmitResponseBody prevents the API response from being stored every time.
+	//
+	// Note that you can override this by calling `stephttp.UpdateOmitResponseBody(ctx, bool)`
+	// before the API responds to dynamically adjust whether the response is stored. This
+	// allows you to properly store eg. errors for debugging, then only omit successful
+	// responses at the end of your function.
+	OmitResponseBody bool
 
 	// AsyncResponse determines how we respond to a user when an API hits an
 	// async step (eg. step.sleep, step.waitForEvent) or if a step errors.
@@ -43,17 +51,30 @@ type FnOpts struct {
 	AsyncResponse AsyncResponse
 }
 
-func Configure(ctx context.Context, opts FnOpts) context.Context {
+func Configure(ctx context.Context, opts FnOpts) {
 	if _, ok := ctx.Value(fnConfigCtx).(FnOpts); ok {
 		// Here, we should ideally warn, if we have a logger available.
-		return ctx
+		return
 	}
 
 	if set, ok := ctx.Value(fnSetterCtx).(func(FnOpts)); ok {
 		set(opts)
 	}
+}
 
-	return context.WithValue(ctx, fnConfigCtx, opts)
+// UpdateOmitResponseBody sets whether the response body will be tracked in logs and traces.
+// You can call this at any time before sending the API response and this will be respected.
+func UpdateOmitResponseBody(ctx context.Context, to bool) {
+	cfg := configFromContext(ctx)
+	cfg.OmitResponseBody = to
+	Configure(ctx, cfg)
+}
+
+func configFromContext(ctx context.Context) FnOpts {
+	if get, ok := ctx.Value(fnGetterCtx).(func() FnOpts); ok {
+		return get()
+	}
+	return FnOpts{}
 }
 
 // AsyncResponseRedirect redirects the user to a URL which will block until the async
@@ -103,6 +124,7 @@ type fnConfigKeyType string
 const (
 	fnConfigCtx = fnConfigKeyType("inngest-fn-opts")
 	fnSetterCtx = fnConfigKeyType("inngest-fn-setter")
+	fnGetterCtx = fnConfigKeyType("inngest-fn-getter")
 )
 
 type servableRestFn struct {
