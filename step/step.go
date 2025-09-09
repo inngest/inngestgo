@@ -3,6 +3,7 @@ package step
 import (
 	"context"
 
+	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 )
 
@@ -43,14 +44,14 @@ func SetTargetStepID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, targetStepIDKey, id)
 }
 
-func preflight(ctx context.Context) sdkrequest.InvocationManager {
+func preflight(ctx context.Context, op enums.Opcode) sdkrequest.InvocationManager {
 	if ctx.Err() != nil {
 		// Another tool has already ran and the context is closed.  Return
 		// and do nothing.
 		panic(sdkrequest.ControlHijack{})
 	}
 	mgr, ok := sdkrequest.Manager(ctx)
-	if !ok {
+	if !ok && enums.OpcodeIsAsync(op) {
 		panic(ErrNotInFunction)
 	}
 	return mgr

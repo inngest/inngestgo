@@ -31,7 +31,7 @@ type InvokeOpts struct {
 // fail and the function will stop with a `NoRetryError`.
 func Invoke[T any](ctx context.Context, id string, opts InvokeOpts) (T, error) {
 	targetID := getTargetStepID(ctx)
-	mgr := preflight(ctx)
+	mgr := preflight(ctx, enums.OpcodeInvokeFunction)
 	args := map[string]any{
 		"function_id": opts.FunctionId,
 		"payload": map[string]any{

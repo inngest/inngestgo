@@ -40,7 +40,7 @@ type WaitForEventOpts struct {
 //	})
 func WaitForEvent[T any](ctx context.Context, stepID string, opts WaitForEventOpts) (T, error) {
 	targetID := getTargetStepID(ctx)
-	mgr := preflight(ctx)
+	mgr := preflight(ctx, enums.OpcodeWaitForEvent)
 	args := map[string]any{
 		"timeout": str2duration.String(opts.Timeout),
 		"event":   opts.Event,

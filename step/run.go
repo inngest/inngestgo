@@ -37,9 +37,14 @@ func Run[T any](
 	f func(ctx context.Context) (T, error),
 ) (T, error) {
 	targetID := getTargetStepID(ctx)
-	mgr := preflight(ctx)
+	mgr := preflight(ctx, enums.OpcodeStepRun)
 	op := mgr.NewOp(enums.OpcodeStepRun, id)
 	hashedID := op.MustHash()
+
+	if mgr == nil {
+		// If there's no manager, execute the function directly.
+		return f(ctx)
+	}
 
 	if val, ok := mgr.Step(ctx, op); ok {
 		return loadExistingStep(id, mgr, val, f)

@@ -30,7 +30,7 @@ func Infer[InputT any, OutputT any](
 	in InferOpts[InputT],
 ) (out OutputT, err error) {
 	targetID := getTargetStepID(ctx)
-	mgr := preflight(ctx)
+	mgr := preflight(ctx, enums.OpcodeAIGateway)
 	op := mgr.NewOp(enums.OpcodeAIGateway, id)
 	hashedID := op.MustHash()
 

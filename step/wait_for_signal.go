@@ -56,7 +56,7 @@ type SignalResult[T any] struct {
 
 func WaitForSignal[T any](ctx context.Context, stepID string, opts WaitForSignalOpts) (SignalResult[T], error) {
 	targetID := getTargetStepID(ctx)
-	mgr := preflight(ctx)
+	mgr := preflight(ctx, enums.OpcodeWaitForSignal)
 	args := map[string]any{
 		"signal":   opts.Signal,
 		"timeout":  str2duration.String(opts.Timeout),
