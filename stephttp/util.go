@@ -1,8 +1,10 @@
 package stephttp
 
 import (
+	"bufio"
 	"bytes"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 
@@ -23,6 +25,7 @@ type responseWriter struct {
 	http.ResponseWriter
 	statusCode int
 	body       *bytes.Buffer
+	hijacked   bool
 }
 
 func newResponseWriter(w http.ResponseWriter) *responseWriter {
@@ -30,6 +33,7 @@ func newResponseWriter(w http.ResponseWriter) *responseWriter {
 		ResponseWriter: w,
 		statusCode:     http.StatusOK,
 		body:           &bytes.Buffer{},
+		hijacked:       false,
 	}
 }
 
@@ -39,8 +43,24 @@ func (rw *responseWriter) WriteHeader(code int) {
 }
 
 func (rw *responseWriter) Write(data []byte) (int, error) {
-	rw.body.Write(data)
+	// Don't capture response body after hijacking
+	if !rw.hijacked {
+		rw.body.Write(data)
+	}
 	return rw.ResponseWriter.Write(data)
+}
+
+// Hijack implements http.Hijacker interface, passing through to the underlying writer if supported
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := rw.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	
+	// Mark as hijacked so we stop capturing response data
+	rw.hijacked = true
+	
+	return hijacker.Hijack()
 }
 
 // readRequestBody reads and restores the request body
