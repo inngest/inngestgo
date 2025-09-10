@@ -22,7 +22,7 @@ import (
 func processRequest(p *provider, r *http.Request, w http.ResponseWriter, next http.HandlerFunc) error {
 	owner := &requestOwner{
 		r:        r,
-		w:        w,
+		w:        newResponseWriter(w),
 		next:     next,
 		provider: p,
 		mgr: sdkrequest.NewManager(sdkrequest.Opts{
@@ -51,8 +51,8 @@ type requestOwner struct {
 	// r represents the incoming http request for the sync function.  This may be
 	// an end user's request, or it may be a re-entry from Inngest.
 	r *http.Request
-	// w responds to the request.
-	w http.ResponseWriter
+	// w responds to the request. This is always our wrapped responseWriter.
+	w *responseWriter
 	// next is the API handler to call to execute the sync function, ie. next in
 	// the middleware chain.
 	next http.HandlerFunc
@@ -136,8 +136,9 @@ func (o *requestOwner) handle(ctx context.Context) error {
 	}
 
 	// Attempt to flush the response directly to the client immediately, reducing TTFB
-	if f, ok := o.w.(http.Flusher); ok {
-		f.Flush()
+	// Only flush if the connection hasn't been hijacked (e.g., for WebSocket upgrades)
+	if !o.w.hijacked {
+		o.w.Flush()
 	}
 
 	if len(o.mgr.Ops()) == 0 && !o.provider.opts.Optional.TrackAllEndpoints {
@@ -282,16 +283,14 @@ func (o *requestOwner) call(ctx context.Context) APIResult {
 		}
 	}()
 
-	// Wrap response writer to capture output
-	rw := newResponseWriter(o.w)
-	// Execute the handler with step tooling available
-	o.next(rw, o.r.WithContext(ctx))
+	// Execute the handler with step tooling available (o.w is already wrapped)
+	o.next(o.w, o.r.WithContext(ctx))
 	duration := time.Since(o.startTime)
 
 	result := APIResult{
-		StatusCode: rw.statusCode,
-		Headers:    flattenHeaders(rw.Header()),
-		Body:       rw.body.Bytes(),
+		StatusCode: o.w.statusCode,
+		Headers:    flattenHeaders(o.w.Header()),
+		Body:       o.w.body.Bytes(),
 		Duration:   duration,
 	}
 
