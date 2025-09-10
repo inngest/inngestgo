@@ -34,7 +34,9 @@ func TestWebSocketIntegration(t *testing.T) {
 			t.Errorf("Failed to accept WebSocket connection: %v", err)
 			return
 		}
-		defer conn.Close(websocket.StatusNormalClosure, "test complete")
+		defer func() {
+			_ = conn.Close(websocket.StatusNormalClosure, "test complete")
+		}()
 		
 		mu.Lock()
 		connEstablished = true
@@ -88,7 +90,9 @@ func TestWebSocketIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to connect to WebSocket server: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "client done")
+	defer func() {
+		_ = conn.Close(websocket.StatusNormalClosure, "client done")
+	}()
 	
 	// Wait a bit for connection to establish
 	time.Sleep(100 * time.Millisecond)
@@ -186,7 +190,9 @@ func TestWebSocketWithStepHTTPProvider(t *testing.T) {
 			t.Errorf("Failed to accept WebSocket with stephttp provider: %v", err)
 			return
 		}
-		defer conn.Close(websocket.StatusNormalClosure, "test done")
+		defer func() {
+			_ = conn.Close(websocket.StatusNormalClosure, "test done")
+		}()
 		
 		mu.Lock()
 		wsConnected = true
@@ -221,7 +227,9 @@ func TestWebSocketWithStepHTTPProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to connect through stephttp provider: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "client done")
+	defer func() {
+		_ = conn.Close(websocket.StatusNormalClosure, "client done")
+	}()
 	
 	// Read the test message
 	_, msg, err := conn.Read(ctx)
@@ -311,7 +319,9 @@ func TestMixedTraffic(t *testing.T) {
 			t.Errorf("WebSocket accept failed: %v", err)
 			return
 		}
-		defer conn.Close(websocket.StatusNormalClosure, "done")
+		defer func() {
+			_ = conn.Close(websocket.StatusNormalClosure, "done")
+		}()
 		
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
@@ -331,7 +341,9 @@ func TestMixedTraffic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HTTP request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("Expected HTTP status %d, got %d", http.StatusOK, resp.StatusCode)
@@ -346,7 +358,9 @@ func TestMixedTraffic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WebSocket connection failed: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "test done")
+	defer func() {
+		_ = conn.Close(websocket.StatusNormalClosure, "test done")
+	}()
 	
 	_, msg, err := conn.Read(ctx)
 	if err != nil {
