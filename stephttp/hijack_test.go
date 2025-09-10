@@ -19,6 +19,57 @@ func (m *mockHijacker) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return nil, nil, nil // Return nil values for test simplicity
 }
 
+// mockFlusher implements http.Flusher for testing
+type mockFlusher struct {
+	*httptest.ResponseRecorder
+	flushCalled bool
+}
+
+func (m *mockFlusher) Flush() {
+	m.flushCalled = true
+}
+
+// mockPusher implements http.Pusher for testing
+type mockPusher struct {
+	*httptest.ResponseRecorder
+	pushCalled bool
+	pushTarget string
+	pushOpts   *http.PushOptions
+}
+
+func (m *mockPusher) Push(target string, opts *http.PushOptions) error {
+	m.pushCalled = true
+	m.pushTarget = target
+	m.pushOpts = opts
+	return nil
+}
+
+// mockFullFeatured implements all HTTP interfaces for testing
+type mockFullFeatured struct {
+	*httptest.ResponseRecorder
+	hijackCalled bool
+	flushCalled  bool
+	pushCalled   bool
+	pushTarget   string
+	pushOpts     *http.PushOptions
+}
+
+func (m *mockFullFeatured) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	m.hijackCalled = true
+	return nil, nil, nil
+}
+
+func (m *mockFullFeatured) Flush() {
+	m.flushCalled = true
+}
+
+func (m *mockFullFeatured) Push(target string, opts *http.PushOptions) error {
+	m.pushCalled = true
+	m.pushTarget = target
+	m.pushOpts = opts
+	return nil
+}
+
 // mockNonHijacker doesn't implement http.Hijacker
 type mockNonHijacker struct {
 	*httptest.ResponseRecorder
@@ -121,5 +172,128 @@ func TestResponseWriter_InterfaceAssertion(t *testing.T) {
 	
 	if _, ok := any(rw2).(http.Hijacker); !ok {
 		t.Error("Expected responseWriter to always implement http.Hijacker interface")
+	}
+}
+
+func TestResponseWriter_FlushSupported(t *testing.T) {
+	mockWriter := &mockFlusher{
+		ResponseRecorder: httptest.NewRecorder(),
+	}
+	
+	rw := newResponseWriter(mockWriter)
+	
+	// Test that Flush works when underlying writer supports it
+	rw.Flush()
+	
+	if !mockWriter.flushCalled {
+		t.Error("Expected Flush to be called on underlying writer")
+	}
+}
+
+func TestResponseWriter_FlushNotSupported(t *testing.T) {
+	mockWriter := &mockNonHijacker{
+		ResponseRecorder: httptest.NewRecorder(),
+	}
+	
+	rw := newResponseWriter(mockWriter)
+	
+	// Test that Flush doesn't panic when underlying writer doesn't support it
+	// This should just be a no-op
+	rw.Flush()
+	
+	// No assertions needed - just ensure it doesn't panic
+}
+
+func TestResponseWriter_PushSupported(t *testing.T) {
+	mockWriter := &mockPusher{
+		ResponseRecorder: httptest.NewRecorder(),
+	}
+	
+	rw := newResponseWriter(mockWriter)
+	
+	// Test that Push works when underlying writer supports it
+	target := "/api/data"
+	opts := &http.PushOptions{Method: "GET"}
+	
+	err := rw.Push(target, opts)
+	if err != nil {
+		t.Fatalf("Expected push to succeed, got error: %v", err)
+	}
+	
+	if !mockWriter.pushCalled {
+		t.Error("Expected Push to be called on underlying writer")
+	}
+	
+	if mockWriter.pushTarget != target {
+		t.Errorf("Expected target to be '%s', got '%s'", target, mockWriter.pushTarget)
+	}
+	
+	if mockWriter.pushOpts != opts {
+		t.Error("Expected push options to be passed through")
+	}
+}
+
+func TestResponseWriter_PushNotSupported(t *testing.T) {
+	mockWriter := &mockNonHijacker{
+		ResponseRecorder: httptest.NewRecorder(),
+	}
+	
+	rw := newResponseWriter(mockWriter)
+	
+	// Test that Push fails when underlying writer doesn't support it
+	err := rw.Push("/api/data", nil)
+	if err != http.ErrNotSupported {
+		t.Fatalf("Expected ErrNotSupported, got: %v", err)
+	}
+}
+
+func TestResponseWriter_AllInterfaces(t *testing.T) {
+	mockWriter := &mockFullFeatured{
+		ResponseRecorder: httptest.NewRecorder(),
+	}
+	
+	rw := newResponseWriter(mockWriter)
+	
+	// Test that all interfaces work together
+	rw.Flush()
+	if !mockWriter.flushCalled {
+		t.Error("Expected Flush to be called")
+	}
+	
+	err := rw.Push("/test", nil)
+	if err != nil {
+		t.Fatalf("Expected Push to succeed, got: %v", err)
+	}
+	if !mockWriter.pushCalled {
+		t.Error("Expected Push to be called")
+	}
+	
+	_, _, err = rw.Hijack()
+	if err != nil {
+		t.Fatalf("Expected Hijack to succeed, got: %v", err)
+	}
+	if !mockWriter.hijackCalled {
+		t.Error("Expected Hijack to be called")
+	}
+}
+
+func TestResponseWriter_InterfaceImplementations(t *testing.T) {
+	// Test that responseWriter always implements all the interfaces,
+	// regardless of underlying writer capabilities
+	mockWriter := &mockNonHijacker{
+		ResponseRecorder: httptest.NewRecorder(),
+	}
+	rw := newResponseWriter(mockWriter)
+	
+	if _, ok := any(rw).(http.Hijacker); !ok {
+		t.Error("Expected responseWriter to implement http.Hijacker")
+	}
+	
+	if _, ok := any(rw).(http.Flusher); !ok {
+		t.Error("Expected responseWriter to implement http.Flusher")
+	}
+	
+	if _, ok := any(rw).(http.Pusher); !ok {
+		t.Error("Expected responseWriter to implement http.Pusher")
 	}
 }

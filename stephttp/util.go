@@ -63,6 +63,21 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return hijacker.Hijack()
 }
 
+// Flush implements http.Flusher interface, passing through to the underlying writer if supported
+func (rw *responseWriter) Flush() {
+	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// Push implements http.Pusher interface, passing through to the underlying writer if supported
+func (rw *responseWriter) Push(target string, opts *http.PushOptions) error {
+	if pusher, ok := rw.ResponseWriter.(http.Pusher); ok {
+		return pusher.Push(target, opts)
+	}
+	return http.ErrNotSupported
+}
+
 // readRequestBody reads and restores the request body
 func readRequestBody(r *http.Request) ([]byte, error) {
 	if r.Body == nil {
