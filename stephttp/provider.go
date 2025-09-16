@@ -1,10 +1,12 @@
 package stephttp
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"os"
 	"sync/atomic"
+	"time"
 
 	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/pkg/env"
@@ -23,7 +25,8 @@ type Provider interface {
 	Middleware(next http.Handler) http.Handler
 
 	// Wait provides a mechanism to wait for all cehckpoints to finish before shutting down.
-	Wait() chan bool
+	// Cancel the incoming context to quit polling for checkpoint progres.
+	Wait(ctx context.Context) chan bool
 }
 
 // SetupOpts contains configuration for the API middleware.  Optional
@@ -134,4 +137,25 @@ func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
 			p.logger.Error("error handling api request", "error", err)
 		}
 	}
+}
+
+// Wait returns a channel that is sent when all in progress checkpoints finish.
+func (p *provider) Wait(ctx context.Context) chan bool {
+	c := make(chan bool)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+				// Continue on.
+			}
+
+			if p.inflight.Load() == 0 {
+				c <- true
+				return
+			}
+		}
+	}()
+	return c
 }
