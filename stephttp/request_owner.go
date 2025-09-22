@@ -131,8 +131,8 @@ func (o *requestOwner) handle(ctx context.Context) error {
 
 	if sdkrequest.HasAsyncOps(o.mgr.Ops(), o.run.Attempt, 0) {
 		// Always checkpoint first, then handle the async conversion.
-		o.handleFirstCheckpoint(ctx)
-		return o.handleAsyncConversion(ctx)
+		token := o.handleFirstCheckpoint(ctx)
+		return o.handleAsyncConversion(ctx, token)
 	}
 
 	// Attempt to flush the response directly to the client immediately, reducing TTFB
@@ -169,7 +169,7 @@ func (o *requestOwner) handle(ctx context.Context) error {
 //
 // We also need to handle the API response to our user, which is either a token,
 // a redirect, or a custom response.
-func (o *requestOwner) handleAsyncConversion(ctx context.Context) error {
+func (o *requestOwner) handleAsyncConversion(ctx context.Context, token string) error {
 	if !sdkrequest.HasAsyncOps(o.mgr.Ops(), o.run.Attempt, 0) {
 		return nil
 	}
@@ -193,19 +193,19 @@ func (o *requestOwner) handleAsyncConversion(ctx context.Context) error {
 	case AsyncResponseToken:
 		return json.NewEncoder(o.w).Encode(asyncResponseToken{
 			RunID: o.run.RunID,
-			Token: redirectToken(o.run.RunID),
+			Token: token,
 		})
 	case AsyncResponseCustom:
 		v(o.w, o.r)
 		return nil
 	case AsyncResponseRedirect:
 		if v.URL != nil {
-			url = v.URL(redirectToken(o.run.RunID))
+			url = v.URL(o.run.RunID, token)
 		}
 	}
 
 	if url == "" {
-		url = defaultRedirectURL(o.provider.opts, o.run.RunID)
+		url = defaultRedirectURL(o.provider.opts, o.run.RunID, token)
 	}
 
 	http.Redirect(o.w, o.r, url, http.StatusSeeOther)
@@ -312,7 +312,9 @@ func (o *requestOwner) call(ctx context.Context) APIResult {
 // It also checkpoints the first N steps (potentially including the entire function).
 //
 // This is a blocking operation;  to run this in the background use a goroutine.
-func (o *requestOwner) handleFirstCheckpoint(ctx context.Context) {
+//
+// This returns an optional token used when redirecting to async outputs.
+func (o *requestOwner) handleFirstCheckpoint(ctx context.Context) string {
 	var (
 		requestBody []byte
 		err         error
@@ -357,10 +359,11 @@ func (o *requestOwner) handleFirstCheckpoint(ctx context.Context) {
 	}, o.mgr.Ops()...)
 	if err != nil {
 		o.provider.logger.Error("error creating new api-based inngest run", "error", err, "run_id", o.run.RunID)
-		return
+		return ""
 	}
 
 	o.run = *resp
+	return resp.Token
 }
 
 // validateResumeRequestSignature validates the signature for resume requests.

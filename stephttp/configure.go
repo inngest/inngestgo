@@ -88,7 +88,7 @@ type AsyncResponseRedirect struct {
 	//
 	// Note that this accepts a token which can be used to hit the Inngest API to
 	// block for the API result.
-	URL func(token string) string
+	URL func(runID ulid.ULID, token string) string
 }
 
 func (a AsyncResponseRedirect) isAsyncResponse() {}
