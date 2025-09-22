@@ -3,6 +3,7 @@ package stephttp
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -11,13 +12,13 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-func redirectToken(runID ulid.ULID) string {
-	// TODO: SIGN WITH A KEY OR RANDOM TOKEN
-	return runID.String()
-}
-
-func defaultRedirectURL(o SetupOpts, runID ulid.ULID) string {
-	return o.baseURL() + "/v2/public/runs/" + redirectToken(runID)
+func defaultRedirectURL(o SetupOpts, runID ulid.ULID, token string) string {
+	return fmt.Sprintf(
+		"%s/v1/http/runs/%s/output?token=%s",
+		o.baseURL(),
+		runID,
+		token,
+	)
 }
 
 // responseWriter captures the response for storing as the API result
@@ -56,10 +57,10 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if !ok {
 		return nil, nil, http.ErrNotSupported
 	}
-	
+
 	// Mark as hijacked so we stop capturing response data
 	rw.hijacked = true
-	
+
 	return hijacker.Hijack()
 }
 

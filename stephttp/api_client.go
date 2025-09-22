@@ -29,6 +29,11 @@ type CheckpointRun struct {
 	AppID uuid.UUID `json:"app_id"`
 	// RunID is the function run ID created for this execution.
 	RunID ulid.ULID `json:"run_id"`
+	// Token is the token to use when redirecting if this is an async checkpoint.
+	Token string `json:"token,omitempty"`
+
+	// NOTE: The below are not included in the API response when checkpointing
+	// new runs.
 
 	// Stack is the current stack, used when resuming requests.
 	Stack []string
