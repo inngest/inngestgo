@@ -11,6 +11,7 @@ import (
 	"github.com/inngest/inngestgo/errors"
 	"github.com/inngest/inngestgo/internal"
 	"github.com/inngest/inngestgo/internal/middleware"
+	"github.com/inngest/inngestgo/internal/opcode"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/pkg/interval"
 )
@@ -100,7 +101,7 @@ func Run[T any](
 			ID:   hashedID,
 			Op:   enums.OpcodeStepError,
 			Name: id,
-			Error: &sdkrequest.UserError{
+			Error: &opcode.UserError{
 				Name:    "Step failed",
 				Message: err.Error(),
 				Data:    marshalled,

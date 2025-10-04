@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/inngest/inngestgo"
-	"github.com/inngest/inngestgo/errors"
+	"github.com/inngest/inngestgo/internal/checkpoint"
 	"github.com/inngest/inngestgo/step"
 )
 
@@ -26,9 +26,10 @@ func main() {
 	_, err = inngestgo.CreateFunction(
 		c,
 		inngestgo.FunctionOpts{
-			ID:      "account-created",
-			Name:    "Account creation flow",
-			Retries: inngestgo.IntPtr(5),
+			ID:               "account-created",
+			Name:             "Account creation flow",
+			CheckpointConfig: &checkpoint.Config{},
+			Retries:          inngestgo.IntPtr(5),
 		},
 		// Run on every api/account.created event.
 		inngestgo.EventTrigger("api/account.created", nil),
@@ -40,6 +41,7 @@ func main() {
 	}
 
 	// And serve the functions from an HTTP handler.
+	fmt.Print("listening on :8080")
 	_ = http.ListenAndServe(":8080", c.Serve())
 }
 
@@ -60,16 +62,10 @@ func AccountCreated(ctx context.Context, input inngestgo.Input[AccountCreatedEve
 	// state.
 	result, err := step.Run(ctx, "fetch todo", func(ctx context.Context) (*TodoItem, error) {
 		// Run any code inside a step, eg:
-
 		resp, err := http.Get("https://jsonplaceholder.typicode.com/todos/1")
 		if err != nil {
 			// This will retry automatically according to the function's Retry count.
 			return nil, err
-		}
-		if retryAfter := parseRetryAfter(resp.Header.Get("Retry-After")); !retryAfter.IsZero() {
-			// Return a RetryAtError to manually control when to retry the step on transient
-			// errors such as rate limits.
-			return nil, errors.RetryAtError(fmt.Errorf("rate-limited"), retryAfter)
 		}
 		defer func() {
 			_ = resp.Body.Close()
@@ -97,7 +93,7 @@ func AccountCreated(ctx context.Context, input inngestgo.Input[AccountCreatedEve
 		step.WaitForEventOpts{
 			Name:    "Wait for a function to be created",
 			Event:   "api/function.created",
-			Timeout: time.Hour * 72,
+			Timeout: time.Second,
 			// Match events where the user_id is the same in the async sampled event.
 			If: inngestgo.StrPtr("event.data.user_id == async.data.user_id"),
 		},
@@ -128,15 +124,19 @@ func AccountCreated(ctx context.Context, input inngestgo.Input[AccountCreatedEve
 //		Timestamp int64                   `json:"ts,omitempty"`
 //		Version   string                  `json:"v,omitempty"`
 //	}
-type AccountCreatedEvent inngestgo.GenericEvent[AccountCreatedEventData]
-type AccountCreatedEventData struct {
-	AccountID string
-}
+type (
+	AccountCreatedEvent     inngestgo.GenericEvent[AccountCreatedEventData]
+	AccountCreatedEventData struct {
+		AccountID string
+	}
+)
 
-type FunctionCreatedEvent inngestgo.GenericEvent[FunctionCreatedEventData]
-type FunctionCreatedEventData struct {
-	FunctionID string
-}
+type (
+	FunctionCreatedEvent     inngestgo.GenericEvent[FunctionCreatedEventData]
+	FunctionCreatedEventData struct {
+		FunctionID string
+	}
+)
 
 //
 // Utility helpers
