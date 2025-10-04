@@ -11,8 +11,35 @@ import (
 )
 
 const (
-	// MaxSteps attempts to checkpoint as many steps as possible.
-	MaxSteps = 1_000
+	// AllSteps attempts to checkpoint as many steps as possible.
+	AllSteps = 1_000
+)
+
+var (
+	// CheckpointStrict is the safest configuration, which checkpoints after each step
+	// in a blocking manner.
+	//
+	// By default, you should use this configuration.
+	ConfigStrict = &Config{}
+
+	// ConfigPerformant is the least safe configuration, and runs as many steps as possible,
+	// until a checkpoint is forced via an async step (eg. step.sleep, step.waitForEvent),
+	// or the run ends.
+	//
+	// It is NOT recommended to use this in serverless environments.
+	//
+	// You should only use this configuration if you care about performance over everything,
+	// and are comfortable with steps potentially re-running.
+	ConfigPerformant = &Config{
+		MaxSteps: AllSteps,
+	}
+
+	// ConfigBlended checkpoints after 3 steps or 3 seconds pass, giving a blend between performance
+	// and safety.
+	ConfigBlended = &Config{
+		MaxSteps:    3,
+		MaxInterval: 3 * time.Second,
+	}
 )
 
 type Config struct {
@@ -32,13 +59,6 @@ type Config struct {
 	// If zero, there are no limits on the number of steps that can be executed, and the SDK will execute
 	// step.run calls until an async step is reached.
 	// StopAfterSteps int
-
-	// Async allows checkpointing in the background, with one or more steps in a single
-	// checkpoint call.
-	//
-	// By default this is false, ensuring that we checkpoint after every step in a blocking
-	// manner. This is the safest approach, but incurs the highest latency.
-	// Async bool
 }
 
 type Opts struct {
