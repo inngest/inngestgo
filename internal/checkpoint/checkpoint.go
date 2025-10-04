@@ -19,17 +19,19 @@ var (
 	// CheckpointSafe is the safest configuration, which checkpoints after each step
 	// in a blocking manner.
 	//
-	// By default, you should use this configuration.
+	// By default, you should use this configuration.  You should also ALWAYS use this
+	// configuration first, and only tune these parameters to further improve latency.
 	ConfigSafe = &Config{}
 
 	// ConfigPerformant is the least safe configuration, and runs as many steps as possible,
 	// until a checkpoint is forced via an async step (eg. step.sleep, step.waitForEvent),
 	// or the run ends.
 	//
-	// It is NOT recommended to use this in serverless environments.
+	// You should ONLY use this configuration if you care about performance over everything,
+	// and are comfortable with steps potentially re-running.  Look at and use ConfigBlended,
+	// or your own custom config, if you care about both performance and safety.
 	//
-	// You should only use this configuration if you care about performance over everything,
-	// and are comfortable with steps potentially re-running.
+	// It is NOT recommended to use this in serverless environments.
 	ConfigPerformant = &Config{
 		MaxSteps: AllSteps,
 	}
@@ -42,6 +44,18 @@ var (
 	}
 )
 
+// Config specifies the configuration for checkpointing.
+//
+// The zero config is the safest checkpoitning configuration (and is the same as ConfigSage).
+// This checkpoints after every step.Run, ensuring that step data is saved as quickly as possible
+// so that data is not lost.
+//
+// Tweaking config parameters allows you to "batch" many steps into a single checkpoint.
+// If your server dies before the checkpoint completes, step data will be lost and steps
+// will rerun.
+//
+// You should ALWAYS start with the zero config (ConfigSafe) and only tweak these parameters
+// to further improve latency if necessary.
 type Config struct {
 	// MaxSteps represents the maximum number of steps to execute before checkpointing.
 	//
