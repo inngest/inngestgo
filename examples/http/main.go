@@ -28,7 +28,7 @@ func main() {
 		inngestgo.FunctionOpts{
 			ID:               "account-created",
 			Name:             "Account creation flow",
-			CheckpointConfig: checkpoint.ConfigStrict,
+			CheckpointConfig: checkpoint.ConfigSafe,
 			Retries:          inngestgo.IntPtr(5),
 		},
 		// Run on every api/account.created event.

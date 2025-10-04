@@ -16,11 +16,11 @@ const (
 )
 
 var (
-	// CheckpointStrict is the safest configuration, which checkpoints after each step
+	// CheckpointSafe is the safest configuration, which checkpoints after each step
 	// in a blocking manner.
 	//
 	// By default, you should use this configuration.
-	ConfigStrict = &Config{}
+	ConfigSafe = &Config{}
 
 	// ConfigPerformant is the least safe configuration, and runs as many steps as possible,
 	// until a checkpoint is forced via an async step (eg. step.sleep, step.waitForEvent),
