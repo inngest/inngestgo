@@ -60,9 +60,10 @@ func Run[T any](
 	planBeforeRun := targetID == nil && mgr.Request().CallCtx.DisableImmediateExecution
 	if planParallel || planBeforeRun {
 		plannedOp := sdkrequest.GeneratorOpcode{
-			ID:   hashedID,
-			Op:   enums.OpcodeStepPlanned,
-			Name: id,
+			ID:       hashedID,
+			Op:       enums.OpcodeStepPlanned,
+			Name:     id,
+			Userland: op.Userland(),
 		}
 		mgr.AppendOp(ctx, plannedOp)
 		panic(sdkrequest.ControlHijack{})
@@ -105,7 +106,8 @@ func Run[T any](
 				Message: err.Error(),
 				Data:    marshalled,
 			},
-			Timing: interval.New(pre, post),
+			Timing:   interval.New(pre, post),
+			Userland: op.Userland(),
 		})
 
 		// API functions: return the error without panic
@@ -120,11 +122,12 @@ func Run[T any](
 	// Depending on the manager's step mode, this will either return control to the handler
 	// to prevent function execution or checkpoint the step immediately.
 	mgr.AppendOp(ctx, sdkrequest.GeneratorOpcode{
-		ID:     hashedID,
-		Op:     enums.OpcodeStepRun,
-		Name:   id,
-		Data:   byt,
-		Timing: interval.New(pre, post),
+		ID:       hashedID,
+		Op:       enums.OpcodeStepRun,
+		Name:     id,
+		Data:     byt,
+		Timing:   interval.New(pre, post),
+		Userland: op.Userland(),
 	})
 
 	return result, nil
