@@ -226,11 +226,12 @@ func TestStep(t *testing.T) {
 			require.NotEmpty(t, mgr.Ops())
 			require.Equal(t, 1, len(mgr.Ops()))
 			require.Equal(t, []sdkrequest.GeneratorOpcode{{
-				ID:     op.MustHash(),
-				Op:     enums.OpcodeStepRun,
-				Name:   name,
-				Data:   opData,
-				Timing: mgr.Ops()[0].Timing,
+				ID:       op.MustHash(),
+				Op:       enums.OpcodeStepRun,
+				Name:     name,
+				Data:     opData,
+				Timing:   mgr.Ops()[0].Timing,
+				Userland: op.Userland(),
 			}}, mgr.Ops())
 		})
 	})
