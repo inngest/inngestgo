@@ -87,22 +87,34 @@ func Run[T any](
 	mutated := out.Result
 	err = out.Error
 	if err != nil {
-		// If tihs is a StepFailure already, fail fast.
+		// If this is a StepFailure already, fail fast.
 		if errors.IsStepError(err) {
 			mgr.SetErr(fmt.Errorf("unhandled step error: %s", err))
 			panic(sdkrequest.ControlHijack{})
 		}
 
+		isNoRetry := errors.IsNoRetryError(err)
+		maxAttemptsReached := shouldUseStepFailed(mgr)
+
 		marshalled, _ := json.Marshal(mutated)
 
-		// Implement per-step errors.
+		// Determine opcode based on retry eligibility
+		opcode := enums.OpcodeStepError
+		errorName := "Step error"
+
+		if isNoRetry || maxAttemptsReached {
+			opcode = enums.OpcodeStepFailed
+			errorName = "Step failed"
+		}
+
 		mgr.SetErr(err)
+
 		mgr.AppendOp(ctx, sdkrequest.GeneratorOpcode{
 			ID:   hashedID,
-			Op:   enums.OpcodeStepError,
+			Op:   opcode,
 			Name: id,
 			Error: &sdkrequest.UserError{
-				Name:    "Step failed",
+				Name:    errorName,
 				Message: err.Error(),
 				Data:    marshalled,
 			},
@@ -179,4 +191,13 @@ func loadExistingStep[T any](
 
 	val, _ := reflect.ValueOf(v).Elem().Interface().(T)
 	return val, nil
+}
+
+func shouldUseStepFailed(mgr sdkrequest.InvocationManager) bool {
+	callCtx := mgr.Request().CallCtx
+	if callCtx.MaxAttempts == nil {
+		return false
+	}
+
+	return callCtx.Attempt+1 >= *callCtx.MaxAttempts
 }
