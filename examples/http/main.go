@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/inngest/inngestgo"
+	"github.com/inngest/inngestgo/errors"
 	"github.com/inngest/inngestgo/internal/checkpoint"
 	"github.com/inngest/inngestgo/step"
 )
@@ -66,6 +67,11 @@ func AccountCreated(ctx context.Context, input inngestgo.Input[AccountCreatedEve
 		if err != nil {
 			// This will retry automatically according to the function's Retry count.
 			return nil, err
+		}
+		if retryAfter := parseRetryAfter(resp.Header.Get("Retry-After")); !retryAfter.IsZero() {
+			// Return a RetryAtError to manually control when to retry the step on transient
+			// errors such as rate limits.
+			return nil, errors.RetryAtError(fmt.Errorf("rate-limited"), retryAfter)
 		}
 		defer func() {
 			_ = resp.Body.Close()
