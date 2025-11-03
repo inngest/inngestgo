@@ -143,11 +143,11 @@ func NewManager(opts Opts) InvocationManager {
 		mw:         opts.Middleware,
 		mode:       opts.Mode,
 		checkpointer: checkpoint.New(checkpoint.Opts{
-			RunID:       opts.Request.CallCtx.RunID,
-			FnID:        opts.Request.CallCtx.FunctionID,
-			QueueItemID: "",
-			SigningKey:  opts.SigningKey,
-			Config:      checkpointConfig,
+			RunID:        opts.Request.CallCtx.RunID,
+			FnID:         opts.Request.CallCtx.FunctionID,
+			QueueItemRef: opts.Request.CallCtx.QueueItemRef,
+			SigningKey:   opts.SigningKey,
+			Config:       checkpointConfig,
 		}),
 	}
 }

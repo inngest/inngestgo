@@ -80,9 +80,9 @@ type Opts struct {
 	RunID string
 	// FnID is the ID of the function being checkpointed.
 	FnID uuid.UUID
-	// QueueItemID represents the queue item ID that's currently leased while
+	// QueueItemRef represents the queue item ref that's currently leased while
 	// executing the SDK.
-	QueueItemID string
+	QueueItemRef string
 	// SigningKey is the signing key used to checkpoint.
 	SigningKey string
 	// Config is the config for the checkpointer.
@@ -170,10 +170,10 @@ func (c *checkpointer) checkpoint(ctx context.Context, cb Callback) {
 	}
 
 	err := checkpoint(ctx, c.opts.SigningKey, AsyncRequest{
-		RunID:       c.opts.RunID,
-		FnID:        c.opts.FnID,
-		QueueItemID: c.opts.QueueItemID,
-		Steps:       c.buffer,
+		RunID:        c.opts.RunID,
+		FnID:         c.opts.FnID,
+		QueueItemRef: c.opts.QueueItemRef,
+		Steps:        c.buffer,
 	})
 	if err != nil {
 		// Call the callback with an error.
@@ -198,9 +198,9 @@ type AsyncRequest struct {
 	RunID string `json:"run_id"`
 	// FnID is the ID of the function being checkpointed.
 	FnID uuid.UUID `json:"fn_id"`
-	// QueueItemID represents the queue item ID that's currently leased while
+	// QueueItemRef represents the queue item ID that's currently leased while
 	// executing the SDK.
-	QueueItemID string `json:"qi_id"`
+	QueueItemRef string `json:"qi_id"`
 	// Steps represents the steps being checkpointed.
 	Steps []opcode.Step `json:"steps"`
 }

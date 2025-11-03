@@ -33,6 +33,7 @@ type CallCtx struct {
 	StepID                    string    `json:"step_id"`
 	Stack                     CallStack `json:"stack"`
 	Attempt                   int       `json:"attempt"`
+	QueueItemRef              string    `json:"qi_id"`
 }
 
 type CallStack struct {
