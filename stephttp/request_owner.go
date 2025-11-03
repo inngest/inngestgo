@@ -12,6 +12,7 @@ import (
 
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngestgo"
+	"github.com/inngest/inngestgo/internal/opcode"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/pkg/env"
 	"github.com/inngest/inngestgo/pkg/httputil"
@@ -129,7 +130,7 @@ func (o *requestOwner) handle(ctx context.Context) error {
 	// context could be cancelled.  Stop this from breaking our API calls.
 	ctx = context.WithoutCancel(ctx)
 
-	if sdkrequest.HasAsyncOps(o.mgr.Ops(), o.run.Attempt, 0) {
+	if opcode.HasAsyncOps(o.mgr.Ops(), o.run.Attempt, 0) {
 		// Always checkpoint first, then handle the async conversion.
 		token := o.handleFirstCheckpoint(ctx)
 		return o.handleAsyncConversion(ctx, token)
@@ -170,7 +171,7 @@ func (o *requestOwner) handle(ctx context.Context) error {
 // We also need to handle the API response to our user, which is either a token,
 // a redirect, or a custom response.
 func (o *requestOwner) handleAsyncConversion(ctx context.Context, token string) error {
-	if !sdkrequest.HasAsyncOps(o.mgr.Ops(), o.run.Attempt, 0) {
+	if !opcode.HasAsyncOps(o.mgr.Ops(), o.run.Attempt, 0) {
 		return nil
 	}
 
@@ -428,10 +429,12 @@ func (o *requestOwner) appendResult(ctx context.Context, res APIResult) error {
 		}
 	}
 
+	mgrOp := o.mgr.NewOp(enums.OpcodeRunComplete, "complete")
 	op := sdkrequest.GeneratorOpcode{
-		ID:   o.mgr.NewOp(enums.OpcodeRunComplete, "complete").MustHash(),
-		Op:   enums.OpcodeRunComplete,
-		Data: responseBody,
+		ID:       mgrOp.MustHash(),
+		Op:       enums.OpcodeRunComplete,
+		Data:     responseBody,
+		Userland: mgrOp.Userland(),
 	}
 
 	o.mgr.AppendOp(ctx, op)

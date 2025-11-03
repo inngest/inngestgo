@@ -433,3 +433,10 @@ func (u UnhashedOp) MustHash() string {
 	}
 	return h
 }
+
+func (u UnhashedOp) Userland() *opcode.OpUserland {
+	return &opcode.OpUserland{
+		ID:    u.ID,
+		Index: int(u.Pos),
+	}
+}
