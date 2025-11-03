@@ -10,7 +10,7 @@ import (
 
 	"github.com/inngest/inngestgo"
 	"github.com/inngest/inngestgo/errors"
-	"github.com/inngest/inngestgo/internal/checkpoint"
+	"github.com/inngest/inngestgo/pkg/checkpoint"
 	"github.com/inngest/inngestgo/step"
 )
 
