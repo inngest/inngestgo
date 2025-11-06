@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -21,6 +22,13 @@ import (
 	"github.com/inngest/inngestgo/internal/types"
 	"github.com/pbnjay/memory"
 	"golang.org/x/sync/errgroup"
+)
+
+const (
+	defaultMaxWorkerConcurrency = int64(0)
+	defaultWorkerPoolSize       = 1_000
+	maxWorkerPoolSize           = 100_000_000
+	maxWorkerConcurrencyEnvKey  = "INNGEST_CONNECT_MAX_WORKER_CONCURRENCY"
 )
 
 type ConnectionState string
@@ -63,7 +71,13 @@ func Connect(ctx context.Context, opts Opts, invokers map[string]FunctionInvoker
 		cancelWorkerCtx: cancelDone,
 	}
 
-	wp := NewWorkerPool(ctx, opts.MaxConcurrency, ch.processExecutorRequest)
+	// define a worker pool size based on the max worker concurrency
+	workerPoolSize := defaultWorkerPoolSize
+	if opts.MaxWorkerConcurrency != nil && *opts.MaxWorkerConcurrency > 0 {
+		workerPoolSize = min(int(*opts.MaxWorkerConcurrency), maxWorkerPoolSize)
+	}
+
+	wp := NewWorkerPool(ctx, workerPoolSize, ch.processExecutorRequest)
 	ch.workerPool = wp
 
 	defer func() {
@@ -97,7 +111,7 @@ type Opts struct {
 	HashedSigningKey         []byte
 	HashedSigningKeyFallback []byte
 
-	MaxConcurrency int
+	MaxWorkerConcurrency *int64
 
 	APIBaseUrl   string
 	IsDev        bool
@@ -484,6 +498,28 @@ func (h *connectHandler) instanceId() string {
 
 	// TODO Is there any stable identifier that can be used as a fallback?
 	return "<missing-instance-id>"
+}
+
+// maxWorkerConcurrency returns the maximum number of worker concurrency to use.
+func (h *connectHandler) maxWorkerConcurrency() *int64 {
+
+	// user provided max worker concurrency
+	if h.opts.MaxWorkerConcurrency != nil {
+		return h.opts.MaxWorkerConcurrency
+	}
+
+	// environment variable
+	envValue := os.Getenv(maxWorkerConcurrencyEnvKey)
+	if envValue != "" {
+		if concurrency, err := strconv.ParseInt(envValue, 10, 64); err == nil {
+			return &concurrency
+		}
+		// ignore error
+	}
+
+	// default max worker concurrency
+	concurrency := defaultMaxWorkerConcurrency
+	return &concurrency
 }
 
 func expBackoff(attempt int) time.Duration {
