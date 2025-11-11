@@ -1009,6 +1009,84 @@ func TestInBandSync(t *testing.T) {
 		r.NoError(err)
 		r.Equal("", string(respByt))
 	})
+
+	t.Run("override URL with env vars", func(t *testing.T) {
+		t.Setenv("INNGEST_SERVE_HOST", "https://override.com")
+		t.Setenv("INNGEST_SERVE_PATH", "/override/path")
+
+		r := require.New(t)
+		ctx := context.Background()
+
+		sig, _ := Sign(ctx, time.Now(), []byte(testKey), reqBodyByt)
+		req, err := http.NewRequest(
+			http.MethodPut,
+			server.URL,
+			bytes.NewReader(reqBodyByt),
+		)
+		r.NoError(err)
+		req.Header.Set("x-inngest-signature", sig)
+		req.Header.Set("x-inngest-sync-kind", "in_band")
+		resp, err := http.DefaultClient.Do(req)
+		r.NoError(err)
+		r.Equal(http.StatusOK, resp.StatusCode)
+		r.Equal(resp.Header.Get("x-inngest-sync-kind"), "in_band")
+
+		var respBody inBandSynchronizeResponse
+		err = json.NewDecoder(resp.Body).Decode(&respBody)
+		r.NoError(err)
+
+		r.Equal(
+			inBandSynchronizeResponse{
+				AppID: c.AppID(),
+				Env:   toPtr("my-env"),
+				Functions: []ifn.SyncConfig{{
+					Name: "my-fn",
+					Slug: fmt.Sprintf("%s-my-fn", c.AppID()),
+					Steps: map[string]ifn.SDKStep{
+						"step": {
+							ID:   "step",
+							Name: "my-fn",
+							Runtime: map[string]any{
+								"url": fmt.Sprintf("https://override.com/override/path?fnId=%s-my-fn&step=step", c.AppID()),
+							},
+						},
+					},
+					Triggers: []ifn.Trigger{EventTrigger("my-event", nil)},
+				}},
+				Inspection: map[string]any{
+					"api_origin":               "https://api.inngest.com",
+					"app_id":                   "test-in-band-sync",
+					"authentication_succeeded": true,
+					"capabilities": map[string]any{
+						"in_band_sync": "v1",
+						"trust_probe":  "v1",
+						"connect":      "v1",
+					},
+					"env":                       "my-env",
+					"event_api_origin":          "https://inn.gs",
+					"event_key_hash":            "6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090",
+					"framework":                 "",
+					"function_count":            float64(1),
+					"has_event_key":             true,
+					"has_signing_key":           true,
+					"has_signing_key_fallback":  true,
+					"mode":                      "cloud",
+					"schema_version":            "2024-05-24",
+					"sdk_language":              "go",
+					"sdk_version":               SDKVersion,
+					"serve_origin":              "https://override.com",
+					"serve_path":                "/override/path",
+					"signing_key_fallback_hash": "signkey-test-df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+					"signing_key_hash":          "signkey-test-b2ed992186a5cb19f6668aade821f502c1d00970dfd0e35128d51bac4649916c",
+				},
+				SDKAuthor:   "inngest",
+				SDKLanguage: "go",
+				SDKVersion:  SDKVersion,
+				URL:         "https://override.com/override/path",
+			},
+			respBody,
+		)
+	})
 }
 
 func TestConnectSync(t *testing.T) {
