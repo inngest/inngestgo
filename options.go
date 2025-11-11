@@ -48,5 +48,5 @@ func overrideURL(u *url.URL, hOpts handlerOpts) (*url.URL, error) {
 		rawURL += "?" + u.RawQuery
 	}
 
-	return url.Parse(fmt.Sprintf("%s%s", origin, path))
+	return url.Parse(rawURL)
 }

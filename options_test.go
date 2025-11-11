@@ -85,7 +85,7 @@ func TestServePathOverride(t *testing.T) {
 }
 
 func TestOverrideURL(t *testing.T) {
-	originalURL, err := url.Parse("https://original.com/original")
+	originalURL, err := url.Parse("https://original.com/original?original")
 	require.NoError(t, err)
 
 	t.Run("no override", func(t *testing.T) {
@@ -103,10 +103,13 @@ func TestOverrideURL(t *testing.T) {
 		t.Setenv("INNGEST_SERVE_PATH", "/env")
 		r.NoError(err)
 		hOpts := handlerOpts{
-			ServeOrigin: StrPtr("https://serve-field.com/serve-field"),
-			URL:         urlMustParse(t, "https://url-field.com/url-field"),
+			ServeOrigin: StrPtr("https://serve-field.com"),
+			ServePath:   StrPtr("/serve-field"),
+			URL:         urlMustParse(t, "https://url-field.com/url-field?url-field"),
 		}
-		r.Equal(*hOpts.ServeOrigin, *serveOriginOverride(hOpts))
+		overrideURL, err := overrideURL(originalURL, hOpts)
+		r.NoError(err)
+		r.Equal("https://serve-field.com/serve-field?original", overrideURL.String())
 	})
 
 	t.Run("URL field has second highest precedence", func(t *testing.T) {
@@ -116,11 +119,11 @@ func TestOverrideURL(t *testing.T) {
 		t.Setenv("INNGEST_SERVE_PATH", "/env")
 		r.NoError(err)
 		hOpts := handlerOpts{
-			URL: urlMustParse(t, "https://url-field.com/url-field"),
+			URL: urlMustParse(t, "https://url-field.com/url-field?url-field"),
 		}
 		overrideURL, err := overrideURL(hOpts.URL, hOpts)
 		r.NoError(err)
-		r.Equal("https://url-field.com/url-field", overrideURL.String())
+		r.Equal("https://url-field.com/url-field?url-field", overrideURL.String())
 	})
 
 	t.Run("env vars have lowest precedence", func(t *testing.T) {
@@ -130,7 +133,7 @@ func TestOverrideURL(t *testing.T) {
 		hOpts := handlerOpts{}
 		overrideURL, err := overrideURL(originalURL, hOpts)
 		r.NoError(err)
-		r.Equal("https://env.com/env", overrideURL.String())
+		r.Equal("https://env.com/env?original", overrideURL.String())
 	})
 }
 
