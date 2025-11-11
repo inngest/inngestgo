@@ -47,7 +47,7 @@ func TestMaxWorkerConcurrency(t *testing.T) {
 		r := require.New(t)
 
 		// Ensure environment variable is not set
-		os.Unsetenv(maxWorkerConcurrencyEnvKey)
+		_ = os.Unsetenv(maxWorkerConcurrencyEnvKey)
 
 		h := &connectHandler{
 			opts: Opts{
