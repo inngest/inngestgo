@@ -1,5 +1,11 @@
 # inngestgo
 
+## 0.14.2
+
+### Patch Changes
+
+- e9c5f74: Fix serve URL overrides
+
 ## 0.14.1
 
 ### Patch Changes
