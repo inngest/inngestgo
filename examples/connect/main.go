@@ -65,7 +65,8 @@ func main() {
 	}
 
 	conn, err := inngestgo.Connect(ctx, inngestgo.ConnectOpts{
-		InstanceID: inngestgo.Ptr("example-worker"),
+		InstanceID:           inngestgo.Ptr("example-worker"),
+		MaxWorkerConcurrency: inngestgo.Ptr(int64(2)),
 		Apps: []inngestgo.Client{
 			c1,
 			c2,
