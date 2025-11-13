@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gowebpki/jcs"
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/syscode"
@@ -1212,7 +1213,7 @@ func createRequest(t *testing.T, evt any) *sdkrequest.Request {
 	return &sdkrequest.Request{
 		Event: byt,
 		CallCtx: sdkrequest.CallCtx{
-			FunctionID: "fn-id",
+			FunctionID: uuid.New(),
 			RunID:      "run-id",
 		},
 	}
@@ -1232,7 +1233,7 @@ func createBatchRequest(t *testing.T, evt any, num int) *sdkrequest.Request {
 		Event:  events[0],
 		Events: events,
 		CallCtx: sdkrequest.CallCtx{
-			FunctionID: "fn-id",
+			FunctionID: uuid.New(),
 			RunID:      "run-id",
 		},
 	}

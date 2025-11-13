@@ -27,6 +27,7 @@ import (
 	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/internal/types"
+	"github.com/inngest/inngestgo/internal/util"
 	"github.com/inngest/inngestgo/pkg/env"
 	"github.com/inngest/inngestgo/pkg/httputil"
 	"github.com/inngest/inngestgo/step"
@@ -561,7 +562,7 @@ func (h *handler) inBandSync(
 	if err != nil {
 		return fmt.Errorf("error creating inspection: %w", err)
 	}
-	inspectionMap, err := types.StructToMap(inspection)
+	inspectionMap, err := util.StructToMap(inspection)
 	if err != nil {
 		return fmt.Errorf("error converting inspection to map: %w", err)
 	}
@@ -1215,7 +1216,7 @@ func invoke(
 		sf,
 		inputVal,
 		input.Event,
-		types.ToAnySlice(input.Events),
+		util.ToAnySlice(input.Events),
 	)
 	if err != nil {
 		return nil, nil, err
@@ -1224,7 +1225,7 @@ func invoke(
 	// Set InputCtx
 	callCtx := InputCtx{
 		Env:        input.CallCtx.Env,
-		FunctionID: input.CallCtx.FunctionID,
+		FunctionID: input.CallCtx.FunctionID.String(),
 		RunID:      input.CallCtx.RunID,
 		StepID:     input.CallCtx.StepID,
 		Attempt:    input.CallCtx.Attempt,
@@ -1298,7 +1299,7 @@ func invoke(
 				sf,
 				inputVal,
 				mwInput.Event,
-				types.ToAnySlice(mwInput.Events),
+				util.ToAnySlice(mwInput.Events),
 			)
 			if err != nil {
 				mgr.SetErr(err)
