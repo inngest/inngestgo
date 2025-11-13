@@ -1,5 +1,11 @@
 # inngestgo
 
+## 0.14.3
+
+### Patch Changes
+
+- a2747b8: - [SYS-370] Adding Worker Concurrency - Go SDK
+
 ## 0.14.2
 
 ### Patch Changes
