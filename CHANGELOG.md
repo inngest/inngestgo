@@ -1,5 +1,11 @@
 # inngestgo
 
+## 0.14.4
+
+### Patch Changes
+
+- 2bc16f0: Protect connectHandler.state behind RWMutex
+
 ## 0.14.3
 
 ### Patch Changes
