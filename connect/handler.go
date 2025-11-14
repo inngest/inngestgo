@@ -11,6 +11,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -150,7 +151,9 @@ type connectHandler struct {
 
 	// Global connection state
 
-	state           ConnectionState
+	stateLock sync.RWMutex
+	state     ConnectionState
+
 	workerCtx       context.Context
 	cancelWorkerCtx context.CancelFunc
 	gracefulCloseEg errgroup.Group
@@ -238,7 +241,7 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 					isInitialConnection = false
 					initialConnectionDone <- nil
 				}
-				h.state = ConnectionStateActive
+				h.setState(ConnectionStateActive)
 				attempts = 0
 				continue
 
@@ -247,7 +250,7 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 				h.logger.Error("connect failed", "err", err, "reconnect", msg.reconnect)
 
 				if !msg.reconnect {
-					h.state = ConnectionStateClosed
+					h.setState(ConnectionStateClosed)
 
 					if isInitialConnection {
 						isInitialConnection = false
@@ -257,7 +260,7 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 					return err
 				}
 
-				h.state = ConnectionStateReconnecting
+				h.setState(ConnectionStateReconnecting)
 
 				// Some errors should be handled differently (e.g. auth failed)
 				if msg.err != nil {
@@ -449,13 +452,21 @@ func (h *connectHandler) Close() error {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
 
-	h.state = ConnectionStateClosed
+	h.setState(ConnectionStateClosed)
 
 	return nil
 }
 
 func (h *connectHandler) State() ConnectionState {
+	h.stateLock.RLock()
+	defer h.stateLock.RUnlock()
 	return h.state
+}
+
+func (h *connectHandler) setState(state ConnectionState) {
+	h.stateLock.Lock()
+	defer h.stateLock.Unlock()
+	h.state = state
 }
 
 var errGatewayDraining = errors.New("gateway is draining")
