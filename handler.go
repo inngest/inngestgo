@@ -833,6 +833,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 		mw,
 		fn,
 		h.GetSigningKey(),
+		h.GetSigningKeyFallback(),
 		request,
 		stepID,
 	)
@@ -1176,6 +1177,7 @@ func invoke(
 	mw *middleware.MiddlewareManager,
 	sf ServableFunction,
 	signingKey string,
+	signingKeyFallback string,
 	input *sdkrequest.Request,
 	stepID *string,
 ) (any, []sdkrequest.GeneratorOpcode, error) {
@@ -1200,12 +1202,13 @@ func invoke(
 
 	// This must be a pointer so that it can be mutated from within function tools.
 	mgr := sdkrequest.NewManager(sdkrequest.Opts{
-		Fn:         sf,
-		Middleware: mw,
-		Cancel:     cancel,
-		Request:    input,
-		SigningKey: signingKey,
-		Mode:       sdkrequest.StepModeYield,
+		Fn:                 sf,
+		Middleware:         mw,
+		Cancel:             cancel,
+		Request:            input,
+		SigningKey:         signingKey,
+		SigningKeyFallback: signingKeyFallback,
+		Mode:               sdkrequest.StepModeYield,
 	})
 	fCtx = sdkrequest.SetManager(fCtx, mgr)
 

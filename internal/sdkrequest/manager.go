@@ -84,7 +84,8 @@ type InvocationManager interface {
 }
 
 type Opts struct {
-	SigningKey string
+	SigningKey         string
+	SigningKeyFallback string
 	// Mode represents the mode of execution, eg. sync steps, or async steps.
 	Mode StepMode
 	// Fn represents the function being executed, if this is an async
@@ -144,11 +145,12 @@ func NewManager(opts Opts) InvocationManager {
 		mw:         opts.Middleware,
 		mode:       opts.Mode,
 		checkpointer: checkpoint.New(checkpoint.Opts{
-			RunID:        opts.Request.CallCtx.RunID,
-			FnID:         opts.Request.CallCtx.FunctionID,
-			QueueItemRef: opts.Request.CallCtx.QueueItemRef,
-			SigningKey:   opts.SigningKey,
-			Config:       checkpointConfig,
+			RunID:              opts.Request.CallCtx.RunID,
+			FnID:               opts.Request.CallCtx.FunctionID,
+			QueueItemRef:       opts.Request.CallCtx.QueueItemRef,
+			SigningKey:         opts.SigningKey,
+			SigningKeyFallback: opts.SigningKeyFallback,
+			Config:             checkpointConfig,
 		}),
 	}
 }

@@ -23,6 +23,8 @@ type Opts struct {
 	QueueItemRef string
 	// SigningKey is the signing key used to checkpoint.
 	SigningKey string
+	// SigningKeyFallback is the fallback signing key.
+	SigningKeyFallback string
 	// Config is the config for the checkpointer.
 	Config Config
 }
@@ -30,6 +32,7 @@ type Opts struct {
 func New(o Opts) Checkpointer {
 	return &checkpointer{
 		opts:       o,
+		client:     NewClient(o.SigningKey, o.SigningKeyFallback),
 		buffer:     []opcode.Step{},
 		lock:       sync.Mutex{},
 		totalSteps: atomic.Int32{},
@@ -54,7 +57,8 @@ type Checkpointer interface {
 type Callback func(committed []opcode.Step, err error)
 
 type checkpointer struct {
-	opts Opts
+	opts   Opts
+	client *Client
 
 	// buffer stores the remaining items to checkpoint as a buffer.
 	buffer []opcode.Step
@@ -107,7 +111,7 @@ func (c *checkpointer) checkpoint(ctx context.Context, cb Callback) {
 		return
 	}
 
-	err := checkpoint(ctx, c.opts.SigningKey, AsyncRequest{
+	err := c.client.Checkpoint(ctx, AsyncRequest{
 		RunID:        c.opts.RunID,
 		FnID:         c.opts.FnID,
 		QueueItemRef: c.opts.QueueItemRef,

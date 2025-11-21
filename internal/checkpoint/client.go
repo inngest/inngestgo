@@ -7,18 +7,37 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/inngest/inngestgo/pkg/env"
 )
 
-var hc = &http.Client{Timeout: 30 * time.Second}
-
 func checkpointURL(runID string) string {
 	return fmt.Sprintf("%s/v1/checkpoint/%s/async", env.APIServerURL(), runID)
 }
 
-func checkpoint(ctx context.Context, key string, req AsyncRequest) error {
+type Client struct {
+	primaryKey  string
+	fallbackKey string
+	httpClient  *http.Client
+	useFallback *atomic.Bool
+}
+
+func NewClient(primaryKey, fallbackKey string) *Client {
+	return &Client{
+		primaryKey:  primaryKey,
+		fallbackKey: fallbackKey,
+		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		useFallback: &atomic.Bool{},
+	}
+}
+
+func (c *Client) Checkpoint(ctx context.Context, req AsyncRequest) error {
+	return c.do(ctx, req)
+}
+
+func (c *Client) do(ctx context.Context, req AsyncRequest) error {
 	byt, err := json.Marshal(req)
 	if err != nil {
 		return err
@@ -34,9 +53,9 @@ func checkpoint(ctx context.Context, key string, req AsyncRequest) error {
 	}
 
 	hr.Header.Set("Content-Type", "application/json")
-	hr.Header.Set("Authorization", fmt.Sprintf("Bearer %s", key))
+	hr.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.getCurrentSigningKey()))
 
-	resp, err := hc.Do(hr)
+	resp, err := c.httpClient.Do(hr)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
@@ -50,9 +69,21 @@ func checkpoint(ctx context.Context, key string, req AsyncRequest) error {
 	}
 
 	if resp.StatusCode >= 400 {
-		// TODO: Signing key fallbacks.
+		// If we get a 401 and have a fallback key, try switching to it
+		if resp.StatusCode == 401 && c.fallbackKey != "" && !c.useFallback.Load() {
+			c.useFallback.Store(true)
+			// Retry the request with the fallback key
+			return c.do(ctx, req)
+		}
 		return fmt.Errorf("error checkpointing (%d): %s", resp.StatusCode, byt)
 	}
 
 	return nil
+}
+
+func (c *Client) getCurrentSigningKey() string {
+	if c.useFallback.Load() {
+		return c.fallbackKey
+	}
+	return c.primaryKey
 }
