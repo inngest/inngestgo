@@ -20,7 +20,7 @@ func TestClient_Checkpoint_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedAuthHeader = r.Header.Get("Authorization")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"success":true}`))
+		_, _ = w.Write([]byte(`{"success":true}`))
 	}))
 	defer server.Close()
 
@@ -61,13 +61,13 @@ func TestClient_Checkpoint_FallbackOnAuth(t *testing.T) {
 		if count == 1 {
 			// First call with primary key - fail with 401
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"error":"unauthorized"}`))
+			_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 			return
 		}
 
 		// Second call with fallback key - succeed
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"success":true}`))
+		_, _ = w.Write([]byte(`{"success":true}`))
 	}))
 	defer server.Close()
 
@@ -106,7 +106,7 @@ func TestClient_Checkpoint_BothKeysFail(t *testing.T) {
 		callCount.Add(1)
 		// Always fail with 401
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error":"unauthorized"}`))
+		_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 	}))
 	defer server.Close()
 
@@ -138,7 +138,7 @@ func TestClient_Checkpoint_NoFallbackKey(t *testing.T) {
 		callCount.Add(1)
 		// Fail with 401
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error":"unauthorized"}`))
+		_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 	}))
 	defer server.Close()
 
@@ -171,7 +171,7 @@ func TestClient_Checkpoint_Non401Error(t *testing.T) {
 		callCount.Add(1)
 		// Fail with 500 (not 401)
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error":"internal server error"}`))
+		_, _ = w.Write([]byte(`{"error":"internal server error"}`))
 	}))
 	defer server.Close()
 
@@ -205,7 +205,7 @@ func TestClient_Checkpoint_FallbackAlreadyActive(t *testing.T) {
 		receivedAuthHeaders = append(receivedAuthHeaders, authHeader)
 		callCount.Add(1)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"success":true}`))
+		_, _ = w.Write([]byte(`{"success":true}`))
 	}))
 	defer server.Close()
 
@@ -243,7 +243,7 @@ func TestClient_Checkpoint_ValidRequestBody(t *testing.T) {
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"success":true}`))
+		_, _ = w.Write([]byte(`{"success":true}`))
 	}))
 	defer server.Close()
 
