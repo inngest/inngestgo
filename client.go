@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/inngest/inngestgo/internal/middleware"
+	"github.com/inngest/inngestgo/pkg/checkpoint"
 	"github.com/inngest/inngestgo/pkg/env"
 )
 
@@ -43,6 +44,10 @@ type Client interface {
 
 type ClientOpts struct {
 	AppID string
+
+	// Checkpoint is the default checkpoint configuration for all functions
+	// created with this client.
+	Checkpoint *checkpoint.Config
 
 	// HTTPClient is the HTTP client used to send events.
 	HTTPClient *http.Client
