@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"sync"
 
@@ -281,7 +282,7 @@ func (r *requestCtxManager) AppendOp(ctx context.Context, op GeneratorOpcode) {
 				}
 				return
 			}
-			// TODO: Log
+			slog.Default().Error("error checkpointing state, falling back to async response", "error", err)
 		})
 	default:
 		// Do nothing else.
