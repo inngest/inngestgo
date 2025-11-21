@@ -154,6 +154,7 @@ func (h *handler) InvokeFunction(ctx context.Context, slug string, stepId *strin
 		mw,
 		fn,
 		h.GetSigningKey(),
+		h.GetSigningKeyFallback(),
 		&request,
 		stepId,
 	)

@@ -51,7 +51,7 @@ type checkpointAPI interface {
 	GetSteps(ctx context.Context, runID ulid.ULID) (map[string]json.RawMessage, error)
 }
 
-// NewAPIRunRequest represents the entire request payload used to create new
+// CheckpointNewRunRequest represents the entire request payload used to create new
 // API-based runs.
 type CheckpointNewRunRequest struct {
 	// RunID represents the run ID for this request.  This is generated on the

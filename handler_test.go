@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gowebpki/jcs"
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/syscode"
@@ -125,7 +126,7 @@ func TestInvoke(t *testing.T) {
 		r.NoError(err)
 
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, c, mw, a, testKey, createRequest(t, input), nil)
+			actual, op, err := invoke(ctx, c, mw, a, testKey, testKeyFallback, createRequest(t, input), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -160,7 +161,7 @@ func TestInvoke(t *testing.T) {
 		r.NoError(err)
 
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, c, mw, a, testKey, createBatchRequest(t, input, 5), nil)
+			actual, op, err := invoke(ctx, c, mw, a, testKey, testKeyFallback, createBatchRequest(t, input, 5), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -196,7 +197,7 @@ func TestInvoke(t *testing.T) {
 		ctx := context.Background()
 
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, c, mw, a, testKey, createRequest(t, input), nil)
+			actual, op, err := invoke(ctx, c, mw, a, testKey, testKeyFallback, createRequest(t, input), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -231,7 +232,7 @@ func TestInvoke(t *testing.T) {
 
 		ctx := context.Background()
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, c, mw, a, testKey, createRequest(t, input), nil)
+			actual, op, err := invoke(ctx, c, mw, a, testKey, testKeyFallback, createRequest(t, input), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -269,7 +270,7 @@ func TestInvoke(t *testing.T) {
 
 		ctx := context.Background()
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, c, mw, a, testKey, createRequest(t, input), nil)
+			actual, op, err := invoke(ctx, c, mw, a, testKey, testKeyFallback, createRequest(t, input), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -315,7 +316,7 @@ func TestInvoke(t *testing.T) {
 		r.NoError(err)
 
 		actual, op, err := invoke(
-			ctx, c, mw, a, testKey,
+			ctx, c, mw, a, testKey, testKeyFallback,
 			createRequest(t, EventA{Name: "my-event"}),
 			nil,
 		)
@@ -1212,7 +1213,7 @@ func createRequest(t *testing.T, evt any) *sdkrequest.Request {
 	return &sdkrequest.Request{
 		Event: byt,
 		CallCtx: sdkrequest.CallCtx{
-			FunctionID: "fn-id",
+			FunctionID: uuid.New(),
 			RunID:      "run-id",
 		},
 	}
@@ -1232,7 +1233,7 @@ func createBatchRequest(t *testing.T, evt any, num int) *sdkrequest.Request {
 		Event:  events[0],
 		Events: events,
 		CallCtx: sdkrequest.CallCtx{
-			FunctionID: "fn-id",
+			FunctionID: uuid.New(),
 			RunID:      "run-id",
 		},
 	}
