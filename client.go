@@ -35,6 +35,8 @@ type Client interface {
 	Send(ctx context.Context, evt any) (string, error)
 	// Send sends a batch of events to the ingest API.
 	SendMany(ctx context.Context, evt []any) ([]string, error)
+	// Options returns the cleint options set during initialization.
+	Options() ClientOpts
 
 	Serve() http.Handler
 	ServeWithOpts(opts ServeOpts) http.Handler
@@ -178,6 +180,10 @@ func clientOptsToHandlerOpts(opts ClientOpts) handlerOpts {
 type apiClient struct {
 	ClientOpts
 	h *handler
+}
+
+func (a apiClient) Options() ClientOpts {
+	return a.ClientOpts
 }
 
 func (a apiClient) AppID() string {

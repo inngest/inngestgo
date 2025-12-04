@@ -27,12 +27,16 @@ type Opts struct {
 	SigningKeyFallback string
 	// Config is the config for the checkpointer.
 	Config Config
+	// APIBaseURL, if set, is the URL to use for the Inngest API.
+	// Defaults to os.Getenv("INNGEST_DEV") if set as a URL (for development), and
+	// "https://api.inngest.com" in production.
+	APIBaseURL string
 }
 
 func New(o Opts) Checkpointer {
 	return &checkpointer{
 		opts:       o,
-		client:     NewClient(o.SigningKey, o.SigningKeyFallback),
+		client:     NewClient(o.APIBaseURL, o.SigningKey, o.SigningKeyFallback),
 		buffer:     []opcode.Step{},
 		lock:       sync.Mutex{},
 		totalSteps: atomic.Int32{},

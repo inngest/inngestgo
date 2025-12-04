@@ -9,28 +9,28 @@ import (
 	"net/http"
 	"sync/atomic"
 	"time"
-
-	"github.com/inngest/inngestgo/pkg/env"
 )
-
-func checkpointURL(runID string) string {
-	return fmt.Sprintf("%s/v1/checkpoint/%s/async", env.APIServerURL(), runID)
-}
 
 type Client struct {
 	primaryKey  string
 	fallbackKey string
+	apiBaseURL  string
 	httpClient  *http.Client
 	useFallback *atomic.Bool
 }
 
-func NewClient(primaryKey, fallbackKey string) *Client {
+func NewClient(apiURL, primaryKey, fallbackKey string) *Client {
 	return &Client{
 		primaryKey:  primaryKey,
 		fallbackKey: fallbackKey,
+		apiBaseURL:  apiURL,
 		httpClient:  &http.Client{Timeout: 30 * time.Second},
 		useFallback: &atomic.Bool{},
 	}
+}
+
+func (c *Client) checkpointURL(runID string) string {
+	return fmt.Sprintf("%s/v1/checkpoint/%s/async", c.apiBaseURL, runID)
 }
 
 func (c *Client) Checkpoint(ctx context.Context, req AsyncRequest) error {
@@ -45,7 +45,7 @@ func (c *Client) do(ctx context.Context, req AsyncRequest) error {
 
 	hr, err := http.NewRequest(
 		http.MethodPost,
-		checkpointURL(req.RunID),
+		c.checkpointURL(req.RunID),
 		bytes.NewBuffer(byt),
 	)
 	if err != nil {

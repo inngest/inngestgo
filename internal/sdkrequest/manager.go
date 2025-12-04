@@ -100,6 +100,11 @@ type Opts struct {
 	// Cancel, when executed cancels the context that is passed to the
 	// sync or async function.
 	Cancel context.CancelFunc
+
+	// APIBaseURL, if set, is the URL to use for the Inngest API.
+	// Defaults to os.Getenv("INNGEST_DEV") if set as a URL (for development), and
+	// "https://api.inngest.com" in production.
+	APIBaseURL string
 }
 
 // NewManager returns an InvocationManager to manage the incoming executor request.  This
@@ -153,6 +158,7 @@ func NewManager(opts Opts) InvocationManager {
 			SigningKey:         opts.SigningKey,
 			SigningKeyFallback: opts.SigningKeyFallback,
 			Config:             checkpointConfig,
+			APIBaseURL:         opts.APIBaseURL,
 		}),
 	}
 }

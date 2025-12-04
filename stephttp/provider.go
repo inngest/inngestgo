@@ -85,7 +85,7 @@ func (o SetupOpts) baseURL() string {
 	if o.Optional.BaseURL != "" {
 		return o.Optional.BaseURL
 	}
-	return env.APIServerURL()
+	return env.APIServerURL(nil)
 }
 
 // provider wraps HTTP handlers to provide Inngest step tooling for API functions.

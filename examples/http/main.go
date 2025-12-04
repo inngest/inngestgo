@@ -27,10 +27,10 @@ func main() {
 	_, err = inngestgo.CreateFunction(
 		c,
 		inngestgo.FunctionOpts{
-			ID:               "account-created",
-			Name:             "Account creation flow",
-			CheckpointConfig: checkpoint.ConfigSafe,
-			Retries:          inngestgo.IntPtr(5),
+			ID:         "account-created",
+			Name:       "Account creation flow",
+			Checkpoint: checkpoint.ConfigSafe,
+			Retries:    inngestgo.IntPtr(5),
 		},
 		// Run on every api/account.created event.
 		inngestgo.EventTrigger("api/account.created", nil),

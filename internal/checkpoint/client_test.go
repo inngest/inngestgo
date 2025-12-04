@@ -27,7 +27,7 @@ func TestClient_Checkpoint_Success(t *testing.T) {
 	// Set INNGEST_DEV to use our test server
 	t.Setenv("INNGEST_DEV", server.URL)
 
-	client := NewClient("primary-key", "fallback-key")
+	client := NewClient(server.URL, "primary-key", "fallback-key")
 	client.httpClient = server.Client()
 
 	req := AsyncRequest{
@@ -74,7 +74,7 @@ func TestClient_Checkpoint_FallbackOnAuth(t *testing.T) {
 	// Set INNGEST_DEV to use our test server
 	t.Setenv("INNGEST_DEV", server.URL)
 
-	client := NewClient("primary-key", "fallback-key")
+	client := NewClient(server.URL, "primary-key", "fallback-key")
 	client.httpClient = server.Client()
 
 	req := AsyncRequest{
@@ -113,7 +113,7 @@ func TestClient_Checkpoint_BothKeysFail(t *testing.T) {
 	// Set INNGEST_DEV to use our test server
 	t.Setenv("INNGEST_DEV", server.URL)
 
-	client := NewClient("primary-key", "fallback-key")
+	client := NewClient(server.URL, "primary-key", "fallback-key")
 	client.httpClient = server.Client()
 
 	req := AsyncRequest{
@@ -146,7 +146,7 @@ func TestClient_Checkpoint_NoFallbackKey(t *testing.T) {
 	t.Setenv("INNGEST_DEV", server.URL)
 
 	// Create client with no fallback key
-	client := NewClient("primary-key", "")
+	client := NewClient(server.URL, "primary-key", "")
 	client.httpClient = server.Client()
 
 	req := AsyncRequest{
@@ -178,7 +178,7 @@ func TestClient_Checkpoint_Non401Error(t *testing.T) {
 	// Set INNGEST_DEV to use our test server
 	t.Setenv("INNGEST_DEV", server.URL)
 
-	client := NewClient("primary-key", "fallback-key")
+	client := NewClient(server.URL, "primary-key", "fallback-key")
 	client.httpClient = server.Client()
 
 	req := AsyncRequest{
@@ -212,7 +212,7 @@ func TestClient_Checkpoint_FallbackAlreadyActive(t *testing.T) {
 	// Set INNGEST_DEV to use our test server
 	t.Setenv("INNGEST_DEV", server.URL)
 
-	client := NewClient("primary-key", "fallback-key")
+	client := NewClient(server.URL, "primary-key", "fallback-key")
 	client.httpClient = server.Client()
 
 	// Manually activate fallback mode
@@ -250,7 +250,7 @@ func TestClient_Checkpoint_ValidRequestBody(t *testing.T) {
 	// Set INNGEST_DEV to use our test server
 	t.Setenv("INNGEST_DEV", server.URL)
 
-	client := NewClient("primary-key", "fallback-key")
+	client := NewClient(server.URL, "primary-key", "fallback-key")
 	client.httpClient = server.Client()
 
 	fnID := uuid.New()

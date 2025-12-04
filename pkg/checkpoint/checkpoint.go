@@ -43,7 +43,7 @@ type Config struct {
 	//
 	// If zero, there are no limits on the number of steps that can be executed, and the SDK will execute
 	// step.run calls until an async step is reached.
-	// MaxRuntime int
+	// MaxSteps int
 }
 
 const (

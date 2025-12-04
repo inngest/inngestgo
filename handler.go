@@ -1206,6 +1206,7 @@ func invoke(
 		SigningKey:         signingKey,
 		SigningKeyFallback: signingKeyFallback,
 		Mode:               sdkrequest.StepModeYield,
+		APIBaseURL:         env.APIServerURL(client.Options().APIBaseURL),
 	})
 	fCtx = sdkrequest.SetManager(fCtx, mgr)
 
