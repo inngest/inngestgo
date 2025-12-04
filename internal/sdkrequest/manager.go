@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngestgo/experimental"
@@ -127,9 +128,9 @@ func NewManager(opts Opts) InvocationManager {
 	// If the step mode is StepModeYield but the function contains checkpoint config,
 	// enable checkpointing.
 	var checkpointConfig checkpoint.Config
-	if opts.Mode == StepModeYield && opts.Fn != nil && opts.Fn.Config().CheckpointConfig != nil {
+	if opts.Mode == StepModeYield && opts.Fn != nil && opts.Fn.Config().Checkpoint != nil {
 		opts.Mode = StepModeCheckpoint
-		checkpointConfig = *opts.Fn.Config().CheckpointConfig
+		checkpointConfig = *opts.Fn.Config().Checkpoint
 	}
 
 	return &requestCtxManager{
@@ -144,6 +145,7 @@ func NewManager(opts Opts) InvocationManager {
 		unseen:     &unseen,
 		mw:         opts.Middleware,
 		mode:       opts.Mode,
+		t:          time.Now(),
 		checkpointer: checkpoint.New(checkpoint.Opts{
 			RunID:              opts.Request.CallCtx.RunID,
 			FnID:               opts.Request.CallCtx.FunctionID,
@@ -195,6 +197,9 @@ type requestCtxManager struct {
 	// checkpointer stores the reference to the invocation's checkpointer,
 	// allowing us to checkpoint step.runs and continue execution.,
 	checkpointer checkpoint.Checkpointer
+
+	// t returns the time since the epoch since the request started.
+	t time.Time
 }
 
 func (r *requestCtxManager) SigningKey() string {
@@ -268,6 +273,12 @@ func (r *requestCtxManager) AppendOp(ctx context.Context, op GeneratorOpcode) {
 	case StepModeCheckpoint:
 		// When checkpointing, ensure that we only checkpoint step.run opcodes.
 		if op.Op != enums.OpcodeStepRun {
+			r.cancel()
+			panic(ControlHijack{})
+		}
+
+		maxRuntime := r.fn.Config().Checkpoint.MaxRuntime
+		if maxRuntime > 0 && time.Since(r.t) > maxRuntime {
 			r.cancel()
 			panic(ControlHijack{})
 		}

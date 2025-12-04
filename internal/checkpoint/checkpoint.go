@@ -72,6 +72,8 @@ type checkpointer struct {
 
 	// t returns the time  since the epoch (in milliseconds) since the first step
 	// was added.  This is used to checkpoint with max intervals.
+	//
+	// This is reset after each checkpoint.
 	t atomic.Int64
 }
 
@@ -80,13 +82,13 @@ func (c *checkpointer) WithStep(ctx context.Context, step opcode.Step, cb Callba
 	c.buffer = append(c.buffer, step)
 	c.lock.Unlock()
 
-	if len(c.buffer) >= c.opts.Config.MaxSteps {
+	if len(c.buffer) >= c.opts.Config.BatchSteps {
 		// In this case, we've exceeded the total number of steps we can batch.
 		c.checkpoint(ctx, cb)
 		return
 	}
 
-	if c.opts.Config.MaxInterval > 0 && c.t.Load() == 0 {
+	if c.opts.Config.BatchInterval > 0 && c.t.Load() == 0 {
 		// Store the current time in milliseconds atomically.  Note that if this is
 		// called simultaneously from two threads after c.t.Load() atomically returns
 		// zero, we can assume that this is happening within the same ~millisecond or so,
@@ -95,7 +97,7 @@ func (c *checkpointer) WithStep(ctx context.Context, step opcode.Step, cb Callba
 
 		// Start a goroutine to checkpoint in the background.
 		go func() {
-			<-time.After(c.opts.Config.MaxInterval)
+			<-time.After(c.opts.Config.BatchInterval)
 			c.checkpoint(ctx, cb)
 		}()
 	}
