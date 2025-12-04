@@ -66,9 +66,9 @@ func CreateFunction[T any](
 		return nil, err
 	}
 
-	if fc.CheckpointConfig == nil {
+	if fc.Checkpoint == nil {
 		if v, ok := c.(*apiClient); ok {
-			fc.CheckpointConfig = v.Checkpoint
+			fc.Checkpoint = v.Checkpoint
 		}
 	}
 

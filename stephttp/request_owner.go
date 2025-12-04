@@ -29,6 +29,7 @@ func processRequest(p *provider, r *http.Request, w http.ResponseWriter, next ht
 		mgr: sdkrequest.NewManager(sdkrequest.Opts{
 			SigningKey: p.opts.signingKey(),
 			Mode:       sdkrequest.StepModeManual,
+			APIBaseURL: env.APIServerURL(nil),
 		}),
 
 		startTime: time.Now(),
