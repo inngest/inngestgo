@@ -1,5 +1,0 @@
----
-"inngestgo": minor
----
-
-Add checkpointing
