@@ -1,5 +1,11 @@
 # inngestgo
 
+## 0.15.0
+
+### Minor Changes
+
+- a8c3db8: Add checkpointing
+
 ## 0.14.4
 
 ### Patch Changes
