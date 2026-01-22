@@ -37,10 +37,6 @@ func Connect(ctx context.Context, opts ConnectOpts) (connect.WorkerConnection, e
 		Host:   "connect",
 	}
 
-	if opts.InstanceID == nil {
-		return nil, fmt.Errorf("missing required Instance ID")
-	}
-
 	apps := make([]connect.ConnectApp, len(opts.Apps))
 	invokers := make(map[string]connect.FunctionInvoker, len(opts.Apps))
 	for i, a := range opts.Apps {
