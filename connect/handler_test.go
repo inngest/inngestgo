@@ -119,7 +119,7 @@ func TestMessageReadLimit(t *testing.T) {
 				InsecureSkipVerify: true,
 			})
 			r.NoError(err)
-			defer conn.Close(websocket.StatusNormalClosure, "")
+			defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 			// Keep connection open briefly
 			time.Sleep(100 * time.Millisecond)
@@ -134,7 +134,7 @@ func TestMessageReadLimit(t *testing.T) {
 		// Connect without setting limit (should use default 32KB)
 		conn, _, err := websocket.Dial(ctx, wsURL, nil)
 		r.NoError(err)
-		defer conn.Close(websocket.StatusNormalClosure, "")
+		defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 		// The default limit should be 32KB (32768 bytes)
 		// We don't call SetReadLimit, so it uses the library default
@@ -151,7 +151,7 @@ func TestMessageReadLimit(t *testing.T) {
 				InsecureSkipVerify: true,
 			})
 			r.NoError(err)
-			defer conn.Close(websocket.StatusNormalClosure, "")
+			defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 			// Send a 2KB message (larger than our 1KB limit)
 			largeMsg := make([]byte, 2048)
@@ -175,7 +175,7 @@ func TestMessageReadLimit(t *testing.T) {
 
 		conn, _, err := websocket.Dial(ctx, wsURL, nil)
 		r.NoError(err)
-		defer conn.Close(websocket.StatusNormalClosure, "")
+		defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 		// Set the custom limit
 		conn.SetReadLimit(customLimit)
@@ -197,7 +197,7 @@ func TestMessageReadLimit(t *testing.T) {
 				InsecureSkipVerify: true,
 			})
 			r.NoError(err)
-			defer conn.Close(websocket.StatusNormalClosure, "")
+			defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 			// Send a 1MB message (much larger than default 32KB)
 			largeMsg := make([]byte, 1024*1024)
@@ -220,7 +220,7 @@ func TestMessageReadLimit(t *testing.T) {
 
 		conn, _, err := websocket.Dial(ctx, wsURL, nil)
 		r.NoError(err)
-		defer conn.Close(websocket.StatusNormalClosure, "")
+		defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 		// Set unlimited
 		conn.SetReadLimit(-1)
@@ -276,7 +276,7 @@ func TestMessageReadLimitWithProtobuf(t *testing.T) {
 				InsecureSkipVerify: true,
 			})
 			r.NoError(err)
-			defer conn.Close(websocket.StatusNormalClosure, "")
+			defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 			ctx := context.Background()
 
@@ -308,7 +308,7 @@ func TestMessageReadLimitWithProtobuf(t *testing.T) {
 
 		conn, _, err := websocket.Dial(ctx, wsURL, nil)
 		r.NoError(err)
-		defer conn.Close(websocket.StatusNormalClosure, "")
+		defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 		// Set small limit
 		conn.SetReadLimit(smallLimit)
@@ -332,7 +332,7 @@ func TestMessageReadLimitWithProtobuf(t *testing.T) {
 				InsecureSkipVerify: true,
 			})
 			r.NoError(err)
-			defer conn.Close(websocket.StatusNormalClosure, "")
+			defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 			ctx := context.Background()
 
@@ -359,7 +359,7 @@ func TestMessageReadLimitWithProtobuf(t *testing.T) {
 
 		conn, _, err := websocket.Dial(ctx, wsURL, nil)
 		r.NoError(err)
-		defer conn.Close(websocket.StatusNormalClosure, "")
+		defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 		// Set large limit
 		conn.SetReadLimit(largeLimit)
