@@ -143,6 +143,11 @@ func (h *connectHandler) prepareConnection(ctx context.Context, data connectionE
 		return nil, newReconnectErr(fmt.Errorf("could not connect to gateway: %w", err))
 	}
 
+	// Set message read limit if configured (skip if nil or 0 to use default)
+	if h.opts.MessageReadLimit != nil && *h.opts.MessageReadLimit != 0 {
+		ws.SetReadLimit(*h.opts.MessageReadLimit)
+	}
+
 	connectionId, err := ulid.Parse(startRes.GetConnectionId())
 	if err != nil {
 		return nil, newReconnectErr(fmt.Errorf("could not parse connection ID: %w", err))
