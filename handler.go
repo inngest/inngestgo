@@ -1356,6 +1356,85 @@ func invoke(
 		fnError = mgr.Err()
 	}
 
+	// Call OnFailure handler if there's an error and the handler is set
+	if fnError != nil && sf.Config().OnFailure != nil {
+		// Use reflection to call the OnFailure handler dynamically
+		onFailureFunc := reflect.ValueOf(sf.Config().OnFailure)
+
+		// Verify it's a function with the correct signature
+		if onFailureFunc.Kind() == reflect.Func {
+			handlerType := onFailureFunc.Type()
+			// Expected signature: func(ctx context.Context, input Input[T], err error) (any, error)
+			if handlerType.NumIn() == 3 && handlerType.NumOut() == 2 {
+				// The input to the onFailure handler might have a different generic type
+				// than the function itself (eg. Input[any] vs Input[MyType]).
+				//
+				// To handle this, we create a new input value with the type expected by
+				// the onFailure handler, and copy the event data across.
+				onFailureInput := reflect.New(handlerType.In(1)).Elem()
+				onFailureInput.FieldByName("InputCtx").Set(inputVal.FieldByName("InputCtx"))
+
+				// Copy the Event field, converting the generic type.
+				sourceEvent := inputVal.FieldByName("Event")
+				destEvent := reflect.New(onFailureInput.FieldByName("Event").Type()).Elem()
+				// Copy all fields except "Data", which has a generic type.
+				for i := 0; i < sourceEvent.NumField(); i++ {
+					fieldName := sourceEvent.Type().Field(i).Name
+					if fieldName != "Data" {
+						destEvent.FieldByName(fieldName).Set(sourceEvent.Field(i))
+					}
+				}
+				destEvent.FieldByName("Data").Set(sourceEvent.FieldByName("Data"))
+				onFailureInput.FieldByName("Event").Set(destEvent)
+
+				// We also need to copy the events slice, converting each element's generic type.
+				sourceEvents := inputVal.FieldByName("Events")
+				destEventsType := onFailureInput.FieldByName("Events").Type()
+				destEvents := reflect.MakeSlice(destEventsType, sourceEvents.Len(), sourceEvents.Len())
+				for i := 0; i < sourceEvents.Len(); i++ {
+					sourceEventInSlice := sourceEvents.Index(i)
+					destEventInSlice := reflect.New(destEventsType.Elem()).Elem()
+					for j := 0; j < sourceEventInSlice.NumField(); j++ {
+						fieldName := sourceEventInSlice.Type().Field(j).Name
+						if fieldName != "Data" {
+							destEventInSlice.FieldByName(fieldName).Set(sourceEventInSlice.Field(j))
+						}
+					}
+					destEventInSlice.FieldByName("Data").Set(sourceEventInSlice.FieldByName("Data"))
+					destEvents.Index(i).Set(destEventInSlice)
+				}
+				onFailureInput.FieldByName("Events").Set(destEvents)
+
+				// Call the OnFailure handler
+				args := []reflect.Value{
+					reflect.ValueOf(fCtx),
+					onFailureInput,
+					reflect.ValueOf(fnError),
+				}
+
+				results := onFailureFunc.Call(args)
+
+				// Handle the results from OnFailure handler
+				if len(results) == 2 {
+					// First return value is the recovery data (any)
+					recoveryData := results[0].Interface()
+
+					// Second return value is the error
+					if !results[1].IsNil() {
+						// OnFailure handler returned an error, keep the original error
+						// The failure handler failed, but we'll still keep the original error
+						// TODO: Consider logging this when logger is available
+					} else {
+						// OnFailure handler succeeded, use its return value as the function response
+						// and clear the error to indicate recovery
+						fnResponse = recoveryData
+						fnError = nil
+					}
+				}
+			}
+		}
+	}
+
 	return fnResponse, mgr.Ops(), fnError
 }
 

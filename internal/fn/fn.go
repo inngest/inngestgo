@@ -1,6 +1,7 @@
 package fn
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,10 @@ import (
 	"github.com/inngest/inngestgo/pkg/checkpoint"
 	"github.com/xhit/go-str2duration/v2"
 )
+
+// OnFailureFunc defines a function that handles failures within a function execution.
+// It receives the context, input data, and error, and can return recovery data or an error.
+type OnFailureFunc[T any] func(ctx context.Context, input Input[T], err error) (any, error)
 
 // ServableFunction defines a function which can be called by a handler's Serve method.
 // This is created via CreateFunction in this package.
@@ -82,6 +87,8 @@ type FunctionOpts struct {
 	BatchEvents *EventBatchConfig
 	// Singleton ensures only one active function run per key.
 	Singleton *Singleton
+	// OnFailure specifies a handler to call when the function fails.
+	OnFailure OnFailureFunc[any]
 }
 
 func (f FunctionOpts) Validate() error {

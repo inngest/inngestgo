@@ -333,6 +333,169 @@ func TestInvoke(t *testing.T) {
 	})
 }
 
+// TestOnFailureFunc tests that OnFailure handlers are called correctly when functions fail
+func TestOnFailureFunc(t *testing.T) {
+	setEnvVars(t)
+	ctx := context.Background()
+	mw := middleware.NewMiddlewareManager()
+
+	t.Run("OnFailure handler recovers from error", func(t *testing.T) {
+		r := require.New(t)
+		c, err := NewClient(ClientOpts{AppID: "test-app"})
+		r.NoError(err)
+
+		input := EventA{
+			Name: "test/event.a",
+			Data: EventAData{
+				Foo: "test",
+				Bar: "data",
+			},
+		}
+
+		recoveryData := map[string]any{"recovered": true}
+		var onFailureCalled bool
+
+		fn, err := CreateFunction(
+			c,
+			FunctionOpts{
+				ID: "test-on-failure",
+				OnFailure: func(ctx context.Context, input Input[any], err error) (any, error) {
+					onFailureCalled = true
+					require.Contains(t, err.Error(), "function failed")
+					eventData := input.Event.Data.(EventAData)
+					require.Equal(t, eventData.Foo, "test")
+					return recoveryData, nil
+				},
+			},
+			EventTrigger("test/event.a", nil),
+			func(ctx context.Context, input Input[EventAData]) (any, error) {
+				return nil, fmt.Errorf("function failed")
+			},
+		)
+		r.NoError(err)
+
+		actual, ops, err := invoke(ctx, c, mw, fn, testKey, createRequest(t, input), nil)
+		r.NoError(err) // Should be nil because OnFailure handler recovered
+		r.Nil(ops)
+		r.True(onFailureCalled)
+		r.Equal(recoveryData, actual)
+	})
+
+	t.Run("OnFailure handler fails, original error is preserved", func(t *testing.T) {
+		r := require.New(t)
+		c, err := NewClient(ClientOpts{AppID: "test-app"})
+		r.NoError(err)
+
+		input := EventA{
+			Name: "test/event.a",
+			Data: EventAData{
+				Foo: "test",
+				Bar: "data",
+			},
+		}
+
+		var onFailureCalled bool
+
+		fn, err := CreateFunction(
+			c,
+			FunctionOpts{
+				ID: "test-on-failure-fails",
+				OnFailure: func(ctx context.Context, input Input[any], err error) (any, error) {
+					onFailureCalled = true
+					return nil, fmt.Errorf("OnFailure handler failed")
+				},
+			},
+			EventTrigger("test/event.a", nil),
+			func(ctx context.Context, input Input[EventAData]) (any, error) {
+				return nil, fmt.Errorf("original error")
+			},
+		)
+		r.NoError(err)
+
+		actual, ops, err := invoke(ctx, c, mw, fn, testKey, createRequest(t, input), nil)
+		r.Error(err)
+		r.Contains(err.Error(), "original error") // Original error should be preserved
+		r.Nil(ops)
+		r.Nil(actual)
+		r.True(onFailureCalled)
+	})
+
+	t.Run("No OnFailure handler, error is returned as expected", func(t *testing.T) {
+		r := require.New(t)
+		c, err := NewClient(ClientOpts{AppID: "test-app"})
+		r.NoError(err)
+
+		input := EventA{
+			Name: "test/event.a",
+			Data: EventAData{
+				Foo: "test",
+				Bar: "data",
+			},
+		}
+
+		fn, err := CreateFunction(
+			c,
+			FunctionOpts{
+				ID: "test-no-on-failure",
+				// No OnFailure handler
+			},
+			EventTrigger("test/event.a", nil),
+			func(ctx context.Context, input Input[EventAData]) (any, error) {
+				return nil, fmt.Errorf("function failed")
+			},
+		)
+		r.NoError(err)
+
+		actual, ops, err := invoke(ctx, c, mw, fn, testKey, createRequest(t, input), nil)
+		r.Error(err)
+		r.Contains(err.Error(), "function failed")
+		r.Nil(ops)
+		r.Nil(actual)
+	})
+
+	t.Run("OnFailure handler with Input[any] type", func(t *testing.T) {
+		r := require.New(t)
+		c, err := NewClient(ClientOpts{AppID: "test-app"})
+		r.NoError(err)
+
+		input := EventA{
+			Name: "test/event.a",
+			Data: EventAData{
+				Foo: "test",
+				Bar: "data",
+			},
+		}
+
+		recoveryData := map[string]any{"recovered": true}
+		var onFailureCalled bool
+
+		fn, err := CreateFunction(
+			c,
+			FunctionOpts{
+				ID: "test-on-failure-any",
+				OnFailure: func(ctx context.Context, input Input[any], err error) (any, error) {
+					onFailureCalled = true
+					require.Contains(t, err.Error(), "function failed")
+					eventData := input.Event.Data.(map[string]any)
+					require.Equal(t, eventData["foo"], "test")
+					return recoveryData, nil
+				},
+			},
+			EventTrigger("test/event.a", nil),
+			func(ctx context.Context, input Input[map[string]any]) (any, error) {
+				return nil, fmt.Errorf("function failed")
+			},
+		)
+		r.NoError(err)
+
+		actual, ops, err := invoke(ctx, c, mw, fn, testKey, createRequest(t, input), nil)
+		r.NoError(err) // Should be nil because OnFailure handler recovered
+		r.Nil(ops)
+		r.True(onFailureCalled)
+		r.Equal(recoveryData, actual)
+	})
+}
+
 func TestServe(t *testing.T) {
 	setEnvVars(t)
 	r := require.New(t)
