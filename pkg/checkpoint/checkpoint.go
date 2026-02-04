@@ -57,7 +57,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		data["batch_steps"] = c.BatchSteps
 	}
 	if c.BatchInterval > 0 {
-		data["batch_interval"] = c.BatchInterval
+		data["batch_interval"] = c.BatchInterval.String()
 	}
 	if c.MaxRuntime > 0 {
 		data["max_runtime"] = c.MaxRuntime
