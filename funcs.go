@@ -112,6 +112,17 @@ func CronTrigger(cron string) fn.Trigger {
 	}
 }
 
+// CronTriggerWithJitter returns a cron trigger with an optional jitter duration.
+// Jitter delays the function execution by a random amount up to the specified duration.
+func CronTriggerWithJitter(cron string, jitter string) fn.Trigger {
+	return fn.Trigger{
+		CronTrigger: &fn.CronTrigger{
+			Cron:   cron,
+			Jitter: &jitter,
+		},
+	}
+}
+
 // SDKFunction represents a user-defined function to be called based off of events or
 // on a schedule.
 //
