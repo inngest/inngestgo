@@ -115,11 +115,13 @@ func CronTrigger(cron string) fn.Trigger {
 
 // CronTriggerWithJitter returns a cron trigger with an optional jitter duration.
 // Jitter delays the function execution by a random amount up to the specified duration.
+// The duration is serialized as a string (e.g. "30s") for the server.
 func CronTriggerWithJitter(cron string, jitter time.Duration) fn.Trigger {
+	s := jitter.String()
 	return fn.Trigger{
 		CronTrigger: &fn.CronTrigger{
 			Cron:   cron,
-			Jitter: &jitter,
+			Jitter: &s,
 		},
 	}
 }

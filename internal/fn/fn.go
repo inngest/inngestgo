@@ -130,12 +130,8 @@ type EventTrigger struct {
 
 // CronTrigger is a trigger which invokes the function on a CRON schedule.
 type CronTrigger struct {
-	Cron   string         `json:"cron"`
-	Jitter *time.Duration `json:"jitter,omitempty"`
-}
-
-func (c CronTrigger) MarshalJSON() ([]byte, error) {
-	return encodeJSONWithDuration(c, "jitter")
+	Cron   string  `json:"cron"`
+	Jitter *string `json:"jitter,omitempty"`
 }
 
 type Priority struct {
