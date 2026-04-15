@@ -1,5 +1,11 @@
 # inngestgo
 
+## 0.15.2
+
+### Patch Changes
+
+- 69077fd: Add optional jitter field to CronTrigger and CronTriggerWithJitter helper
+
 ## 0.15.1
 
 ### Patch Changes
