@@ -40,4 +40,43 @@ func TestTimeoutMarhsal(t *testing.T) {
 	})
 }
 
+func TestTriggerMarshalJSON(t *testing.T) {
+	t.Run("event trigger with nil CronTrigger", func(t *testing.T) {
+		tr := Trigger{EventTrigger: &EventTrigger{Event: "test/event"}}
+		byt, err := tr.MarshalJSON()
+		require.NoError(t, err)
+		require.JSONEq(t, `{"event":"test/event"}`, string(byt))
+	})
+
+	t.Run("cron trigger with nil EventTrigger", func(t *testing.T) {
+		tr := Trigger{CronTrigger: &CronTrigger{Cron: "* * * * *"}}
+		byt, err := tr.MarshalJSON()
+		require.NoError(t, err)
+		require.JSONEq(t, `{"cron":"* * * * *"}`, string(byt))
+	})
+
+	t.Run("both nil", func(t *testing.T) {
+		tr := Trigger{}
+		byt, err := tr.MarshalJSON()
+		require.NoError(t, err)
+		require.EqualValues(t, `{}`, string(byt))
+	})
+
+	t.Run("event trigger with expression", func(t *testing.T) {
+		expr := "event.data.id == '123'"
+		tr := Trigger{EventTrigger: &EventTrigger{Event: "test/event", Expression: &expr}}
+		byt, err := tr.MarshalJSON()
+		require.NoError(t, err)
+		require.JSONEq(t, `{"event":"test/event","expression":"event.data.id == '123'"}`, string(byt))
+	})
+
+	t.Run("cron trigger with jitter", func(t *testing.T) {
+		jitter := "60"
+		tr := Trigger{CronTrigger: &CronTrigger{Cron: "0 * * * *", Jitter: &jitter}}
+		byt, err := tr.MarshalJSON()
+		require.NoError(t, err)
+		require.JSONEq(t, `{"cron":"0 * * * *","jitter":"60"}`, string(byt))
+	})
+}
+
 func ptr[T any](i T) *T { return &i }
