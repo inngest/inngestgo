@@ -2,6 +2,7 @@ package checkpoint
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -103,6 +104,38 @@ func TestWithStep_BatchSteps_StillCheckpoints(t *testing.T) {
 
 	// Close should be safe after a completed checkpoint.
 	c.Close()
+}
+
+func TestWithStep_IncludesGenerationID(t *testing.T) {
+	var received AsyncRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		err := json.NewDecoder(r.Body).Decode(&received)
+		require.NoError(t, err)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	c := New(Opts{
+		RunID:        "run-123",
+		QueueItemRef: "qi-456",
+		GenerationID: 789,
+		Config: Config{
+			BatchSteps: 1,
+		},
+		APIBaseURL: server.URL,
+	}).(*checkpointer)
+	c.client.httpClient = server.Client()
+
+	c.WithStep(context.Background(), opcode.Step{
+		Op: enums.OpcodeStepRun,
+		ID: "step-1",
+	}, func(_ []opcode.Step, err error) {
+		require.NoError(t, err)
+	})
+
+	assert.Equal(t, "run-123", received.RunID)
+	assert.Equal(t, "qi-456", received.QueueItemRef)
+	assert.Equal(t, 789, received.GenerationID)
 }
 
 func TestWithStep_BatchInterval_Checkpoints(t *testing.T) {

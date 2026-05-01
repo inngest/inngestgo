@@ -69,6 +69,10 @@ func (c *Client) do(ctx context.Context, req AsyncRequest) error {
 	}
 
 	if resp.StatusCode >= 400 {
+		if resp.StatusCode == http.StatusConflict {
+			return fmt.Errorf("%w: checkpoint returned 409 conflict: %s", ErrStaleDispatch, byt)
+		}
+
 		// If we get a 401 and have a fallback key, try switching to it
 		if resp.StatusCode == 401 && c.fallbackKey != "" && !c.useFallback.Load() {
 			c.useFallback.Store(true)

@@ -3,6 +3,7 @@ package checkpoint
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -196,6 +197,29 @@ func TestClient_Checkpoint_Non401Error(t *testing.T) {
 	assert.False(t, client.useFallback.Load(), "should not have switched to fallback")
 }
 
+func TestClient_Checkpoint_ConflictReturnsStaleDispatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":"stale dispatch"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "primary-key", "fallback-key")
+	client.httpClient = server.Client()
+
+	err := client.Checkpoint(context.Background(), AsyncRequest{
+		RunID:        "run-123",
+		FnID:         uuid.New(),
+		QueueItemRef: "qi-456",
+		GenerationID: 789,
+		Steps:        []opcode.Step{},
+	})
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrStaleDispatch))
+	assert.False(t, client.useFallback.Load(), "409 should not switch to fallback auth")
+}
+
 func TestClient_Checkpoint_FallbackAlreadyActive(t *testing.T) {
 	var callCount atomic.Int32
 	var receivedAuthHeaders []string
@@ -258,6 +282,7 @@ func TestClient_Checkpoint_ValidRequestBody(t *testing.T) {
 		RunID:        "run-123",
 		FnID:         fnID,
 		QueueItemRef: "qi-456",
+		GenerationID: 789,
 		Steps: []opcode.Step{
 			{
 				Op: enums.OpcodeStepRun,
@@ -276,6 +301,7 @@ func TestClient_Checkpoint_ValidRequestBody(t *testing.T) {
 	assert.Equal(t, "run-123", receivedBody.RunID)
 	assert.Equal(t, fnID, receivedBody.FnID)
 	assert.Equal(t, "qi-456", receivedBody.QueueItemRef)
+	assert.Equal(t, 789, receivedBody.GenerationID)
 	assert.Len(t, receivedBody.Steps, 2)
 	assert.Equal(t, "step-1", receivedBody.Steps[0].ID)
 	assert.Equal(t, "step-2", receivedBody.Steps[1].ID)
