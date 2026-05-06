@@ -2,6 +2,7 @@ package checkpoint
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,6 +14,8 @@ import (
 
 type Config = check.Config
 
+var ErrStaleDispatch = errors.New("stale dispatch")
+
 type Opts struct {
 	// RunID is the run ID being checkpointed.
 	RunID string
@@ -21,6 +24,8 @@ type Opts struct {
 	// QueueItemRef represents the queue item ref that's currently leased while
 	// executing the SDK.
 	QueueItemRef string
+	// GenerationID fences checkpoint writes to the active dispatch attempt. It is a monotonic counter the backend bumps on requeue. Zero means the SDK did not receive a value and the fence fails open.
+	GenerationID int
 	// SigningKey is the signing key used to checkpoint.
 	SigningKey string
 	// SigningKeyFallback is the fallback signing key.
@@ -149,6 +154,7 @@ func (c *checkpointer) checkpoint(ctx context.Context, cb Callback) {
 		RunID:        c.opts.RunID,
 		FnID:         c.opts.FnID,
 		QueueItemRef: c.opts.QueueItemRef,
+		GenerationID: c.opts.GenerationID,
 		Steps:        c.buffer,
 	})
 	if err != nil {
@@ -177,6 +183,8 @@ type AsyncRequest struct {
 	// QueueItemRef represents the queue item ID that's currently leased while
 	// executing the SDK.
 	QueueItemRef string `json:"qi_id"`
+	// GenerationID fences checkpoint writes to the active dispatch attempt.
+	GenerationID int `json:"generation_id,omitempty"`
 	// Steps represents the steps being checkpointed.
 	Steps []opcode.Step `json:"steps"`
 }

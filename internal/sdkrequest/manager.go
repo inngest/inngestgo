@@ -5,10 +5,12 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/inngest/inngest/pkg/enums"
@@ -158,6 +160,7 @@ func NewManager(opts Opts) InvocationManager {
 			RunID:              opts.Request.CallCtx.RunID,
 			FnID:               opts.Request.CallCtx.FunctionID,
 			QueueItemRef:       opts.Request.CallCtx.QueueItemRef,
+			GenerationID:       opts.Request.CallCtx.GenerationID,
 			SigningKey:         opts.SigningKey,
 			SigningKeyFallback: opts.SigningKeyFallback,
 			Config:             checkpointConfig,
@@ -292,6 +295,9 @@ func (r *requestCtxManager) AppendOp(ctx context.Context, op GeneratorOpcode) {
 			panic(ControlHijack{})
 		}
 
+		// stale is atomic because the callback may fire on the checkpointer's
+		// BatchInterval timer goroutine, not just synchronously inside WithStep.
+		var stale atomic.Bool
 		r.checkpointer.WithStep(ctx, op, func(done []opcode.Step, err error) {
 			if err == nil {
 				// Remove each step that's checkpointed from our buffer.  The manager's buffer
@@ -304,8 +310,20 @@ func (r *requestCtxManager) AppendOp(ctx context.Context, op GeneratorOpcode) {
 				}
 				return
 			}
+			if errors.Is(err, checkpoint.ErrStaleDispatch) {
+				// A stale dispatch must contribute nothing to the SDK response,
+				// otherwise the executor saves our buffered ops as idempotent and
+				// chains the next step off this dead invocation (EXE-1552).
+				r.ops = nil
+				r.cancel()
+				stale.Store(true)
+				return
+			}
 			slog.Default().Warn("error checkpointing state, falling back to async response", "error", err)
 		})
+		if stale.Load() {
+			panic(ControlHijack{})
+		}
 	default:
 		// Do nothing else.
 	}
