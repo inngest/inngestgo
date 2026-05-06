@@ -58,8 +58,10 @@ func Connect(ctx context.Context, opts Opts, invokers map[string]FunctionInvoker
 	// Once the worker is running, it can only be stopped by calling Close()
 	doneCtx, cancelDone := context.WithCancel(context.Background())
 
+	l := logger.With("mode", "connect")
+
 	ch := &connectHandler{
-		logger:                 logger,
+		logger:                 l,
 		invokers:               invokers,
 		opts:                   opts,
 		notifyConnectDoneChan:  make(chan connectReport),
@@ -84,6 +86,7 @@ func Connect(ctx context.Context, opts Opts, invokers map[string]FunctionInvoker
 
 	conn, err := ch.Connect(ctx)
 	if err != nil {
+		l.Error("could not establish connection", "error", err)
 		return nil, fmt.Errorf("could not establish connection: %w", err)
 	}
 

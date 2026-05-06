@@ -255,6 +255,8 @@ func newHandler(c Client, opts handlerOpts) *handler {
 		opts.MaxBodySize = DefaultMaxBodySize
 	}
 
+	opts.Logger = opts.Logger.With("mode", "serve")
+
 	return &handler{
 		handlerOpts: opts,
 		appName:     c.AppID(),
