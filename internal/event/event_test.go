@@ -22,6 +22,10 @@ func TestValidateEventDataType(t *testing.T) {
 		val := struct{}{}
 		err = ValidateEventDataType(&val)
 		r.NoError(err)
+
+		mapVal := map[string]any{}
+		err = ValidateEventDataType(&mapVal)
+		r.NoError(err)
 	})
 
 	t.Run("invalid", func(t *testing.T) {
@@ -48,5 +52,26 @@ func TestValidateEventDataType(t *testing.T) {
 
 		err = ValidateEventDataType([]struct{}{})
 		r.Error(err)
+
+		var structPtr *struct{}
+		err = ValidateEventDataType(structPtr)
+		r.Error(err)
+
+		var mapPtr *map[string]any
+		err = ValidateEventDataType(mapPtr)
+		r.Error(err)
+	})
+}
+
+func TestGenericEventMap(t *testing.T) {
+	t.Run("nil pointer data becomes empty map", func(t *testing.T) {
+		var data *struct{}
+
+		out := GenericEvent[*struct{}]{
+			Name: "test.event",
+			Data: data,
+		}.Map()
+
+		require.Equal(t, map[string]any{}, out["data"])
 	})
 }
