@@ -850,14 +850,15 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 
-		for {
+		done := false
+		for !done {
 			select {
 			case result := <-results:
 				resp, ops, invokeErr = result.resp, result.ops, result.err
-				goto handleResponse
+				done = true
 			case <-r.Context().Done():
 				invokeErr = r.Context().Err()
-				goto handleResponse
+				done = true
 			case <-ticker.C:
 				_, _ = w.Write([]byte(" "))
 				if flusher, ok := w.(http.Flusher); ok {
@@ -865,25 +866,24 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 				}
 			}
 		}
+	} else {
+		resp, ops, invokeErr = invoke(
+			r.Context(),
+			h.client,
+			mw,
+			fn,
+			h.GetSigningKey(),
+			h.GetSigningKeyFallback(),
+			request,
+			stepID,
+		)
 	}
-
-	resp, ops, invokeErr = invoke(
-		r.Context(),
-		h.client,
-		mw,
-		fn,
-		h.GetSigningKey(),
-		h.GetSigningKeyFallback(),
-		request,
-		stepID,
-	)
 
 	// NOTE: When triggering step errors, we should have an OpcodeStepError
 	// within ops alongside an error.  We can safely ignore that error, as it's
 	// only used for checking whether the step used a NoRetryError or RetryAtError
 	//
 	// For that reason, we check those values first.
-handleResponse:
 	noRetry := sdkerrors.IsNoRetryError(invokeErr)
 	retryAt := sdkerrors.GetRetryAtTime(invokeErr)
 
