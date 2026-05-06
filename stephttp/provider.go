@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/inngest/inngestgo/internal/logger"
 	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/pkg/env"
 )
@@ -112,7 +113,7 @@ func Setup(opts SetupOpts) *provider {
 		opts:     opts,
 		mw:       mw,
 		inflight: &atomic.Int32{},
-		logger:   slog.Default(),
+		logger:   logger.Default(),
 	}
 
 	p.api = NewAPIClient(p.opts.baseURL(), p.opts.signingKey(), p.opts.signingKeyFallback())
