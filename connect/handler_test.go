@@ -376,3 +376,70 @@ func TestMessageReadLimitWithProtobuf(t *testing.T) {
 		r.Equal(connectproto.GatewayMessageType_GATEWAY_HEARTBEAT, msg.Kind)
 	})
 }
+
+func TestHandleWorkerRequestExtendLeaseAck(t *testing.T) {
+	newLeaseID := "new-lease-id"
+
+	tests := []struct {
+		name           string
+		initialLeases  map[string]string
+		payload        *connectproto.WorkerRequestExtendLeaseAckData
+		expectedLeases map[string]string
+	}{
+		{
+			name: "updates existing request lease",
+			initialLeases: map[string]string{
+				"request-id": "old-lease-id",
+			},
+			payload: &connectproto.WorkerRequestExtendLeaseAckData{
+				RequestId:  "request-id",
+				NewLeaseId: &newLeaseID,
+			},
+			expectedLeases: map[string]string{
+				"request-id": "new-lease-id",
+			},
+		},
+		{
+			name: "removes request lease when ack has no new lease",
+			initialLeases: map[string]string{
+				"request-id": "old-lease-id",
+			},
+			payload: &connectproto.WorkerRequestExtendLeaseAckData{
+				RequestId: "request-id",
+			},
+			expectedLeases: map[string]string{},
+		},
+		{
+			name:          "ignores stale ack for completed request",
+			initialLeases: map[string]string{},
+			payload: &connectproto.WorkerRequestExtendLeaseAckData{
+				RequestId:  "request-id",
+				NewLeaseId: &newLeaseID,
+			},
+			expectedLeases: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := require.New(t)
+
+			payload, err := proto.Marshal(tt.payload)
+			r.NoError(err)
+
+			h := &connectHandler{
+				workerPool: &workerPool{
+					inProgressLeases: tt.initialLeases,
+				},
+			}
+
+			err = h.handleWorkerRequestExtendLeaseAck(&connectproto.ConnectMessage{
+				Kind:    connectproto.GatewayMessageType_WORKER_REQUEST_EXTEND_LEASE_ACK,
+				Payload: payload,
+			})
+			r.NoError(err)
+
+			r.Equal(tt.expectedLeases, h.workerPool.inProgressLeases)
+		})
+	}
+}
