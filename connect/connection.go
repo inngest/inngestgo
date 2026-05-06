@@ -284,9 +284,11 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 				return errGatewayDraining
 			case connectproto.GatewayMessageType_GATEWAY_EXECUTOR_REQUEST:
 				// Handle invoke in a non-blocking way to allow for other messages to be processed
-				msgCopy := msg
-				if len(msgCopy.Payload) > 0 {
-					msgCopy.Payload = append([]byte(nil), msgCopy.Payload...)
+				msgCopy := connectproto.ConnectMessage{
+					Kind: msg.Kind,
+				}
+				if len(msg.Payload) > 0 {
+					msgCopy.Payload = append([]byte(nil), msg.Payload...)
 				}
 				h.workerPool.Add(workerPoolMsg{
 					msg:          &msgCopy,
