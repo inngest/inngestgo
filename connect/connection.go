@@ -229,7 +229,11 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 	heartbeatReceived := make(chan struct{}, 1)
 	go func() {
 		// Wait until initial heartbeat was sent out
-		<-time.After(preparedConn.heartbeatInterval)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(preparedConn.heartbeatInterval):
+		}
 
 		heartbeatTimeout := 2 * preparedConn.heartbeatInterval
 		heartbeatReplyTimer := time.NewTimer(heartbeatTimeout)
