@@ -147,13 +147,15 @@ func TestConnectReturnsNonReconnectError(t *testing.T) {
 
 func TestConnectReturnsTooManyConnectionsError(t *testing.T) {
 	r := require.New(t)
+	apiClient := newWorkerApiClient("", nil)
 	h := &connectHandler{
 		opts:                   Opts{IsDev: true},
 		logger:                 slog.Default(),
 		notifyConnectDoneChan:  make(chan connectReport),
 		notifyConnectedChan:    make(chan struct{}),
 		initiateConnectionChan: make(chan struct{}, 1),
-		messageBuffer:          &messageBuffer{},
+		apiClient:              apiClient,
+		messageBuffer:          newMessageBuffer(apiClient, slog.Default()),
 		state:                  ConnectionStateConnecting,
 	}
 	h.workerCtx, h.cancelWorkerCtx = context.WithCancel(context.Background())
