@@ -250,16 +250,20 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 					isInitialConnection = false
 					initialConnectionDone <- nil
 				}
-				h.setState(ConnectionStateActive)
+				h.setState(ConnectionStateActive, "connection established", "attempt", attempts)
 				attempts = 0
 				continue
 
 			// Handle connection done events
 			case msg := <-h.notifyConnectDoneChan:
-				l.Error("connect failed", "err", msg.err, "reconnect", msg.reconnect)
+				if msg.err != nil {
+					l.Error("connection ended with error", "err", msg.err, "reconnect", msg.reconnect)
+				} else {
+					l.Debug("connection ended", "reconnect", msg.reconnect)
+				}
 
 				if !msg.reconnect {
-					h.setState(ConnectionStateClosed)
+					h.setState(ConnectionStateClosed, "connection ended without reconnect", "err", msg.err)
 
 					if isInitialConnection {
 						isInitialConnection = false
@@ -269,7 +273,7 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 					return err
 				}
 
-				h.setState(ConnectionStateReconnecting)
+				h.setState(ConnectionStateReconnecting, "connection ended with reconnect", "err", msg.err, "attempt", attempts)
 
 				// Some errors should be handled differently (e.g. auth failed)
 				if msg.err != nil {
@@ -446,13 +450,17 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 func (h *connectHandler) Close() error {
 	// If connection was already closed, this is a no-op.
 	if h.closed.Swap(true) {
+		h.logger.Debug("close ignored; connection already closed", "state", h.State())
 		return nil
 	}
 
 	if h.cancelWorkerCtx == nil {
-		return fmt.Errorf("connection was not fully set up")
+		err := fmt.Errorf("connection was not fully set up")
+		h.logger.Error("could not close connection", "err", err, "state", h.State())
+		return err
 	}
 
+	h.setState(ConnectionStateClosing, "close requested")
 	h.cancelWorkerCtx()
 
 	// Wait until connection loop finishes
@@ -461,7 +469,7 @@ func (h *connectHandler) Close() error {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
 
-	h.setState(ConnectionStateClosed)
+	h.setState(ConnectionStateClosed, "close complete")
 
 	return nil
 }
@@ -472,10 +480,19 @@ func (h *connectHandler) State() ConnectionState {
 	return h.state
 }
 
-func (h *connectHandler) setState(state ConnectionState) {
+func (h *connectHandler) setState(state ConnectionState, reason string, attrs ...any) {
 	h.stateLock.Lock()
-	defer h.stateLock.Unlock()
+	previous := h.state
 	h.state = state
+	h.stateLock.Unlock()
+
+	logAttrs := []any{
+		"from", previous,
+		"to", state,
+		"reason", reason,
+	}
+	logAttrs = append(logAttrs, attrs...)
+	h.logger.Debug("worker connection state transition", logAttrs...)
 }
 
 var errGatewayDraining = errors.New("gateway is draining")
