@@ -104,12 +104,13 @@ type NewAPIRunData struct {
 // APIResult represents the final result of an API function call
 type APIResult struct {
 	// StatusCode represents the status code for the API result
-	StatusCode int `json:"status_code"`
+	StatusCode int `json:"status"`
 	// Headers represents any response headers sent in the server response
 	Headers map[string]string `json:"headers"`
-	// Body represents the API response.  This may be nil by default.  It is only
-	// captured when you manually specify that you want to track the result.
-	Body []byte `json:"body,omitempty"`
+	// Body represents the API response.  This may be empty by default.  It is
+	// only captured when you manually specify that you want to track the
+	// result.
+	Body string `json:"body,omitempty"`
 	// Duration represents the duration
 	Duration time.Duration `json:"duration"`
 	// Error represents any error from the API.  This is only for internal errors,
