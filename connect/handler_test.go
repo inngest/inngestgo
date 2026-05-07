@@ -113,13 +113,15 @@ func TestMaxWorkerConcurrency(t *testing.T) {
 func TestConnectReturnsNonReconnectError(t *testing.T) {
 	r := require.New(t)
 	expected := errors.New("connection failed")
+	apiClient := newWorkerApiClient("", nil)
 	h := &connectHandler{
 		opts:                   Opts{IsDev: true},
 		logger:                 slog.Default(),
 		notifyConnectDoneChan:  make(chan connectReport),
 		notifyConnectedChan:    make(chan struct{}),
 		initiateConnectionChan: make(chan struct{}, 1),
-		messageBuffer:          &messageBuffer{},
+		apiClient:              apiClient,
+		messageBuffer:          newMessageBuffer(apiClient, slog.Default()),
 		state:                  ConnectionStateConnecting,
 	}
 	h.workerCtx, h.cancelWorkerCtx = context.WithCancel(context.Background())
@@ -169,7 +171,7 @@ func TestConnectReturnsTooManyConnectionsError(t *testing.T) {
 
 	h.notifyConnectDoneChan <- connectReport{
 		err:       ErrTooManyConnections,
-		reconnect: true,
+		reconnect: false,
 	}
 
 	select {
