@@ -19,6 +19,7 @@ import (
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/syscode"
 	ifn "github.com/inngest/inngestgo/internal/fn"
+	"github.com/inngest/inngestgo/internal/logger"
 	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/step"
@@ -30,6 +31,20 @@ func setEnvVars(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "abc123")
 	t.Setenv("INNGEST_SIGNING_KEY", string(testKey))
 	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", string(testKeyFallback))
+}
+
+func TestHandlerSetOptionsAnnotatesServeMode(t *testing.T) {
+	t.Setenv("LOG_HANDLER", "txt")
+
+	var buf bytes.Buffer
+	h := &handler{}
+
+	h.SetOptions(handlerOpts{
+		Logger: logger.New(&buf),
+	})
+	h.Logger.Info("test log")
+
+	assert.Contains(t, buf.String(), "mode=serve")
 }
 
 type EventA = GenericEvent[EventAData]
