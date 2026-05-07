@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -45,6 +47,70 @@ func TestHandlerSetOptionsAnnotatesServeMode(t *testing.T) {
 	h.Logger.Info("test log")
 
 	assert.Contains(t, buf.String(), "mode=serve")
+}
+
+func TestInvokeRequestIDsAccessibleForInputAndLogging(t *testing.T) {
+	r := require.New(t)
+	dev := true
+	requestID := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	jobID := "job-123"
+
+	var buf bytes.Buffer
+	c, err := NewClient(ClientOpts{
+		AppID:  "request-ids",
+		Dev:    &dev,
+		Logger: slog.New(slog.NewJSONHandler(&buf, nil)),
+	})
+	r.NoError(err)
+
+	var gotCtx InputCtx
+	_, err = CreateFunction(
+		c,
+		FunctionOpts{ID: "fn"},
+		EventTrigger("test/request.ids", nil),
+		func(ctx context.Context, input Input[map[string]any]) (any, error) {
+			gotCtx = input.InputCtx
+			middleware.LoggerFromContext(ctx).Info("request ids visible")
+			return map[string]bool{"ok": true}, nil
+		},
+	)
+	r.NoError(err)
+
+	body, err := json.Marshal(sdkrequest.Request{
+		Event: []byte(`{"name":"test/request.ids","data":{}}`),
+		Steps: map[string]json.RawMessage{},
+		CallCtx: sdkrequest.CallCtx{
+			FunctionID: uuid.New(),
+			RunID:      "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+		},
+	})
+	r.NoError(err)
+
+	req := httptest.NewRequest(http.MethodPost, "/?fnId=fn", bytes.NewReader(body))
+	req.Header.Set(HeaderKeyRequestID, requestID)
+	req.Header.Set(HeaderKeyJobID, jobID)
+	rr := httptest.NewRecorder()
+	c.Serve().ServeHTTP(rr, req)
+
+	r.Equal(http.StatusOK, rr.Code)
+	r.Equal(requestID, gotCtx.RequestID)
+	r.Equal(jobID, gotCtx.JobID)
+
+	var logEntry map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var entry map[string]any
+		r.NoError(json.Unmarshal([]byte(line), &entry))
+		if entry[slog.MessageKey] == "request ids visible" {
+			logEntry = entry
+			break
+		}
+	}
+	r.NotNil(logEntry)
+	r.Equal(requestID, logEntry["request_id"])
+	r.Equal(jobID, logEntry["job_id"])
 }
 
 type EventA = GenericEvent[EventAData]

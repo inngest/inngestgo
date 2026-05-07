@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/inngest/inngest/pkg/connect/wsproto"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -185,6 +186,79 @@ func TestConnectReturnsTooManyConnectionsError(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for Connect to return")
 	}
+}
+
+func TestConnectInvokeUsesProtoRequestAndJobIDs(t *testing.T) {
+	r := require.New(t)
+	requestID := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	jobID := "job-123"
+
+	accepted := make(chan *websocket.Conn, 1)
+	done := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
+			InsecureSkipVerify: true,
+		})
+		r.NoError(err)
+		accepted <- conn
+		<-done
+		_ = conn.CloseNow()
+	}))
+	defer server.Close()
+	defer close(done)
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	clientConn, _, err := websocket.Dial(context.Background(), wsURL, nil)
+	r.NoError(err)
+	defer func() { _ = clientConn.CloseNow() }()
+	serverConn := <-accepted
+
+	ackCh := make(chan connectproto.ConnectMessage, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		var ack connectproto.ConnectMessage
+		errCh <- wsproto.Read(context.Background(), serverConn, &ack)
+		ackCh <- ack
+	}()
+
+	requestPayload, err := json.Marshal(sdkrequest.Request{
+		Event: []byte(`{"name":"test/connect.request.ids","data":{}}`),
+		Steps: map[string]json.RawMessage{},
+	})
+	r.NoError(err)
+	msgPayload, err := proto.Marshal(&connectproto.GatewayExecutorRequestData{
+		RequestId:      requestID,
+		JobId:          jobID,
+		AppName:        "app",
+		FunctionSlug:   "fn",
+		RequestPayload: requestPayload,
+	})
+	r.NoError(err)
+
+	invoker := &captureInvoker{}
+	h := &connectHandler{
+		logger: slog.New(slog.DiscardHandler),
+		invokers: map[string]FunctionInvoker{
+			"app": invoker,
+		},
+		workerPool: &workerPool{
+			inProgressLeases:     map[string]string{},
+			inProgressLeasesLock: sync.Mutex{},
+		},
+	}
+	resp, err := h.connectInvoke(context.Background(), &connection{
+		ws:                  clientConn,
+		extendLeaseInterval: time.Hour,
+	}, &connectproto.ConnectMessage{
+		Payload: msgPayload,
+	})
+	r.NoError(err)
+	r.Equal(requestID, resp.RequestId)
+	r.Equal(requestID, invoker.request.CallCtx.RequestID)
+	r.Equal(jobID, invoker.request.CallCtx.JobID)
+
+	r.NoError(<-errCh)
+	r.Equal(connectproto.GatewayMessageType_WORKER_REQUEST_ACK, (<-ackCh).Kind)
 }
 
 func TestMessageReadLimit(t *testing.T) {
@@ -721,4 +795,18 @@ func wsReadProto(ctx context.Context, conn *websocket.Conn, msg proto.Message) e
 		return err
 	}
 	return proto.Unmarshal(data, msg)
+}
+
+type captureInvoker struct {
+	request sdkrequest.Request
+}
+
+func (c *captureInvoker) InvokeFunction(
+	ctx context.Context,
+	slug string,
+	stepId *string,
+	request sdkrequest.Request,
+) (any, []sdkrequest.GeneratorOpcode, error) {
+	c.request = request
+	return map[string]bool{"ok": true}, nil, nil
 }
