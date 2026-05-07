@@ -2,6 +2,7 @@ package connect
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -107,6 +108,75 @@ func TestMaxWorkerConcurrency(t *testing.T) {
 		// Should return default value when env var is invalid
 		r.Equal(defaultMaxWorkerConcurrency, *result)
 	})
+}
+
+func TestConnectReturnsNonReconnectError(t *testing.T) {
+	r := require.New(t)
+	expected := errors.New("connection failed")
+	h := &connectHandler{
+		opts:                   Opts{IsDev: true},
+		logger:                 slog.Default(),
+		notifyConnectDoneChan:  make(chan connectReport),
+		notifyConnectedChan:    make(chan struct{}),
+		initiateConnectionChan: make(chan struct{}, 1),
+		messageBuffer:          &messageBuffer{},
+		state:                  ConnectionStateConnecting,
+	}
+	h.workerCtx, h.cancelWorkerCtx = context.WithCancel(context.Background())
+	defer h.cancelWorkerCtx()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.Connect(context.Background())
+		done <- err
+	}()
+
+	h.notifyConnectDoneChan <- connectReport{
+		err:       expected,
+		reconnect: false,
+	}
+
+	select {
+	case err := <-done:
+		r.Error(err)
+		r.ErrorIs(err, expected)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Connect to return")
+	}
+}
+
+func TestConnectReturnsTooManyConnectionsError(t *testing.T) {
+	r := require.New(t)
+	h := &connectHandler{
+		opts:                   Opts{IsDev: true},
+		logger:                 slog.Default(),
+		notifyConnectDoneChan:  make(chan connectReport),
+		notifyConnectedChan:    make(chan struct{}),
+		initiateConnectionChan: make(chan struct{}, 1),
+		messageBuffer:          &messageBuffer{},
+		state:                  ConnectionStateConnecting,
+	}
+	h.workerCtx, h.cancelWorkerCtx = context.WithCancel(context.Background())
+	defer h.cancelWorkerCtx()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.Connect(context.Background())
+		done <- err
+	}()
+
+	h.notifyConnectDoneChan <- connectReport{
+		err:       ErrTooManyConnections,
+		reconnect: true,
+	}
+
+	select {
+	case err := <-done:
+		r.Error(err)
+		r.Contains(err.Error(), "too many connections")
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Connect to return")
+	}
 }
 
 func TestMessageReadLimit(t *testing.T) {
