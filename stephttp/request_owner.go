@@ -290,10 +290,10 @@ func (o *requestOwner) call(ctx context.Context) APIResult {
 	duration := time.Since(o.startTime)
 
 	result := APIResult{
-		StatusCode: o.w.statusCode,
-		Headers:    flattenHeaders(o.w.Header()),
-		Body:       o.w.body.String(),
-		Duration:   duration,
+		Status:   o.w.statusCode,
+		Headers:  flattenHeaders(o.w.Header()),
+		Body:     o.w.body.String(),
+		Duration: duration,
 	}
 
 	if panicErr != nil {

@@ -17,9 +17,9 @@ import (
 // TestAPIResult_JSONShape validates wire format of the RunComplete payload.
 func TestAPIResult_JSONShape(t *testing.T) {
 	res := APIResult{
-		StatusCode: 200,
-		Headers:    map[string]string{"Content-Type": "application/json"},
-		Body:       `{"id":"user_1","name":"alice"}`,
+		Status:  200,
+		Headers: map[string]string{"Content-Type": "application/json"},
+		Body:    `{"id":"user_1","name":"alice"}`,
 	}
 
 	got, err := json.Marshal(res)

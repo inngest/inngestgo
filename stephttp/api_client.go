@@ -103,8 +103,8 @@ type NewAPIRunData struct {
 
 // APIResult represents the final result of an API function call
 type APIResult struct {
-	// StatusCode represents the status code for the API result
-	StatusCode int `json:"status"`
+	// Status represents the status code for the API result
+	Status int `json:"status"`
 	// Headers represents any response headers sent in the server response
 	Headers map[string]string `json:"headers"`
 	// Body represents the API response.  This may be empty by default.  It is
