@@ -51,17 +51,9 @@ func (l *logMiddlewareRequest) TransformInput(
 	call CallContext,
 	input *TransformableInput,
 ) {
-	logger := l.logger
-	if call.RequestID != "" {
-		logger = logger.With("request_id", call.RequestID)
-	}
-	if call.JobID != "" {
-		logger = logger.With("job_id", call.JobID)
-	}
-
 	// Add the logger to the context so that it can be used by the
 	// Inngest function.
-	input.WithContext(withLogger(input.Context(), logger))
+	input.WithContext(withLogger(input.Context(), l.logger))
 }
 
 // LogMiddleware returns a middleware that adds an idempotent logger to the
@@ -109,17 +101,13 @@ func (t *handlerWrapper) Handle(ctx context.Context, r slog.Record) error {
 }
 
 func (t *handlerWrapper) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &handlerWrapper{
-		enabled:     t.enabled,
-		userHandler: t.userHandler.WithAttrs(attrs),
-	}
+	// Pass through to the user handler.
+	return t.userHandler.WithAttrs(attrs)
 }
 
 func (t *handlerWrapper) WithGroup(name string) slog.Handler {
-	return &handlerWrapper{
-		enabled:     t.enabled,
-		userHandler: t.userHandler.WithGroup(name),
-	}
+	// Pass through to the user handler.
+	return t.userHandler.WithGroup(name)
 }
 
 // enable enables logging to the user handler.
