@@ -48,6 +48,32 @@ func TestNewUsesJSONHandler(t *testing.T) {
 	assert.Equal(t, float64(42), entry["answer"])
 }
 
+func TestNewUsesDevHandlerByDefault(t *testing.T) {
+	t.Setenv("LOG_LEVEL", "info")
+	t.Setenv("LOG_HANDLER", "")
+
+	var buf bytes.Buffer
+	logger := New(&buf)
+	logger.Info("dev message")
+
+	assert.Contains(t, buf.String(), "dev message")
+	assert.Contains(t, buf.String(), "\x1b[")
+	assert.NotContains(t, buf.String(), "msg=\"dev message\"")
+	assert.NotContains(t, buf.String(), "{\"")
+}
+
+func TestNewUsesDevHandler(t *testing.T) {
+	t.Setenv("LOG_LEVEL", "debug")
+	t.Setenv("LOG_HANDLER", "dev")
+
+	var buf bytes.Buffer
+	logger := New(&buf)
+	logger.Debug("dev debug")
+
+	assert.Contains(t, buf.String(), "dev debug")
+	assert.Contains(t, buf.String(), "\x1b[")
+}
+
 func TestNewUsesTextHandler(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "info")
 	t.Setenv("LOG_HANDLER", "txt")
