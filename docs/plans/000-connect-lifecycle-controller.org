@@ -146,6 +146,85 @@ Do not build one global FSM. Keep lifecycles separate:
   cleanup for one =connection=;
 - request lifecycle: queued, ACKed, in-flight, reply sent, reply buffered.
 
+* Lifecycle Diagrams
+
+** Manager lifecycle
+
+#+BEGIN_SRC mermaid
+stateDiagram-v2
+    [*] --> CONNECTING
+    CONNECTING --> ACTIVE: initial connection established
+    CONNECTING --> CLOSED: initial non-reconnectable failure
+
+    ACTIVE --> RECONNECTING: reconnectable generation failure
+    RECONNECTING --> ACTIVE: replacement generation established
+    RECONNECTING --> CLOSED: max attempts or non-reconnectable failure
+
+    ACTIVE --> CLOSING: Close()
+    RECONNECTING --> CLOSING: Close()
+    CONNECTING --> CLOSING: Close()
+    CLOSING --> CLOSED: run loop ended and buffers flushed
+#+END_SRC
+
+The manager state is user-visible worker state. It does not describe every
+websocket generation. During gateway drain, the manager may be =ACTIVE= while
+an old generation is =Draining= and a replacement generation is becoming
+=Active=.
+
+** Websocket generation lifecycle
+
+#+BEGIN_SRC mermaid
+stateDiagram-v2
+    [*] --> New
+    New --> Handshaking: websocket dialed
+    Handshaking --> Active: GATEWAY_CONNECTION_READY
+    Handshaking --> Closed: handshake failed
+
+    Active --> Draining: GATEWAY_CLOSING
+    Draining --> Retired: replacement connected or timeout
+
+    Active --> Closing: worker Close()
+    Closing --> Retired: worker pool drained
+
+    Active --> Retired: unexpected read-loop exit
+    Retired --> Closed: close transport
+    Active --> Closed: close helper applies retire first
+    Closed --> Closed: idempotent close
+#+END_SRC
+
+State intent:
+
+- =Draining= is gateway-initiated replacement. It stops heartbeat, rejects new
+  ACKs, but may attempt already-ACKed replies and buffer on write failure.
+- =Closing= is worker-initiated graceful shutdown. It sends =WORKER_PAUSE=,
+  rejects new ACKs, waits for ACKed in-flight work, and then retires.
+- =Retired= is the hard no-write boundary. It emits a best-effort manager flush
+  notification but does not perform API I/O directly.
+
+** Request lifecycle
+
+#+BEGIN_SRC mermaid
+stateDiagram-v2
+    [*] --> Queued
+    Queued --> Skipped: generation cannot ACK
+    Queued --> Acking: generation allows ACK
+    Acking --> Skipped: ACK write failed
+    Acking --> InFlight: ACK write succeeded
+
+    InFlight --> ReplyBuffered: generation retired before reply
+    InFlight --> ReplySent: reply write succeeded
+    InFlight --> ReplyBuffered: reply write failed
+
+    ReplySent --> Done: WORKER_REPLY_ACK received
+    ReplySent --> ReplyBuffered: ACK deadline elapsed
+    ReplyBuffered --> Done: API flush succeeded
+    Skipped --> Done
+#+END_SRC
+
+The request ownership rule is strict: invocation starts only after ACK write
+success. After ACK succeeds, function execution continues even if the websocket
+generation later drains, closes, or retires.
+
 * Websocket Generation States
 
 Recommended internal states:
@@ -154,6 +233,7 @@ Recommended internal states:
 - =Handshaking=
 - =Active=
 - =Draining=
+- =Closing=
 - =Retired=
 - =Closed=
 
@@ -188,16 +268,34 @@ Allowed writes:
 ** Draining
 
 The gateway requested drain. The old websocket may remain open while a
-replacement connection is established.
+replacement connection is established. This is gateway-initiated replacement,
+not local worker shutdown.
 
 Expected behavior:
 
 - no new requests should arrive from gateway;
 - in-flight work that has already ACKed may still complete;
-- replies may be written if policy allows, or buffered if the connection moves
-  to =Retired= before reply;
+- heartbeat writes stop immediately so the old generation no longer advertises
+  active liveness;
+- already-ACKed in-flight replies attempt =WORKER_REPLY= over the draining
+  websocket first and fall back to buffering if the write fails;
 - once replacement connection is established or the drain wait times out, move
   to =Retired= and close the old transport.
+
+** Closing
+
+The local worker is shutting down gracefully. This is worker-initiated, not
+gateway-initiated replacement.
+
+Expected behavior:
+
+- send =WORKER_PAUSE= to tell the gateway this worker should not receive more
+  requests;
+- stop new request ACKs;
+- allow already-ACKed in-flight work to finish;
+- attempt already-ACKed in-flight replies while the websocket remains usable,
+  buffering on write failure;
+- after the worker pool drains, move to =Retired= and close the transport.
 
 ** Retired
 
@@ -212,6 +310,10 @@ Request behavior:
 - queued pre-ACK jobs skip invocation;
 - post-ACK in-flight jobs may finish and buffer replies;
 - lease extension loops exit.
+
+Retiring a generation should not perform API flush directly. It should emit a
+best-effort non-blocking notification to the manager that buffered replies may
+need flushing. The manager owns serialized API flush using current auth state.
 
 ** Closed
 
@@ -233,6 +335,7 @@ func (c *connection) transition(to connPhase, reason string, attrs ...any) error
 
 func (c *connection) markActive(reason string)
 func (c *connection) beginDrain(reason string)
+func (c *connection) beginClose(reason string)
 func (c *connection) retire(reason string)
 func (c *connection) closeNormal(reason string)
 func (c *connection) closeNow(reason string)
@@ -246,15 +349,30 @@ can validate both state and side effects.
 
 - record reason and log transition once;
 - signal that the read loop is expected to end;
+- stop heartbeat writes;
+- keep the old generation as a temporary reply path for already-ACKed
+  in-flight work;
 - optionally reject new queued work if any arrives after drain begins.
 
-** On =Active -> Retired= or =Draining -> Retired=
+** On =Active -> Closing=
+
+- record reason and log transition once;
+- send =WORKER_PAUSE=;
+- stop new request ACKs;
+- allow already-ACKed in-flight work to finish;
+- keep the old generation as a temporary reply path for already-ACKed replies;
+- document in code comments that =Closing= is local worker shutdown, not
+  gateway-initiated replacement.
+
+** On =Active -> Retired=, =Draining -> Retired=, or =Closing -> Retired=
 
 - mark the generation as no longer writable;
 - close a =done= or =noWrites= channel for request and lease loops;
 - cause queued pre-ACK work to fail before invocation;
 - cause post-ACK replies to buffer rather than write;
 - stop heartbeat and lease extension loops.
+- notify the manager, without blocking, that buffered replies may need API
+  flushing.
 
 ** On =Retired -> Closed=
 
@@ -305,10 +423,19 @@ Initial implementation does not need a full request object. It can be enough to
 centralize checks:
 
 - before ACK: require generation =Active=;
+- ACK write must succeed before invocation starts;
 - after ACK: invocation continues independent of generation state;
-- before reply write: require generation =Active= or allowed =Draining=;
+- before reply write: require generation =Active=, =Draining=, or =Closing=;
 - otherwise buffer reply;
 - before lease extend: require generation =Active=.
+
+Operational distinction:
+
+- non-writable phases before ACK, such as =Draining=, =Closing=, =Retired=, or
+  =Closed=, are expected lifecycle skips and should be logged at debug level;
+- ACK write failure while the generation is =Active= is a transport/protocol
+  failure and should be logged more prominently;
+- both cases skip invocation.
 
 * Phased Implementation Plan
 
@@ -359,6 +486,7 @@ protocol behavior.
   - [ ] =Handshaking=
   - [ ] =Active=
   - [ ] =Draining=
+  - [ ] =Closing=
   - [ ] =Retired=
   - [ ] =Closed=
 - [ ] Add a private transition helper:
@@ -370,9 +498,12 @@ protocol behavior.
   - [ ] =phase()=
   - [ ] =markActive(reason string, attrs ...any)=
   - [ ] =beginDrain(reason string, attrs ...any)=
+  - [ ] =beginClose(reason string, attrs ...any)=
   - [ ] =retire(reason string, attrs ...any)=
   - [ ] =closeNormal(reason string, attrs ...any)=
   - [ ] =closeNow(reason string, attrs ...any)=
+- [ ] Add a non-blocking manager flush notification hook that =retire= can
+  call without performing API I/O directly.
 - [ ] Keep =Retired= as the state that means no future protocol writes.
 - [ ] Route existing retire and close call sites through the lifecycle methods.
 - [ ] Preserve the current fallback =CloseNow= behavior, but make its state
@@ -382,7 +513,10 @@ protocol behavior.
 
 - [ ] =New -> Handshaking -> Active= succeeds.
 - [ ] =Active -> Retired= disables writes.
+- [ ] =Active -> Retired= notifies the manager that buffered replies may need
+  flushing.
 - [ ] =Draining -> Retired= succeeds.
+- [ ] =Active -> Closing -> Retired= succeeds.
 - [ ] =Retired -> Closed= is idempotent.
 - [ ] =Active -> Closed= applies retire effects before close.
 - [ ] Invalid transitions are rejected or logged clearly.
@@ -415,7 +549,9 @@ Purpose: make write eligibility state-driven rather than scattered
   - [ ] =New=: no writes;
   - [ ] =Handshaking=: handshake writes only;
   - [ ] =Active=: heartbeat, ACK, reply, extend lease, pause;
-  - [ ] =Draining=: explicitly decide reply/heartbeat policy;
+  - [ ] =Draining=: already-ACKed replies only, attempted first and buffered
+    on failure; no heartbeat;
+  - [ ] =Closing=: pause and already-ACKed replies only;
   - [ ] =Retired=: no protocol writes;
   - [ ] =Closed=: no protocol writes.
 - [ ] Replace direct =preparedConn.isRetired()= checks in request ACK, reply,
@@ -427,6 +563,9 @@ Purpose: make write eligibility state-driven rather than scattered
 *** Test checklist
 
 - [ ] Request ACK is not attempted outside allowed phases.
+- [ ] ACK write failure does not invoke the function.
+- [ ] Non-writable pre-ACK phases and ACK transport failures produce distinct
+  log messages.
 - [ ] Reply write is not attempted after =Retired=.
 - [ ] Heartbeat write is not attempted after =Retired=.
 - [ ] Lease extension write is not attempted after =Retired=.
@@ -460,12 +599,14 @@ worker shutdown.
   - [ ] replacement connection is established; or
   - [ ] replacement wait times out.
 - [ ] Close the old transport through lifecycle close helpers.
-- [ ] Decide and implement =Draining= write policy:
-  - [ ] replies allowed until =Retired=; or
-  - [ ] replies always buffer once drain begins.
-- [ ] Decide heartbeat behavior in =Draining=:
-  - [ ] stop immediately; or
-  - [ ] continue until =Retired=.
+- [ ] Implement =Draining= reply policy:
+  - [ ] attempt =WORKER_REPLY= for already-ACKed in-flight work;
+  - [ ] buffer reply if the draining websocket write fails;
+  - [ ] buffer immediately once the generation reaches =Retired=.
+- [ ] Stop heartbeat writes immediately when the generation enters
+  =Draining=.
+- [ ] Add comments near drain handling clarifying that =Draining= is
+  gateway-initiated replacement, not local worker shutdown.
 
 *** Test checklist
 
@@ -488,6 +629,45 @@ worker shutdown.
 - [ ] Manager can be =ACTIVE= while an old generation is =DRAINING= or
   =RETIRED=.
 
+** Phase 3.5: Model graceful websocket closing explicitly
+
+Purpose: make worker-initiated graceful shutdown distinct from gateway drain.
+
+*** Implementation checklist
+
+- [ ] Add =Closing= as a first-class websocket generation state.
+- [ ] Move graceful shutdown behavior through =beginClose=.
+- [ ] Send =WORKER_PAUSE= when entering =Closing=.
+- [ ] Stop new request ACKs in =Closing=.
+- [ ] Allow already-ACKed in-flight work to finish in =Closing=.
+- [ ] Attempt =WORKER_REPLY= for already-ACKed in-flight work while
+  =Closing=.
+- [ ] Buffer reply if the closing websocket write fails.
+- [ ] Move from =Closing= to =Retired= after worker-pool completion.
+- [ ] Close the transport through lifecycle close helpers.
+- [ ] Add comments near graceful shutdown handling clarifying that =Closing= is
+  local worker shutdown, not gateway-initiated replacement.
+
+*** Test checklist
+
+- [ ] Graceful shutdown moves active generation to =Closing= before
+  =Retired=.
+- [ ] Entering =Closing= sends =WORKER_PAUSE=.
+- [ ] Queued pre-ACK work does not start in =Closing=.
+- [ ] ACKed in-flight work can finish in =Closing=.
+- [ ] ACKed in-flight reply attempts websocket first and buffers on failure.
+- [ ] Generation moves to =Retired= and =Closed= after worker-pool completion.
+
+*** Validation checklist
+
+- [ ] =go test ./connect -count=1=
+- [ ] Tests distinguish =Draining= and =Closing= behavior.
+
+*** Exit criteria
+
+- [ ] Gateway drain and graceful shutdown have separate phases and comments.
+- [ ] Shutdown side effects are correlated with entering =Closing=.
+
 ** Phase 4: Clarify manager transitions
 
 Purpose: keep user-visible worker connection state clear without mixing it with
@@ -508,6 +688,12 @@ websocket generation state.
 - [ ] Make invalid manager transitions visible in logs.
 - [ ] Ensure reconnect overlap does not require changing manager state away
   from =ACTIVE= while old generation drains.
+- [ ] Add a serialized manager-owned flush path for lifecycle flush
+  notifications:
+  - [ ] notification is non-blocking;
+  - [ ] repeated notifications are coalesced or serialized;
+  - [ ] flush uses current manager auth state;
+  - [ ] reconnect and close flushes remain safety points.
 
 *** Test checklist
 
@@ -516,6 +702,8 @@ websocket generation state.
 - [ ] Non-reconnectable failure moves to =CLOSED=.
 - [ ] =Close= moves =ACTIVE/RECONNECTING -> CLOSING -> CLOSED=.
 - [ ] Double =Close= is idempotent.
+- [ ] Manager flush notification triggers one serialized API flush.
+- [ ] Repeated flush notifications do not start concurrent flushes.
 - [ ] Invalid transitions are rejected or logged clearly.
 
 *** Validation checklist
@@ -538,6 +726,7 @@ cancellation semantics.
 - [ ] Add small request helper functions or a request context wrapper if needed.
 - [ ] Encode request boundaries:
   - [ ] before ACK: require generation phase that allows ACK;
+  - [ ] ACK write must succeed before invocation starts;
   - [ ] after ACK: invocation continues independent of generation phase;
   - [ ] before reply write: require generation phase that allows reply;
   - [ ] otherwise buffer reply;
@@ -550,6 +739,7 @@ cancellation semantics.
 *** Test checklist
 
 - [ ] Queued request on =Retired= does not ACK and does not invoke.
+- [ ] ACK write failure while =Active= does not invoke.
 - [ ] ACKed in-flight request on =Retired= completes and buffers reply.
 - [ ] Reply ACK clears =pendingAck=.
 - [ ] Lease extension exits when generation becomes =Retired=.
@@ -597,17 +787,6 @@ Purpose: remove redundant lifecycle mechanisms and document the final contract.
 - [ ] State transitions own their side effects.
 - [ ] Tests cover each state boundary that affects writes, close behavior, or
   request execution.
-
-* Open Questions
-
-- Should =Draining= allow =WORKER_REPLY= writes until the generation is retired,
-  or should replies always buffer once drain begins?
-- Should heartbeat stop immediately on =Draining= or only on =Retired=?
-- Should graceful shutdown mark the generation as a distinct =Closing= phase
-  before =Retired=?
-- Should ACK write failures be treated identically to retired pre-ACK requests?
-- Should buffered replies be flushed immediately on retire or only from the
-  manager reconnect/close paths?
 
 * Success Criteria
 
