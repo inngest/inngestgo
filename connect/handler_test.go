@@ -2,16 +2,20 @@ package connect
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -516,4 +520,157 @@ func TestHandleWorkerRequestExtendLeaseAck(t *testing.T) {
 			r.Equal(tt.expectedLeases, h.workerPool.inProgressLeases)
 		})
 	}
+}
+
+func TestHandleMessageReplyAckClearsPendingAck(t *testing.T) {
+	r := require.New(t)
+
+	apiClient := newWorkerApiClient("", nil)
+	h := &connectHandler{
+		messageBuffer: newMessageBuffer(apiClient, slog.Default()),
+	}
+	h.messageBuffer.pendingAck["request-id"] = &connectproto.SDKResponse{
+		RequestId: "request-id",
+	}
+
+	payload, err := proto.Marshal(&connectproto.WorkerReplyAckData{
+		RequestId: "request-id",
+	})
+	r.NoError(err)
+
+	err = h.handleMessageReplyAck(&connectproto.ConnectMessage{
+		Kind:    connectproto.GatewayMessageType_WORKER_REPLY_ACK,
+		Payload: payload,
+	})
+	r.NoError(err)
+
+	h.messageBuffer.lock.Lock()
+	defer h.messageBuffer.lock.Unlock()
+	r.NotContains(h.messageBuffer.pendingAck, "request-id")
+}
+
+func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.T) {
+	r := require.New(t)
+
+	serverSawAck := make(chan struct{})
+	serverClosed := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
+			InsecureSkipVerify: true,
+		})
+		r.NoError(err)
+		defer close(serverClosed)
+
+		var msg connectproto.ConnectMessage
+		err = wsReadProto(req.Context(), conn, &msg)
+		r.NoError(err)
+		r.Equal(connectproto.GatewayMessageType_WORKER_REQUEST_ACK, msg.Kind)
+		close(serverSawAck)
+
+		_ = conn.Close(websocket.StatusInternalError, "connect_internal_error")
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	clientConn, _, err := websocket.Dial(ctx, wsURL, nil)
+	r.NoError(err)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	apiClient := newWorkerApiClient("", nil)
+	invoker := &blockingTestInvoker{
+		release: serverClosed,
+	}
+	h := &connectHandler{
+		opts: Opts{
+			SDKLanguage: "go",
+			SDKVersion:  "test",
+		},
+		invokers: map[string]FunctionInvoker{
+			"test-app": invoker,
+		},
+		logger:        slog.Default(),
+		messageBuffer: newMessageBuffer(apiClient, slog.Default()),
+		workerPool: &workerPool{
+			inProgressLeases:     map[string]string{},
+			inProgressLeasesLock: sync.Mutex{},
+		},
+	}
+
+	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+		RequestId:      "request-id",
+		AccountId:      "account-id",
+		EnvId:          "env-id",
+		AppId:          "app-id",
+		AppName:        "test-app",
+		FunctionSlug:   "test-fn",
+		RequestPayload: mustJSON(t, sdkrequest.Request{}),
+		LeaseId:        "lease-id",
+	})
+
+	preparedConn := &connection{
+		ws:                  clientConn,
+		connectionId:        "old-connection",
+		extendLeaseInterval: time.Hour,
+	}
+
+	err = h.handleInvokeMessage(ctx, preparedConn, msg)
+	r.NoError(err)
+	r.True(invoker.called.Load())
+
+	h.messageBuffer.lock.Lock()
+	defer h.messageBuffer.lock.Unlock()
+	r.Contains(h.messageBuffer.buffered, "request-id")
+	r.NotContains(h.messageBuffer.pendingAck, "request-id")
+
+	select {
+	case <-serverSawAck:
+	default:
+		t.Fatal("server did not receive worker request ack")
+	}
+}
+
+type blockingTestInvoker struct {
+	release <-chan struct{}
+	called  atomic.Bool
+}
+
+func (b *blockingTestInvoker) InvokeFunction(ctx context.Context, slug string, stepId *string, request sdkrequest.Request) (any, []sdkrequest.GeneratorOpcode, error) {
+	b.called.Store(true)
+	select {
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
+	case <-b.release:
+		return map[string]string{"ok": "true"}, nil, nil
+	}
+}
+
+func mustExecutorRequestMessage(t *testing.T, data *connectproto.GatewayExecutorRequestData) *connectproto.ConnectMessage {
+	t.Helper()
+
+	payload, err := proto.Marshal(data)
+	require.NoError(t, err)
+
+	return &connectproto.ConnectMessage{
+		Kind:    connectproto.GatewayMessageType_GATEWAY_EXECUTOR_REQUEST,
+		Payload: payload,
+	}
+}
+
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+
+	payload, err := json.Marshal(v)
+	require.NoError(t, err)
+	return payload
+}
+
+func wsReadProto(ctx context.Context, conn *websocket.Conn, msg proto.Message) error {
+	_, data, err := conn.Read(ctx)
+	if err != nil {
+		return err
+	}
+	return proto.Unmarshal(data, msg)
 }
