@@ -554,18 +554,19 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 
 	serverSawAck := make(chan struct{})
 	serverClosed := make(chan struct{})
+	invokerRelease := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
 			InsecureSkipVerify: true,
 		})
 		r.NoError(err)
-		defer close(serverClosed)
 
 		var msg connectproto.ConnectMessage
 		err = wsReadProto(req.Context(), conn, &msg)
 		r.NoError(err)
 		r.Equal(connectproto.GatewayMessageType_WORKER_REQUEST_ACK, msg.Kind)
 		close(serverSawAck)
+		close(serverClosed)
 
 		_ = conn.Close(websocket.StatusInternalError, "connect_internal_error")
 	}))
@@ -581,7 +582,7 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 
 	apiClient := newWorkerApiClient("", nil)
 	invoker := &blockingTestInvoker{
-		release: serverClosed,
+		release: invokerRelease,
 	}
 	h := &connectHandler{
 		opts: Opts{
@@ -616,6 +617,12 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 		extendLeaseInterval: time.Hour,
 	}
 
+	go func() {
+		<-serverClosed
+		preparedConn.retire()
+		close(invokerRelease)
+	}()
+
 	err = h.handleInvokeMessage(ctx, preparedConn, msg)
 	r.NoError(err)
 	r.True(invoker.called.Load())
@@ -630,6 +637,47 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 	default:
 		t.Fatal("server did not receive worker request ack")
 	}
+}
+
+func TestHandleInvokeMessageSkipsQueuedRequestForRetiredConnection(t *testing.T) {
+	r := require.New(t)
+
+	apiClient := newWorkerApiClient("", nil)
+	invoker := &blockingTestInvoker{
+		release: make(chan struct{}),
+	}
+	h := &connectHandler{
+		invokers: map[string]FunctionInvoker{
+			"test-app": invoker,
+		},
+		logger:        slog.Default(),
+		messageBuffer: newMessageBuffer(apiClient, slog.Default()),
+	}
+
+	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+		RequestId:      "request-id",
+		EnvId:          "env-id",
+		AppId:          "app-id",
+		AppName:        "test-app",
+		FunctionSlug:   "test-fn",
+		RequestPayload: mustJSON(t, sdkrequest.Request{}),
+		LeaseId:        "lease-id",
+	})
+
+	preparedConn := &connection{
+		connectionId:        "old-connection",
+		extendLeaseInterval: time.Hour,
+	}
+	preparedConn.retire()
+
+	err := h.handleInvokeMessage(context.Background(), preparedConn, msg)
+	r.NoError(err)
+	r.False(invoker.called.Load())
+
+	h.messageBuffer.lock.Lock()
+	defer h.messageBuffer.lock.Unlock()
+	r.Empty(h.messageBuffer.buffered)
+	r.Empty(h.messageBuffer.pendingAck)
 }
 
 type blockingTestInvoker struct {

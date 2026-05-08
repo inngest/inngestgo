@@ -3,6 +3,7 @@ package connect
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/inngest/inngest/pkg/connect/wsproto"
 	"github.com/inngest/inngest/pkg/enums"
@@ -18,9 +19,15 @@ const (
 	ResponseAcknowlegeDeadline = time.Second * 5
 )
 
+var errConnectionRetired = errors.New("connection retired")
+
 func (h *connectHandler) handleInvokeMessage(ctx context.Context, preparedConn *connection, msg *connectproto.ConnectMessage) error {
 	resp, err := h.connectInvoke(ctx, preparedConn, msg)
 	if err != nil {
+		if errors.Is(err, errConnectionRetired) {
+			h.logger.Debug("skipping sdk request because connection is retired")
+			return nil
+		}
 		h.logger.Error("failed to handle sdk request", "err", err)
 		// TODO Should we drop the connection? Continue receiving messages?
 		return fmt.Errorf("could not handle sdk request: %w", err)
@@ -43,14 +50,19 @@ func (h *connectHandler) handleInvokeMessage(ctx context.Context, preparedConn *
 	// that the message was truly passed on to the executor _unless_ we receive the ack message.
 	h.messageBuffer.addPending(ctx, resp, ResponseAcknowlegeDeadline)
 
+	if preparedConn.isRetired() {
+		h.messageBuffer.append(resp)
+		h.logger.Debug("buffering sdk response because connection is retired", "request_id", resp.RequestId)
+		return nil
+	}
+
 	err = wsproto.Write(ctx, preparedConn.ws, responseMessage)
 	if err != nil {
-		h.logger.Error("failed to send sdk response", "err", err)
-
 		// We received an error, the message definitely was not sent: Buffer message to retry
 		h.messageBuffer.append(resp)
+		h.logger.Debug("buffering sdk response after websocket write failure", "err", err, "request_id", resp.RequestId)
 
-		return fmt.Errorf("could not send sdk response: %w", err)
+		return nil
 	}
 
 	return nil
@@ -104,6 +116,9 @@ func (h *connectHandler) connectInvoke(ctx context.Context, preparedConn *connec
 
 	// Ack message
 	// If we're shutting down (context is canceled) we will not ack, which is desired!
+	if preparedConn.isRetired() {
+		return nil, errConnectionRetired
+	}
 	if err := wsproto.Write(ctx, preparedConn.ws, &connectproto.ConnectMessage{
 		Kind:    connectproto.GatewayMessageType_WORKER_REQUEST_ACK,
 		Payload: ackPayload,
@@ -160,6 +175,10 @@ func (h *connectHandler) connectInvoke(ctx context.Context, preparedConn *connec
 			if !ok {
 				// If the lease is not found (e.g. due to being removed after a nack),
 				// stop extending it.
+				cancelExtendLeaseCtx()
+				return
+			}
+			if preparedConn.isRetired() {
 				cancelExtendLeaseCtx()
 				return
 			}
