@@ -429,7 +429,7 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 
 func (h *connectHandler) handleMessageReplyAck(msg *connectproto.ConnectMessage) error {
 	var payload connectproto.WorkerReplyAckData
-	if err := proto.Unmarshal(msg.Payload, msg); err != nil {
+	if err := proto.Unmarshal(msg.Payload, &payload); err != nil {
 		return fmt.Errorf("could not unmarshal reply ack data: %w", err)
 	}
 
