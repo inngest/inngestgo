@@ -1,0 +1,620 @@
+#+TITLE: Connect Lifecycle Controller
+#+AUTHOR: Darwin D. Wu
+#+DATE: 2026-05-08
+#+STATUS: Draft
+#+STARTUP: showall
+
+* Overview
+
+Introduce a small lifecycle controller for Connect websocket generations and
+request execution.
+
+This is not a full-blown FSM rewrite. The goal is to centralize state
+transitions and their side effects so connection behavior is easier to reason
+about, easier to test, and less dependent on scattered booleans, deferred
+closes, channel sends, and context cancellation.
+
+The immediate motivation is SYS-856: queued and in-flight worker-pool jobs held
+a concrete =*connection= after the websocket read loop exited. Once that old
+websocket was closed, those jobs could still attempt ACK, reply, or lease
+extension writes through the stale =preparedConn.ws=.
+
+* Goals
+
+- Make websocket generation state explicit.
+- Correlate lifecycle side effects with state transitions.
+- Make allowed writes clear for each state.
+- Preserve the current intent that an ACKed function execution is not canceled
+  midway unless that becomes an explicit product decision.
+- Make request behavior testable without relying on real websocket timing races.
+- Keep manager, websocket generation, and request execution lifecycles separate.
+- Keep the implementation small and local to Connect internals.
+
+* Non-Goals
+
+- Do not introduce a general-purpose FSM library.
+- Do not model every possible goroutine state.
+- Do not collapse manager state and websocket generation state into one state.
+- Do not change Connect protocol semantics with the gateway in this plan.
+- Do not cancel in-flight user function execution on reconnect by default.
+- Do not replace the worker pool in this plan.
+
+* Current State
+
+Connect currently has three overlapping lifecycles.
+
+** Manager lifecycle
+
+=connectHandler= exposes coarse worker connection state:
+
+- =CONNECTING=
+- =ACTIVE=
+- =PAUSED=
+- =RECONNECTING=
+- =CLOSING=
+- =CLOSED=
+
+These states are currently API/logging state. They do not validate transitions
+or own lifecycle side effects.
+
+The manager run loop in =connect/handler.go=:
+
+1. starts an initial connection,
+2. listens for =notifyConnectedChan= and =notifyConnectDoneChan=,
+3. moves to =ACTIVE= after a connection is established,
+4. moves to =RECONNECTING= after reconnectable failure,
+5. flushes buffered replies via API before reconnect,
+6. backs off and starts another =h.connect(...)=,
+7. moves to =CLOSING= and =CLOSED= when =Close= is called.
+
+** Websocket generation lifecycle
+
+Each =connection= represents one concrete websocket generation.
+
+Current effective states are implicit:
+
+- prepared by =prepareConnection=
+- active while =handleConnection= read loop runs
+- gateway-draining when =GATEWAY_CLOSING= is received
+- unexpectedly closed when the read loop exits with error
+- graceful-closing during worker shutdown
+- retired after the SYS-856 fix marks it as no longer writable
+- transport-closed after =Close= or =CloseNow=
+
+Important behavior:
+
+- =GATEWAY_CLOSING= starts a replacement connection before closing the old
+  websocket.
+- unexpected read-loop exit causes reconnect.
+- graceful shutdown sends =WORKER_PAUSE=, waits for worker-pool completion,
+  retires the websocket, closes it, and flushes buffered replies.
+- a deferred =CloseNow= remains as a fallback safeguard.
+
+** Request lifecycle
+
+Worker-pool jobs currently carry:
+
+#+BEGIN_SRC go
+type workerPoolMsg struct {
+    msg          *connectproto.ConnectMessage
+    preparedConn *connection
+}
+#+END_SRC
+
+This intentionally binds a request to the websocket generation that received
+it.
+
+Current request behavior after the SYS-856 fix:
+
+- queued request on a retired connection: skip before ACK and do not invoke;
+- request that ACKs successfully: invoke function with =context.Background()=;
+- connection retired before reply: buffer the reply for API flush;
+- connection retired while lease extension loop is active: stop extending.
+
+* Problem Statement
+
+The implementation has lifecycle facts spread across multiple places:
+
+- manager state is set in =connectHandler.setState=;
+- websocket close behavior is in =handleConnection= branches and deferred
+  cleanup;
+- reconnect behavior is driven by =connectReport= messages;
+- request behavior checks connection retirement from =invoke.go=;
+- lease extension owns its own loop and exit conditions;
+- pending response acknowledgement is managed by =messageBuffer=.
+
+This makes it hard to answer basic questions locally:
+
+- Is this websocket generation allowed to write?
+- Does this transition close the websocket, only retire it, or both?
+- Are queued jobs allowed to invoke?
+- Are in-flight jobs allowed to finish?
+- Does drain behave differently from unexpected close?
+- Which side effects are guaranteed when a read loop exits?
+
+The current model can be made reliable, but the rules need a single home.
+
+* Design Direction
+
+Add a small lifecycle controller around each websocket generation. It should be
+an internal helper with validated transitions and explicit side effects.
+
+Do not build one global FSM. Keep lifecycles separate:
+
+- manager lifecycle: user-visible worker connection state;
+- websocket generation lifecycle: protocol write permissions and transport
+  cleanup for one =connection=;
+- request lifecycle: queued, ACKed, in-flight, reply sent, reply buffered.
+
+* Websocket Generation States
+
+Recommended internal states:
+
+- =New=
+- =Handshaking=
+- =Active=
+- =Draining=
+- =Retired=
+- =Closed=
+
+** New
+
+The connection object exists but the websocket is not ready for protocol use.
+
+Allowed writes:
+
+- none.
+
+** Handshaking
+
+The SDK is performing gateway hello/connect/ready protocol.
+
+Allowed writes:
+
+- handshake messages only.
+
+** Active
+
+The read loop is running and the gateway may forward executor requests.
+
+Allowed writes:
+
+- =WORKER_HEARTBEAT=
+- =WORKER_REQUEST_ACK=
+- =WORKER_REPLY=
+- =WORKER_REQUEST_EXTEND_LEASE=
+- graceful =WORKER_PAUSE= if shutdown begins
+
+** Draining
+
+The gateway requested drain. The old websocket may remain open while a
+replacement connection is established.
+
+Expected behavior:
+
+- no new requests should arrive from gateway;
+- in-flight work that has already ACKed may still complete;
+- replies may be written if policy allows, or buffered if the connection moves
+  to =Retired= before reply;
+- once replacement connection is established or the drain wait times out, move
+  to =Retired= and close the old transport.
+
+** Retired
+
+The websocket generation must no longer be used for request protocol writes.
+
+Allowed writes:
+
+- none for ACK, reply, heartbeat, or lease extension.
+
+Request behavior:
+
+- queued pre-ACK jobs skip invocation;
+- post-ACK in-flight jobs may finish and buffer replies;
+- lease extension loops exit.
+
+** Closed
+
+The transport has been closed or best-effort closed.
+
+Behavior:
+
+- same no-write behavior as =Retired=;
+- repeated close attempts are idempotent.
+
+* Transition Side Effects
+
+State transition methods should be the only place lifecycle side effects happen.
+
+Recommended internal API shape:
+
+#+BEGIN_SRC go
+func (c *connection) transition(to connPhase, reason string, attrs ...any) error
+
+func (c *connection) markActive(reason string)
+func (c *connection) beginDrain(reason string)
+func (c *connection) retire(reason string)
+func (c *connection) closeNormal(reason string)
+func (c *connection) closeNow(reason string)
+func (c *connection) canWrite(kind connectproto.GatewayMessageType) bool
+#+END_SRC
+
+The public-ish helpers can call a single private =transition= method so tests
+can validate both state and side effects.
+
+** On =Active -> Draining=
+
+- record reason and log transition once;
+- signal that the read loop is expected to end;
+- optionally reject new queued work if any arrives after drain begins.
+
+** On =Active -> Retired= or =Draining -> Retired=
+
+- mark the generation as no longer writable;
+- close a =done= or =noWrites= channel for request and lease loops;
+- cause queued pre-ACK work to fail before invocation;
+- cause post-ACK replies to buffer rather than write;
+- stop heartbeat and lease extension loops.
+
+** On =Retired -> Closed=
+
+- close websocket transport using the requested policy;
+- keep the transition idempotent.
+
+** On =Active -> Closed=
+
+- perform =Retired= side effects first;
+- then close the transport.
+
+* Manager State
+
+Keep manager state separate from websocket generation state.
+
+The manager can be =ACTIVE= while an older generation is =DRAINING= or
+=RETIRED= during reconnect overlap. That overlap is intentional during gateway
+drain and should not be hidden by a single global state.
+
+Manager states should remain user-facing and coarse:
+
+- =CONNECTING=
+- =ACTIVE=
+- =RECONNECTING=
+- =CLOSING=
+- =CLOSED=
+
+Potential cleanup:
+
+- remove =PAUSED= if unused, or define exactly when it is entered;
+- validate manager transitions separately from websocket generation transitions.
+
+* Request State
+
+Make request expectations explicit even if implemented lightly.
+
+Recommended conceptual states:
+
+- =Queued=
+- =Acking=
+- =Acked=
+- =InFlight=
+- =ReplyBuffered=
+- =ReplySent=
+- =Done=
+
+Initial implementation does not need a full request object. It can be enough to
+centralize checks:
+
+- before ACK: require generation =Active=;
+- after ACK: invocation continues independent of generation state;
+- before reply write: require generation =Active= or allowed =Draining=;
+- otherwise buffer reply;
+- before lease extend: require generation =Active=.
+
+* Phased Implementation Plan
+
+Each phase should be self-reviewable. Prefer small PRs that preserve behavior
+unless the phase explicitly changes behavior.
+
+** Phase 0: Baseline and current behavior lock-in
+
+Purpose: capture current lifecycle expectations before moving code.
+
+*** Implementation checklist
+
+- [ ] Keep the SYS-856 regressions covering reply ACK cleanup and stale
+  websocket writes.
+- [ ] Add or confirm coverage for graceful shutdown behavior:
+  - [ ] manager enters =CLOSING=;
+  - [ ] current active generation sends =WORKER_PAUSE=;
+  - [ ] worker pool is waited on;
+  - [ ] generation is retired and closed;
+  - [ ] buffered messages are flushed.
+- [ ] Add or confirm coverage for reconnect behavior:
+  - [ ] reconnectable read-loop errors move manager to =RECONNECTING=;
+  - [ ] buffered replies flush before reconnect attempt;
+  - [ ] non-reconnectable close reasons stop the manager.
+- [ ] Document any behavior that is intentionally preserved even if awkward.
+
+*** Validation checklist
+
+- [ ] =go test ./connect -count=1=
+- [ ] Tests fail if queued pre-ACK work invokes on a retired generation.
+- [ ] Tests fail if post-ACK in-flight work is canceled by generation
+  retirement.
+
+*** Exit criteria
+
+- [ ] Existing behavior is covered well enough to refactor with confidence.
+- [ ] Any known gaps are written down as explicit follow-up checkboxes.
+
+** Phase 1: Name and centralize websocket generation state
+
+Purpose: give one websocket generation an explicit lifecycle without changing
+protocol behavior.
+
+*** Implementation checklist
+
+- [ ] Add internal =connPhase= values:
+  - [ ] =New=
+  - [ ] =Handshaking=
+  - [ ] =Active=
+  - [ ] =Draining=
+  - [ ] =Retired=
+  - [ ] =Closed=
+- [ ] Add a private transition helper:
+  - [ ] validates allowed transitions;
+  - [ ] records reason and structured attrs;
+  - [ ] logs transition once;
+  - [ ] is concurrency-safe.
+- [ ] Replace the bare retired atomic with lifecycle methods:
+  - [ ] =phase()=
+  - [ ] =markActive(reason string, attrs ...any)=
+  - [ ] =beginDrain(reason string, attrs ...any)=
+  - [ ] =retire(reason string, attrs ...any)=
+  - [ ] =closeNormal(reason string, attrs ...any)=
+  - [ ] =closeNow(reason string, attrs ...any)=
+- [ ] Keep =Retired= as the state that means no future protocol writes.
+- [ ] Route existing retire and close call sites through the lifecycle methods.
+- [ ] Preserve the current fallback =CloseNow= behavior, but make its state
+  effect explicit.
+
+*** Test checklist
+
+- [ ] =New -> Handshaking -> Active= succeeds.
+- [ ] =Active -> Retired= disables writes.
+- [ ] =Draining -> Retired= succeeds.
+- [ ] =Retired -> Closed= is idempotent.
+- [ ] =Active -> Closed= applies retire effects before close.
+- [ ] Invalid transitions are rejected or logged clearly.
+
+*** Validation checklist
+
+- [ ] =go test ./connect -count=1=
+- [ ] Existing SYS-856 regressions still pass.
+
+*** Exit criteria
+
+- [ ] Every websocket generation has an observable phase.
+- [ ] Retire and close side effects are routed through lifecycle methods.
+- [ ] No request behavior changes are intentionally introduced in this phase.
+
+** Phase 2: Centralize write permission checks
+
+Purpose: make write eligibility state-driven rather than scattered
+=isRetired= checks.
+
+*** Implementation checklist
+
+- [ ] Add write permission helpers:
+  - [ ] =canWriteHeartbeat()=
+  - [ ] =canWriteRequestAck()=
+  - [ ] =canWriteReply()=
+  - [ ] =canWriteExtendLease()=
+  - [ ] optional generic =canWrite(kind connectproto.GatewayMessageType)=
+- [ ] Define write policy by phase:
+  - [ ] =New=: no writes;
+  - [ ] =Handshaking=: handshake writes only;
+  - [ ] =Active=: heartbeat, ACK, reply, extend lease, pause;
+  - [ ] =Draining=: explicitly decide reply/heartbeat policy;
+  - [ ] =Retired=: no protocol writes;
+  - [ ] =Closed=: no protocol writes.
+- [ ] Replace direct =preparedConn.isRetired()= checks in request ACK, reply,
+  heartbeat, and lease extension paths.
+- [ ] Return explicit no-write outcomes instead of attempting stale websocket
+  writes.
+- [ ] Keep websocket write failures after invocation as buffer-and-return-nil.
+
+*** Test checklist
+
+- [ ] Request ACK is not attempted outside allowed phases.
+- [ ] Reply write is not attempted after =Retired=.
+- [ ] Heartbeat write is not attempted after =Retired=.
+- [ ] Lease extension write is not attempted after =Retired=.
+- [ ] Websocket write failure after invocation buffers reply and returns no
+  request failure.
+
+*** Validation checklist
+
+- [ ] =go test ./connect -count=1=
+- [ ] Logs clearly distinguish "not writable due to phase" from websocket
+  transport write failure.
+
+*** Exit criteria
+
+- [ ] All protocol writes consult lifecycle state first.
+- [ ] No ACK, reply, heartbeat, or lease extension writes occur after
+  =Retired=.
+
+** Phase 3: Model gateway drain explicitly
+
+Purpose: make =GATEWAY_CLOSING= distinct from unexpected close and graceful
+worker shutdown.
+
+*** Implementation checklist
+
+- [ ] Move =GATEWAY_CLOSING= handling through =beginDrain=.
+- [ ] Preserve replacement-connection-before-close behavior.
+- [ ] Keep the old generation open during drain only for explicitly allowed
+  operations.
+- [ ] Move old generation from =Draining= to =Retired= after:
+  - [ ] replacement connection is established; or
+  - [ ] replacement wait times out.
+- [ ] Close the old transport through lifecycle close helpers.
+- [ ] Decide and implement =Draining= write policy:
+  - [ ] replies allowed until =Retired=; or
+  - [ ] replies always buffer once drain begins.
+- [ ] Decide heartbeat behavior in =Draining=:
+  - [ ] stop immediately; or
+  - [ ] continue until =Retired=.
+
+*** Test checklist
+
+- [ ] =GATEWAY_CLOSING= moves old generation to =Draining=.
+- [ ] Replacement connection can become =Active= while old generation is still
+  =Draining=.
+- [ ] Old generation moves to =Retired= and =Closed= after replacement.
+- [ ] Old generation moves to =Retired= and =Closed= after replacement timeout.
+- [ ] Queued work after drain does not start if ACK cannot be sent.
+- [ ] In-flight ACKed work follows the chosen =Draining= reply policy.
+
+*** Validation checklist
+
+- [ ] =go test ./connect -count=1=
+- [ ] Drain tests do not depend on real websocket close races.
+
+*** Exit criteria
+
+- [ ] Gateway drain behavior is explicit and separately testable.
+- [ ] Manager can be =ACTIVE= while an old generation is =DRAINING= or
+  =RETIRED=.
+
+** Phase 4: Clarify manager transitions
+
+Purpose: keep user-visible worker connection state clear without mixing it with
+websocket generation state.
+
+*** Implementation checklist
+
+- [ ] Add manager transition validation around =setState=.
+- [ ] Keep manager states coarse:
+  - [ ] =CONNECTING=
+  - [ ] =ACTIVE=
+  - [ ] =RECONNECTING=
+  - [ ] =CLOSING=
+  - [ ] =CLOSED=
+- [ ] Decide what to do with =PAUSED=:
+  - [ ] define exactly when it is entered; or
+  - [ ] remove it if it remains unused.
+- [ ] Make invalid manager transitions visible in logs.
+- [ ] Ensure reconnect overlap does not require changing manager state away
+  from =ACTIVE= while old generation drains.
+
+*** Test checklist
+
+- [ ] Initial connection moves =CONNECTING -> ACTIVE=.
+- [ ] Reconnectable failure moves =ACTIVE -> RECONNECTING -> ACTIVE=.
+- [ ] Non-reconnectable failure moves to =CLOSED=.
+- [ ] =Close= moves =ACTIVE/RECONNECTING -> CLOSING -> CLOSED=.
+- [ ] Double =Close= is idempotent.
+- [ ] Invalid transitions are rejected or logged clearly.
+
+*** Validation checklist
+
+- [ ] =go test ./connect -count=1=
+- [ ] Existing public =State()= behavior remains compatible.
+
+*** Exit criteria
+
+- [ ] Manager state documents user-visible lifecycle only.
+- [ ] Websocket generation state owns write and transport lifecycle.
+
+** Phase 5: Tighten request lifecycle boundaries
+
+Purpose: make request expectations explicit without changing function
+cancellation semantics.
+
+*** Implementation checklist
+
+- [ ] Add small request helper functions or a request context wrapper if needed.
+- [ ] Encode request boundaries:
+  - [ ] before ACK: require generation phase that allows ACK;
+  - [ ] after ACK: invocation continues independent of generation phase;
+  - [ ] before reply write: require generation phase that allows reply;
+  - [ ] otherwise buffer reply;
+  - [ ] before lease extend: require generation phase that allows lease extend.
+- [ ] Keep =InvokeFunction(context.Background(), ...)= behavior unless a
+  separate decision changes cancellation semantics.
+- [ ] Ensure pending ACK cleanup remains independent of generation lifecycle.
+- [ ] Make request logs include connection ID and generation phase where useful.
+
+*** Test checklist
+
+- [ ] Queued request on =Retired= does not ACK and does not invoke.
+- [ ] ACKed in-flight request on =Retired= completes and buffers reply.
+- [ ] Reply ACK clears =pendingAck=.
+- [ ] Lease extension exits when generation becomes =Retired=.
+- [ ] Request tests assert behavior by phase, not by websocket race timing.
+
+*** Validation checklist
+
+- [ ] =go test ./connect -count=1=
+- [ ] No SYS-856-style stale websocket write logs are expected from request
+  paths after =Retired=.
+
+*** Exit criteria
+
+- [ ] Request behavior is explicit for each relevant generation phase.
+- [ ] In-flight ACKed function execution still completes across reconnect.
+
+** Phase 6: Cleanup and documentation
+
+Purpose: remove redundant lifecycle mechanisms and document the final contract.
+
+*** Implementation checklist
+
+- [ ] Remove obsolete direct retired checks after all writes use phase helpers.
+- [ ] Remove redundant close calls if lifecycle close helpers make them
+  unnecessary.
+- [ ] Keep fallback close safeguards where they are still useful.
+- [ ] Update code comments around gateway drain, unexpected close, and graceful
+  shutdown.
+- [ ] Update this plan with decisions made during implementation.
+
+*** Test checklist
+
+- [ ] Full Connect package tests pass.
+- [ ] Add regression tests for any bug found during phases 1-5.
+
+*** Validation checklist
+
+- [ ] =go test ./connect -count=1=
+- [ ] Optional: run broader package test if touched imports or shared helpers
+  expand beyond =connect=.
+
+*** Exit criteria
+
+- [ ] Lifecycle rules are discoverable from code and this plan.
+- [ ] State transitions own their side effects.
+- [ ] Tests cover each state boundary that affects writes, close behavior, or
+  request execution.
+
+* Open Questions
+
+- Should =Draining= allow =WORKER_REPLY= writes until the generation is retired,
+  or should replies always buffer once drain begins?
+- Should heartbeat stop immediately on =Draining= or only on =Retired=?
+- Should graceful shutdown mark the generation as a distinct =Closing= phase
+  before =Retired=?
+- Should ACK write failures be treated identically to retired pre-ACK requests?
+- Should buffered replies be flushed immediately on retire or only from the
+  manager reconnect/close paths?
+
+* Success Criteria
+
+- Every websocket generation has an explicit phase.
+- State transition helpers own lifecycle side effects.
+- Request behavior is documented and tested for each relevant phase.
+- No ACK, reply, heartbeat, or lease extension writes occur after =Retired=.
+- In-flight ACKed function execution still completes across reconnect.
+- Gateway drain behavior remains compatible with current reconnect overlap.
+- Tests no longer need real closed-socket races to prove lifecycle behavior.
