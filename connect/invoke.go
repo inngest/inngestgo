@@ -19,13 +19,19 @@ const (
 	ResponseAcknowlegeDeadline = time.Second * 5
 )
 
+// errConnectionRetired is only returned before WORKER_REQUEST_ACK is sent.
+// At that point the SDK has not claimed ownership of the request, so skipping
+// invocation lets the gateway/executor retry or reroute it instead of risking
+// duplicate execution.
 var errConnectionRetired = errors.New("connection retired")
 
 func (h *connectHandler) handleInvokeMessage(ctx context.Context, preparedConn *connection, msg *connectproto.ConnectMessage) error {
 	resp, err := h.connectInvoke(ctx, preparedConn, msg)
 	if err != nil {
 		if errors.Is(err, errConnectionRetired) {
-			h.logger.Debug("skipping sdk request because connection is retired")
+			// This is a pre-ACK skip. Once ACK succeeds, connectInvoke invokes
+			// the function with context.Background() and must let it finish.
+			h.logger.Debug("skipping sdk request because connection retired before ack")
 			return nil
 		}
 		h.logger.Error("failed to handle sdk request", "err", err)
@@ -114,8 +120,8 @@ func (h *connectHandler) connectInvoke(ctx context.Context, preparedConn *connec
 		}
 	}
 
-	// Ack message
-	// If we're shutting down (context is canceled) we will not ack, which is desired!
+	// ACK is the ownership boundary. If this generation is already retired,
+	// do not ACK and do not invoke; the gateway/executor can retry elsewhere.
 	if preparedConn.isRetired() {
 		return nil, errConnectionRetired
 	}
