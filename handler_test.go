@@ -77,6 +77,8 @@ func TestInvokeRequestIDsAccessibleInInput(t *testing.T) {
 		CallCtx: sdkrequest.CallCtx{
 			FunctionID: uuid.New(),
 			RunID:      "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+			RequestID:  "body-request-id",
+			JobID:      "body-job-id",
 		},
 	})
 	r.NoError(err)

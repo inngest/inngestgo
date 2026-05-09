@@ -107,12 +107,8 @@ func (h *connectHandler) connectInvoke(ctx context.Context, preparedConn *connec
 		l.Error("error decoding sdk request", "error", err)
 		return nil, fmt.Errorf("invalid SDK request payload: %w", err)
 	}
-	if request.CallCtx.RequestID == "" {
-		request.CallCtx.RequestID = body.RequestId
-	}
-	if request.CallCtx.JobID == "" {
-		request.CallCtx.JobID = body.JobId
-	}
+	request.CallCtx.RequestID = body.RequestId
+	request.CallCtx.JobID = body.JobId
 	if request.CallCtx.JobID != "" {
 		l = l.With("job_id", request.CallCtx.JobID)
 	}

@@ -789,12 +789,8 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 		h.Logger.Error("error decoding function request", "error", err)
 		return fmt.Errorf("%w: %s", errBadRequest, err)
 	}
-	if request.CallCtx.RequestID == "" {
-		request.CallCtx.RequestID = r.Header.Get(HeaderKeyRequestID)
-	}
-	if request.CallCtx.JobID == "" {
-		request.CallCtx.JobID = r.Header.Get(HeaderKeyJobID)
-	}
+	request.CallCtx.RequestID = r.Header.Get(HeaderKeyRequestID)
+	request.CallCtx.JobID = r.Header.Get(HeaderKeyJobID)
 
 	if request.UseAPI {
 		// TODO: implement this

@@ -34,8 +34,8 @@ type CallCtx struct {
 	Stack                     CallStack `json:"stack"`
 	Attempt                   int       `json:"attempt"`
 	QueueItemRef              string    `json:"qi_id"`
-	RequestID                 string    `json:"request_id"`
-	JobID                     string    `json:"job_id"`
+	RequestID                 string    `json:"-"`
+	JobID                     string    `json:"-"`
 	MaxAttempts               *int      `json:"max_attempts"`
 }
 

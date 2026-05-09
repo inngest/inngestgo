@@ -224,6 +224,10 @@ func TestConnectInvokeUsesProtoRequestAndJobIDs(t *testing.T) {
 	requestPayload, err := json.Marshal(sdkrequest.Request{
 		Event: []byte(`{"name":"test/connect.request.ids","data":{}}`),
 		Steps: map[string]json.RawMessage{},
+		CallCtx: sdkrequest.CallCtx{
+			RequestID: "body-request-id",
+			JobID:     "body-job-id",
+		},
 	})
 	r.NoError(err)
 	msgPayload, err := proto.Marshal(&connectproto.GatewayExecutorRequestData{
