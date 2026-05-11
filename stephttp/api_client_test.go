@@ -2,13 +2,39 @@ package stephttp
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// TestAPIResult_JSONShape validates wire format of the RunComplete payload.
+func TestAPIResult_JSONShape(t *testing.T) {
+	res := APIResult{
+		Status:  200,
+		Headers: map[string]string{"Content-Type": "application/json"},
+		Body:    `{"id":"user_1","name":"alice"}`,
+	}
+
+	got, err := json.Marshal(res)
+	require.NoError(t, err)
+
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(got, &decoded), "raw=%s", got)
+
+	assert.NotContains(t, decoded, "status_code", "expected `status` field, got `status_code`: %s", got)
+	assert.Equal(t, float64(200), decoded["status"], "raw=%s", got)
+
+	body, ok := decoded["body"].(string)
+	require.True(t, ok, "expected body to be a string, got %T", decoded["body"])
+	assert.Equal(t, `{"id":"user_1","name":"alice"}`, body, "expected raw UTF-8 body, not base64")
+}
 
 func TestAPIClient_RetryLogic(t *testing.T) {
 	var callCount atomic.Int32
