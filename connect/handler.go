@@ -67,7 +67,7 @@ func Connect(ctx context.Context, opts Opts, invokers map[string]FunctionInvoker
 		logger:                 l,
 		invokers:               invokers,
 		opts:                   opts,
-		notifyConnectDoneChan:  make(chan connectReport),
+		notifyConnectDoneChan:  make(chan connectReport, 1),
 		notifyConnectedChan:    make(chan struct{}),
 		initiateConnectionChan: make(chan struct{}),
 		notifyFlushChan:        make(chan struct{}, 1),
@@ -239,7 +239,7 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 	var attempts int
 
 	isInitialConnection := true
-	initialConnectionDone := make(chan error)
+	initialConnectionDone := make(chan error, 1)
 
 	// We construct a connection loop, which will attempt to reconnect on failure
 	// Instead of doing a simple, synchronous loop, we use channels to communicate connection status changes,

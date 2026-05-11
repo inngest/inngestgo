@@ -125,7 +125,7 @@ func TestConnectReturnsNonReconnectError(t *testing.T) {
 	h := &connectHandler{
 		opts:                   Opts{IsDev: true},
 		logger:                 slog.Default(),
-		notifyConnectDoneChan:  make(chan connectReport),
+		notifyConnectDoneChan:  make(chan connectReport, 1),
 		notifyConnectedChan:    make(chan struct{}),
 		initiateConnectionChan: make(chan struct{}, 1),
 		apiClient:              apiClient,
@@ -161,7 +161,7 @@ func TestConnectReturnsTooManyConnectionsError(t *testing.T) {
 	h := &connectHandler{
 		opts:                   Opts{IsDev: true},
 		logger:                 slog.Default(),
-		notifyConnectDoneChan:  make(chan connectReport),
+		notifyConnectDoneChan:  make(chan connectReport, 1),
 		notifyConnectedChan:    make(chan struct{}),
 		initiateConnectionChan: make(chan struct{}, 1),
 		apiClient:              apiClient,
