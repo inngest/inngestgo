@@ -1,5 +1,16 @@
 # inngestgo
 
+## 0.15.2
+
+### Patch Changes
+
+- 69077fd: Add optional jitter field to CronTrigger and CronTriggerWithJitter helper
+- 99211e2: Fix Connect worker reply ACK handling and avoid writing request ACKs, replies, and lease extensions to retired websocket connections.
+- 7100399: Add request ID
+- 557ed47: Ignore stale Connect lease ACKs after a request has completed.
+- 8c45e9e: Allow default SDK logging to be configured with `LOG_LEVEL` and `LOG_HANDLER`, default to a colorful dev logger, and add Connect worker state transition logs with gateway connection context.
+- 14cdbc0: Align `stephttp` `APIResult` wire format with the JS SDK: rename `status_code` to `status`, emit `body` as a string instead of base64-encoded bytes, and stop wrapping the run-complete payload in a `data` envelope.
+
 ## 0.15.1
 
 ### Patch Changes
