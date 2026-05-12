@@ -47,6 +47,53 @@ func TestHandlerSetOptionsAnnotatesServeMode(t *testing.T) {
 	assert.Contains(t, buf.String(), "mode=serve")
 }
 
+func TestInvokeRequestIDsAccessibleInInput(t *testing.T) {
+	r := require.New(t)
+	dev := true
+	requestID := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	jobID := "job-123"
+
+	c, err := NewClient(ClientOpts{
+		AppID: "request-ids",
+		Dev:   &dev,
+	})
+	r.NoError(err)
+
+	var gotCtx InputCtx
+	_, err = CreateFunction(
+		c,
+		FunctionOpts{ID: "fn"},
+		EventTrigger("test/request.ids", nil),
+		func(ctx context.Context, input Input[map[string]any]) (any, error) {
+			gotCtx = input.InputCtx
+			return map[string]bool{"ok": true}, nil
+		},
+	)
+	r.NoError(err)
+
+	body, err := json.Marshal(sdkrequest.Request{
+		Event: []byte(`{"name":"test/request.ids","data":{}}`),
+		Steps: map[string]json.RawMessage{},
+		CallCtx: sdkrequest.CallCtx{
+			FunctionID: uuid.New(),
+			RunID:      "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+			RequestID:  "body-request-id",
+			JobID:      "body-job-id",
+		},
+	})
+	r.NoError(err)
+
+	req := httptest.NewRequest(http.MethodPost, "/?fnId=fn", bytes.NewReader(body))
+	req.Header.Set(HeaderKeyRequestID, requestID)
+	req.Header.Set(HeaderKeyJobID, jobID)
+	rr := httptest.NewRecorder()
+	c.Serve().ServeHTTP(rr, req)
+
+	r.Equal(http.StatusOK, rr.Code)
+	r.Equal(requestID, gotCtx.RequestID)
+	r.Equal(jobID, gotCtx.JobID)
+}
+
 type EventA = GenericEvent[EventAData]
 
 type EventAData struct {
