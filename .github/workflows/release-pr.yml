@@ -209,8 +209,9 @@ jobs:
 
           ## Notes Preview
 
-          $(cat RELEASE_NOTES.md)
           EOF
+
+            cat RELEASE_NOTES.md
           } > /tmp/release-pr-body.md
 
       - name: Find existing release PR
