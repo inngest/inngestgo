@@ -37,5 +37,4 @@ node_modules
 .npmrc
 
 # AI
-CLAUDE.md
 /.claude/
