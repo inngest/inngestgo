@@ -717,6 +717,77 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 	}
 }
 
+func TestHandleInvokeMessageReturnsErrorWhenConnectionClosesBeforeAck(t *testing.T) {
+	r := require.New(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
+			InsecureSkipVerify: true,
+		})
+		r.NoError(err)
+
+		defer func() { _ = conn.CloseNow() }()
+		<-req.Context().Done()
+	}))
+	defer server.Close()
+
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelDial()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	clientConn, _, err := websocket.Dial(dialCtx, wsURL, nil)
+	r.NoError(err)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	apiClient := newWorkerApiClient("", nil)
+	invokerRelease := make(chan struct{})
+	close(invokerRelease)
+	invoker := &blockingTestInvoker{
+		release: invokerRelease,
+	}
+	h := &connectHandler{
+		opts: Opts{
+			SDKLanguage: "go",
+			SDKVersion:  "test",
+		},
+		invokers: map[string]FunctionInvoker{
+			"test-app": invoker,
+		},
+		logger:        slog.Default(),
+		messageBuffer: newMessageBuffer(apiClient, slog.Default()),
+		workerPool: &workerPool{
+			inProgressLeases:     map[string]string{},
+			inProgressLeasesLock: sync.Mutex{},
+		},
+	}
+
+	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+		RequestId:      "request-id",
+		AccountId:      "account-id",
+		EnvId:          "env-id",
+		AppId:          "app-id",
+		AppName:        "test-app",
+		FunctionSlug:   "test-fn",
+		RequestPayload: mustJSON(t, sdkrequest.Request{}),
+		LeaseId:        "lease-id",
+	})
+
+	preparedConn := &connection{
+		ws:                  clientConn,
+		connectionId:        "old-connection",
+		extendLeaseInterval: time.Hour,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = h.handleInvokeMessage(ctx, preparedConn, msg)
+	r.Error(err)
+	r.Contains(err.Error(), "could not write message to websocket")
+	r.NotContains(err.Error(), "PANIC")
+	r.False(invoker.called.Load())
+}
+
 func TestHandleInvokeMessageSkipsQueuedRequestForRetiredConnection(t *testing.T) {
 	r := require.New(t)
 

@@ -1,0 +1,248 @@
+name: Auto-create Release PR
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'CHANGELOG.md'
+      - 'version.go'
+      - 'pkg/version/version.go'
+  schedule:
+    # Keep long-lived release PRs fresh so git-cliff's timestamped changelog
+    # entry reflects the day the release PR is regenerated.
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  # Use the release bot token so release/next pushes and PR updates trigger
+  # normal workflow fanout.
+  GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+concurrency:
+  group: release-pr-main
+  cancel-in-progress: true
+
+jobs:
+  create-release-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate release token
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error title=Missing RELEASE_TOKEN::Configure the release bot token as the RELEASE_TOKEN repository secret."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ env.GH_TOKEN }}
+
+      - name: Skip release commits
+        id: skip
+        run: |
+          if git log -1 --pretty=%s | grep -Eq '^chore\(release\): v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Check for unreleased commits
+        if: steps.skip.outputs.skip == 'false'
+        id: changes
+        run: |
+          git fetch --tags origin
+          latest_tag="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
+          head_sha="$(git rev-parse HEAD)"
+          head_short_sha="$(git rev-parse --short HEAD)"
+
+          if [ -n "${latest_tag}" ]; then
+            ahead="$(git rev-list --count "${latest_tag}"..HEAD)"
+            compare_url="${{ github.server_url }}/${{ github.repository }}/compare/${latest_tag}...${head_sha}"
+            compare_label="${latest_tag}...${head_short_sha}"
+          else
+            ahead="$(git rev-list --count HEAD)"
+            compare_url=""
+            compare_label=""
+          fi
+
+          echo "latest_tag=${latest_tag}" >> "$GITHUB_OUTPUT"
+          echo "ahead=${ahead}" >> "$GITHUB_OUTPUT"
+          echo "compare_url=${compare_url}" >> "$GITHUB_OUTPUT"
+          echo "compare_label=${compare_label}" >> "$GITHUB_OUTPUT"
+
+          if [ "${ahead}" -eq 0 ]; then
+            echo "No unreleased commits found"
+          else
+            echo "Found ${ahead} unreleased commits since ${latest_tag:-repo start}"
+          fi
+
+      - name: Compute next version
+        if: steps.skip.outputs.skip == 'false' && steps.changes.outputs.ahead != '0'
+        id: next-version
+        # Pinned from orhun/git-cliff-action@v4.
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5
+        with:
+          config: cliff.toml
+          args: --bumped-version
+        env:
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Normalize next tag
+        if: steps.skip.outputs.skip == 'false' && steps.changes.outputs.ahead != '0'
+        id: normalized-version
+        env:
+          RAW_VERSION: ${{ steps.next-version.outputs.content }}
+        run: |
+          case "${RAW_VERSION}" in
+            v*)
+              echo "tag=${RAW_VERSION}" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "tag=v${RAW_VERSION}" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Skip if no version bump is needed
+        if: steps.skip.outputs.skip == 'false' && steps.changes.outputs.ahead != '0'
+        id: version-check
+        env:
+          LATEST_TAG: ${{ steps.changes.outputs.latest_tag }}
+          NEXT_TAG: ${{ steps.normalized-version.outputs.tag }}
+        run: |
+          if [ -n "${LATEST_TAG}" ] && [ "${LATEST_TAG}" = "${NEXT_TAG}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Update SDK version
+        if: steps.skip.outputs.skip == 'false' && steps.changes.outputs.ahead != '0' && steps.version-check.outputs.skip == 'false'
+        env:
+          RELEASE_TAG: ${{ steps.normalized-version.outputs.tag }}
+        run: ./release/set_version.sh "${RELEASE_TAG}"
+
+      - name: Generate changelog
+        if: steps.skip.outputs.skip == 'false' && steps.changes.outputs.ahead != '0' && steps.version-check.outputs.skip == 'false'
+        # Pinned from orhun/git-cliff-action@v4.
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5
+        with:
+          config: cliff.toml
+          args: --tag ${{ steps.normalized-version.outputs.tag }}
+        env:
+          OUTPUT: CHANGELOG.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Generate release notes preview
+        if: steps.skip.outputs.skip == 'false' && steps.changes.outputs.ahead != '0' && steps.version-check.outputs.skip == 'false'
+        # Pinned from orhun/git-cliff-action@v4.
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5
+        with:
+          config: cliff.toml
+          args: --unreleased --tag ${{ steps.normalized-version.outputs.tag }} --strip header
+        env:
+          OUTPUT: RELEASE_NOTES.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Create or update release branch
+        if: steps.skip.outputs.skip == 'false' && steps.changes.outputs.ahead != '0' && steps.version-check.outputs.skip == 'false'
+        env:
+          RELEASE_TAG: ${{ steps.normalized-version.outputs.tag }}
+        run: |
+          branch="release/next"
+
+          git checkout -B "${branch}"
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add CHANGELOG.md version.go pkg/version/version.go
+
+          if git diff --cached --quiet; then
+            echo "Release branch already matches generated files"
+          else
+            git commit -m "chore(release): ${RELEASE_TAG}"
+          fi
+
+          git push --force-with-lease origin "${branch}"
+
+      - name: Create PR body
+        if: steps.skip.outputs.skip == 'false' && steps.changes.outputs.ahead != '0' && steps.version-check.outputs.skip == 'false'
+        env:
+          RELEASE_TAG: ${{ steps.normalized-version.outputs.tag }}
+          AHEAD: ${{ steps.changes.outputs.ahead }}
+          LATEST_TAG: ${{ steps.changes.outputs.latest_tag }}
+          COMPARE_URL: ${{ steps.changes.outputs.compare_url }}
+          COMPARE_LABEL: ${{ steps.changes.outputs.compare_label }}
+        run: |
+          {
+            cat <<EOF
+          <!-- auto-release-pr -->
+          ## Release
+
+          This PR prepares \`${RELEASE_TAG}\`.
+
+          EOF
+
+            if [ -n "${COMPARE_URL}" ]; then
+              printf -- '- Code difference since last tag: [%s](%s)\n' "${COMPARE_LABEL}" "${COMPARE_URL}"
+            else
+              printf -- '- Code difference since last tag: none\n'
+            fi
+
+            if [ -n "${LATEST_TAG}" ]; then
+              printf -- '- Previous tag: `%s`\n' "${LATEST_TAG}"
+            else
+              printf -- '- Previous tag: none\n'
+            fi
+
+            cat <<EOF
+          - Commits since last tag: ${AHEAD}
+          - Source branch: \`release/next\`
+          - Base branch: \`${{ github.event.repository.default_branch }}\`
+
+          ## Notes Preview
+
+          EOF
+
+            cat RELEASE_NOTES.md
+          } > /tmp/release-pr-body.md
+
+      - name: Find existing release PR
+        if: steps.skip.outputs.skip == 'false' && steps.changes.outputs.ahead != '0' && steps.version-check.outputs.skip == 'false'
+        id: existing-pr
+        run: |
+          pr_number="$(gh pr list \
+            --base "${{ github.event.repository.default_branch }}" \
+            --head "release/next" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')"
+
+          echo "pr_number=${pr_number}" >> "$GITHUB_OUTPUT"
+
+      - name: Create release PR
+        if: steps.skip.outputs.skip == 'false' && steps.changes.outputs.ahead != '0' && steps.version-check.outputs.skip == 'false' && steps.existing-pr.outputs.pr_number == ''
+        env:
+          RELEASE_TAG: ${{ steps.normalized-version.outputs.tag }}
+        run: |
+          gh pr create \
+            --base "${{ github.event.repository.default_branch }}" \
+            --head "release/next" \
+            --title "chore(release): ${RELEASE_TAG}" \
+            --body-file /tmp/release-pr-body.md
+
+      - name: Update existing release PR
+        if: steps.skip.outputs.skip == 'false' && steps.changes.outputs.ahead != '0' && steps.version-check.outputs.skip == 'false' && steps.existing-pr.outputs.pr_number != ''
+        env:
+          RELEASE_TAG: ${{ steps.normalized-version.outputs.tag }}
+        run: |
+          gh pr edit "${{ steps.existing-pr.outputs.pr_number }}" \
+            --title "chore(release): ${RELEASE_TAG}" \
+            --body-file /tmp/release-pr-body.md
