@@ -1,0 +1,79 @@
+name: Auto-tag Release Commits
+
+on:
+  pull_request_target:
+    types:
+      - closed
+
+permissions:
+  contents: write
+
+env:
+  # Use the release bot token so tag pushes trigger the release workflow.
+  RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+concurrency:
+  group: release-tag-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  tag-release:
+    if: github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'release/next' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate release token
+        run: |
+          if [ -z "${RELEASE_TOKEN}" ]; then
+            echo "::error title=Missing RELEASE_TOKEN::Configure the release bot token as the RELEASE_TOKEN repository secret."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          token: ${{ env.RELEASE_TOKEN }}
+
+      - name: Determine release tag
+        id: release
+        run: |
+          git fetch --tags origin
+          pr_title='${{ github.event.pull_request.title }}'
+
+          if ! printf '%s\n' "${pr_title}" | grep -Eq '^chore\(release\): v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Release PR title is not a valid release title: ${pr_title}"
+            exit 1
+          fi
+
+          tag_name="$(printf '%s\n' "${pr_title}" | sed -E 's/^chore\(release\): (v[0-9]+\.[0-9]+\.[0-9]+)$/\1/')"
+          version="${tag_name#v}"
+
+          if ! grep -Eq "^## \\[?${version}\\]? - " CHANGELOG.md; then
+            echo "Merged release commit does not contain changelog entry for ${version}"
+            exit 1
+          fi
+
+          if ! grep -q "const SDKVersion = \"${version}\"" version.go; then
+            echo "version.go does not contain SDKVersion ${version}"
+            exit 1
+          fi
+
+          if ! grep -q "const SDKVersion = \"${version}\"" pkg/version/version.go; then
+            echo "pkg/version/version.go does not contain SDKVersion ${version}"
+            exit 1
+          fi
+
+          if git rev-parse "${tag_name}" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "tag_name=${tag_name}" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        if: steps.release.outputs.skip == 'false'
+        run: |
+          git tag "${{ steps.release.outputs.tag_name }}"
+          git push origin "${{ steps.release.outputs.tag_name }}"

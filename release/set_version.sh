@@ -1,37 +1,48 @@
-#! /bin/sh
+#!/bin/sh
 
 # This script is used to bump the version of the SDK. It will write that new
 # version as inngestgo.SDKVersion. Its only stdout is the next version, so the
 # caller can capture it and assign to a variable.
 #
 # Usage:
-#   ./scripts/next_version.sh <major|minor|patch>
+#   ./release/set_version.sh <version>
 #
 # Example:
-#   ./scripts/next_version.sh major
-#   ./scripts/next_version.sh minor
-#   ./scripts/next_version.sh patch
+#   ./release/set_version.sh v0.16.0
+#   ./release/set_version.sh 0.16.0
 
-ROOT_DIR=$(dirname "$0")
+set -eu
+
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
 print() {
   # Print to stderr so that the caller doesn't capture it.
   echo "$1" >&2
 }
 
-# Get NEXT_VERSION from ../package.json
-NEXT_VERSION=$(grep -o '"version": "[^"]*"' "$ROOT_DIR/../package.json" | cut -d'"' -f4)
-
-if [ -z "$NEXT_VERSION" ]; then
-  print "Error: Could not extract version from package.json"
+if [ "$#" -ne 1 ]; then
+  print "Usage: ./release/set_version.sh <version>"
   exit 1
 fi
 
-print "Using version $NEXT_VERSION from package.json"
+NEXT_VERSION=${1#v}
 
-# Validate the next version.
-printf "package inngestgo\n\nconst SDKVersion = \"%s\"\n" "$NEXT_VERSION" >./version.go
-printf "package version\n\nconst SDKVersion = \"%s\"\n" "$NEXT_VERSION" >./pkg/version/version.go
+case "$NEXT_VERSION" in
+  *[!0-9.]* | *.*.*.* | .* | *. | *..* | "")
+    print "Error: invalid version: $1"
+    exit 1
+    ;;
+esac
+
+if ! printf "%s\n" "$NEXT_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+  print "Error: version must be semver major.minor.patch: $1"
+  exit 1
+fi
+
+print "Setting SDK version to $NEXT_VERSION"
+
+printf "package inngestgo\n\nconst SDKVersion = \"%s\"\n" "$NEXT_VERSION" >"$ROOT_DIR/version.go"
+printf "package version\n\nconst SDKVersion = \"%s\"\n" "$NEXT_VERSION" >"$ROOT_DIR/pkg/version/version.go"
 
 # Output the next version, allowing the caller to capture it.
 echo "${NEXT_VERSION}"
