@@ -87,7 +87,8 @@ jobs:
       - name: Compute next version
         if: steps.skip.outputs.skip == 'false' && steps.changes.outputs.ahead != '0'
         id: next-version
-        uses: orhun/git-cliff-action@v4
+        # Pinned from orhun/git-cliff-action@v4.
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5
         with:
           config: cliff.toml
           args: --bumped-version
@@ -131,7 +132,8 @@ jobs:
 
       - name: Generate changelog
         if: steps.skip.outputs.skip == 'false' && steps.changes.outputs.ahead != '0' && steps.version-check.outputs.skip == 'false'
-        uses: orhun/git-cliff-action@v4
+        # Pinned from orhun/git-cliff-action@v4.
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5
         with:
           config: cliff.toml
           args: --tag ${{ steps.normalized-version.outputs.tag }}
@@ -141,7 +143,8 @@ jobs:
 
       - name: Generate release notes preview
         if: steps.skip.outputs.skip == 'false' && steps.changes.outputs.ahead != '0' && steps.version-check.outputs.skip == 'false'
-        uses: orhun/git-cliff-action@v4
+        # Pinned from orhun/git-cliff-action@v4.
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5
         with:
           config: cliff.toml
           args: --unreleased --tag ${{ steps.normalized-version.outputs.tag }} --strip header

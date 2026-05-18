@@ -24,7 +24,8 @@ jobs:
           ref: ${{ github.ref }}
 
       - name: Generate release notes
-        uses: orhun/git-cliff-action@v4
+        # Pinned from orhun/git-cliff-action@v4.
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5
         with:
           config: cliff.toml
           args: --latest --strip header
@@ -33,7 +34,8 @@ jobs:
           GITHUB_REPO: ${{ github.repository }}
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        # Pinned from softprops/action-gh-release@v2.
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           body_path: RELEASE_NOTES.md
         env:

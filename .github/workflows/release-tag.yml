@@ -37,16 +37,17 @@ jobs:
 
       - name: Determine release tag
         id: release
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           git fetch --tags origin
-          pr_title='${{ github.event.pull_request.title }}'
 
-          if ! printf '%s\n' "${pr_title}" | grep -Eq '^chore\(release\): v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Release PR title is not a valid release title: ${pr_title}"
+          if ! printf '%s\n' "${PR_TITLE}" | grep -Eq '^chore\(release\): v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Release PR title is not a valid release title: ${PR_TITLE}"
             exit 1
           fi
 
-          tag_name="$(printf '%s\n' "${pr_title}" | sed -E 's/^chore\(release\): (v[0-9]+\.[0-9]+\.[0-9]+)$/\1/')"
+          tag_name="$(printf '%s\n' "${PR_TITLE}" | sed -E 's/^chore\(release\): (v[0-9]+\.[0-9]+\.[0-9]+)$/\1/')"
           version="${tag_name#v}"
 
           if ! grep -Eq "^## \\[?${version}\\]? - " CHANGELOG.md; then

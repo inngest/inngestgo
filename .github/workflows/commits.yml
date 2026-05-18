@@ -4,13 +4,17 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
 
+permissions:
+  pull-requests: read
+
 jobs:
   validate-pr-title:
     runs-on: ubuntu-latest
     steps:
       # ref: https://github.com/marketplace/actions/conventional-commit-in-pull-requests
       - name: PR Conventional Commit Validation
-        uses: ytanikin/pr-conventional-commits@1.5.2
+        # Pinned from ytanikin/pr-conventional-commits@1.5.2.
+        uses: ytanikin/pr-conventional-commits@639145d78959c53c43112365837e3abd21ed67c1
         with:
           # NOTE: this list should match what's in cliff.toml
           task_types: '["feat","fix","doc","docs","test","ci","refactor","perf","chore","revert","style","security"]'
