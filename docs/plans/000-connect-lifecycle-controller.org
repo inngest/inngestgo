@@ -526,7 +526,7 @@ Purpose: capture current lifecycle expectations before moving code.
 
 *** Validation checklist
 
-- [ ] =go test ./connect -count=1=
+- [X] =go test ./connect -count=1=
 - [X] Tests fail if queued pre-ACK work invokes on a retired generation.
 - [X] Tests fail if post-ACK in-flight work is canceled by generation
   retirement.
@@ -536,7 +536,14 @@ Purpose: capture current lifecycle expectations before moving code.
 *** Exit criteria
 
 - [ ] Existing behavior is covered well enough to refactor with confidence.
-- [ ] Any known gaps are written down as explicit follow-up checkboxes.
+- [X] Any known gaps are written down as explicit follow-up checkboxes.
+
+*** Known follow-up gaps
+
+- [ ] Add manager reconnect loop coverage before Phase 1 centralizes state:
+  - [ ] reconnectable read-loop errors move manager to =RECONNECTING=;
+  - [ ] buffered replies flush before reconnect attempt;
+  - [ ] non-reconnectable websocket close reasons stop the manager.
 
 ** Phase 1: Name and centralize websocket generation state
 
