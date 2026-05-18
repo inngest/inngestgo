@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/inngest/inngest/pkg/enums"
-	"github.com/inngest/inngestgo/internal/middleware"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
+	"github.com/inngest/inngestgo/middleware"
 	openai "github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/require"
 )
