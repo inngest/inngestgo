@@ -8,9 +8,9 @@ Use clear, scoped commit titles for any commit you create. Conventional commit
 titles are preferred when they fit the change, for example `fix(step): preserve
 run errors` or `test(connect): cover stale websocket writes`.
 
-Release-visible changes are tracked with Changesets. If a change should affect
-the published package version or changelog, add a matching file in `.changeset/`
-using the existing format.
+Release-visible changes are inferred from conventional commit titles by
+`git-cliff`. Use one of the commit types configured in `cliff.toml` so release
+PRs can compute the correct version bump and changelog entry.
 
 ## Development Commands
 
@@ -26,10 +26,11 @@ using the existing format.
 
 ### Release Tooling
 
-- `pnpm changeset` creates a Changeset.
-- `pnpm release:version` applies Changeset version updates and runs
-  `./release/set_version.sh`.
-- `pnpm release:publish` creates Changeset release tags.
+- `git cliff --bumped-version` computes the next tag from unreleased
+  conventional commits.
+- `git cliff --tag vX.Y.Z` regenerates `CHANGELOG.md` for a release tag.
+- `./release/set_version.sh vX.Y.Z` updates the SDK version constants in
+  `version.go` and `pkg/version/version.go`.
 
 ## Project Architecture
 
@@ -65,8 +66,12 @@ with Inngest step primitives from Go code.
 - `go.mod` pins the Go version and module dependencies.
 - `Makefile` defines the CI-aligned unit, integration, and lint commands.
 - `.github/workflows/go.yml` runs lint, unit tests, and integration tests.
-- `.github/workflows/release.yml` handles Changesets-based releases.
-- `package.json` contains only release and Changesets scripts.
+- `.github/workflows/release-pr.yml` opens or updates `release/next` with the
+  generated changelog and SDK version bump.
+- `.github/workflows/release-tag.yml` tags merged release PRs.
+- `.github/workflows/release.yml` publishes GitHub release notes for pushed
+  release tags.
+- `cliff.toml` defines release-note grouping and version-bump behavior.
 
 ## Working Style
 
