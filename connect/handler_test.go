@@ -663,6 +663,7 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 	invoker := &blockingTestInvoker{
 		release: invokerRelease,
 	}
+	logger := slog.New(slog.DiscardHandler)
 	h := &connectHandler{
 		opts: Opts{
 			SDKLanguage: "go",
@@ -671,8 +672,8 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 		invokers: map[string]FunctionInvoker{
 			"test-app": invoker,
 		},
-		logger:        slog.Default(),
-		messageBuffer: newMessageBuffer(apiClient, slog.Default()),
+		logger:        logger,
+		messageBuffer: newMessageBuffer(apiClient, logger),
 		workerPool: &workerPool{
 			inProgressLeases:     map[string]string{},
 			inProgressLeasesLock: sync.Mutex{},
@@ -833,6 +834,100 @@ func TestHandleInvokeMessageSkipsQueuedRequestForRetiredConnection(t *testing.T)
 	defer h.messageBuffer.lock.Unlock()
 	r.Empty(h.messageBuffer.buffered)
 	r.Empty(h.messageBuffer.pendingAck)
+}
+
+func TestHandleInvokeMessageRetiresConnectionAfterAckWriteFailure(t *testing.T) {
+	r := require.New(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
+			InsecureSkipVerify: true,
+		})
+		r.NoError(err)
+
+		defer func() { _ = conn.CloseNow() }()
+		<-req.Context().Done()
+	}))
+	defer server.Close()
+
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelDial()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	clientConn, _, err := websocket.Dial(dialCtx, wsURL, nil)
+	r.NoError(err)
+	_ = clientConn.CloseNow()
+
+	apiClient := newWorkerApiClient("", nil)
+	invokerRelease := make(chan struct{})
+	close(invokerRelease)
+	invoker := &blockingTestInvoker{
+		release: invokerRelease,
+	}
+	logger := slog.New(slog.DiscardHandler)
+	h := &connectHandler{
+		opts: Opts{
+			SDKLanguage: "go",
+			SDKVersion:  "test",
+		},
+		invokers: map[string]FunctionInvoker{
+			"test-app": invoker,
+		},
+		logger:        logger,
+		messageBuffer: newMessageBuffer(apiClient, logger),
+		workerPool: &workerPool{
+			inProgressLeases:     map[string]string{},
+			inProgressLeasesLock: sync.Mutex{},
+		},
+	}
+
+	preparedConn := &connection{
+		ws:                  clientConn,
+		connectionId:        "old-connection",
+		extendLeaseInterval: time.Hour,
+	}
+
+	firstMsg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+		RequestId:      "request-id-1",
+		AccountId:      "account-id",
+		EnvId:          "env-id",
+		AppId:          "app-id",
+		AppName:        "test-app",
+		FunctionSlug:   "test-fn",
+		RequestPayload: mustJSON(t, sdkrequest.Request{}),
+		LeaseId:        "lease-id",
+	})
+
+	err = h.handleInvokeMessage(context.Background(), preparedConn, firstMsg)
+	r.Error(err)
+	r.Contains(err.Error(), "could not write message to websocket")
+	r.True(preparedConn.isRetired())
+	r.False(invoker.called.Load())
+
+	secondMsg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+		RequestId:      "request-id-2",
+		AccountId:      "account-id",
+		EnvId:          "env-id",
+		AppId:          "app-id",
+		AppName:        "test-app",
+		FunctionSlug:   "test-fn",
+		RequestPayload: mustJSON(t, sdkrequest.Request{}),
+		LeaseId:        "lease-id",
+	})
+
+	err = h.handleInvokeMessage(context.Background(), preparedConn, secondMsg)
+	r.NoError(err)
+	r.False(invoker.called.Load())
+}
+
+func TestConnectionRetireIsIdempotent(t *testing.T) {
+	r := require.New(t)
+
+	conn := &connection{}
+
+	r.True(conn.retire())
+	r.False(conn.retire())
+	r.True(conn.isRetired())
 }
 
 type blockingTestInvoker struct {
