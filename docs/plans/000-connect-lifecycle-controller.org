@@ -507,10 +507,10 @@ Purpose: capture current lifecycle expectations before moving code.
   - [X] worker pool is waited on;
   - [X] generation is retired and closed;
   - [X] buffered messages are flushed.
-- [ ] Add or confirm coverage for reconnect behavior:
-  - [ ] reconnectable read-loop errors move manager to =RECONNECTING=;
-  - [ ] buffered replies flush before reconnect attempt;
-  - [ ] non-reconnectable close reasons stop the manager.
+- [X] Add or confirm coverage for reconnect behavior:
+  - [X] reconnectable read-loop errors move manager to =RECONNECTING=;
+  - [X] buffered replies flush before reconnect attempt;
+  - [X] non-reconnectable close reasons stop the manager.
 - [X] Document any behavior that is intentionally preserved even if awkward.
 
 *** Preserved behavior notes
@@ -535,15 +535,12 @@ Purpose: capture current lifecycle expectations before moving code.
 
 *** Exit criteria
 
-- [ ] Existing behavior is covered well enough to refactor with confidence.
+- [X] Existing behavior is covered well enough to refactor with confidence.
 - [X] Any known gaps are written down as explicit follow-up checkboxes.
 
 *** Known follow-up gaps
 
-- [ ] Add manager reconnect loop coverage before Phase 1 centralizes state:
-  - [ ] reconnectable read-loop errors move manager to =RECONNECTING=;
-  - [ ] buffered replies flush before reconnect attempt;
-  - [ ] non-reconnectable websocket close reasons stop the manager.
+- None for Phase 0.
 
 ** Phase 1: Name and centralize websocket generation state
 

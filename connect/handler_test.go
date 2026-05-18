@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -188,6 +189,156 @@ func TestConnectReturnsTooManyConnectionsError(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for Connect to return")
 	}
+}
+
+func TestConnectReconnectableErrorEntersReconnectingAndFlushesBeforeNextAttempt(t *testing.T) {
+	r := require.New(t)
+
+	events := make(chan string, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		r.Equal("/v0/connect/flush", req.URL.Path)
+
+		body, err := io.ReadAll(req.Body)
+		r.NoError(err)
+
+		var resp connectproto.SDKResponse
+		r.NoError(proto.Unmarshal(body, &resp))
+		r.Equal("request-id", resp.RequestId)
+
+		events <- "flush"
+
+		payload, err := proto.Marshal(&connectproto.FlushResponse{})
+		r.NoError(err)
+		w.Header().Set("Content-Type", "application/protobuf")
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	connectCtx, cancelConnect := context.WithCancel(context.Background())
+	defer cancelConnect()
+
+	logger := slog.New(slog.DiscardHandler)
+	apiClient := newWorkerApiClient(server.URL, nil)
+	var startCalls atomic.Int32
+	h := &connectHandler{
+		opts:                   Opts{IsDev: true},
+		logger:                 logger,
+		notifyConnectDoneChan:  make(chan connectReport),
+		notifyConnectedChan:    make(chan struct{}),
+		initiateConnectionChan: make(chan struct{}, 1),
+		apiClient:              apiClient,
+		messageBuffer:          newMessageBuffer(apiClient, logger),
+		state:                  ConnectionStateConnecting,
+		auth: authContext{
+			hashedSigningKey: []byte("signing-key"),
+		},
+		reconnectBackoff: func(int) time.Duration {
+			return 0
+		},
+	}
+	h.startConnection = func(context.Context, connectionEstablishData, ...connectOpt) {
+		call := startCalls.Add(1)
+		events <- fmt.Sprintf("start-%d", call)
+		if call == 1 {
+			h.notifyConnectedChan <- struct{}{}
+		}
+	}
+	h.workerCtx, h.cancelWorkerCtx = context.WithCancel(context.Background())
+	defer h.cancelWorkerCtx()
+
+	conn, err := h.Connect(connectCtx)
+	r.NoError(err)
+	r.Equal(h, conn)
+	r.Equal("start-1", <-events)
+
+	h.messageBuffer.append(&connectproto.SDKResponse{
+		RequestId: "request-id",
+	})
+	h.notifyConnectDoneChan <- connectReport{
+		reconnect: true,
+		err:       newReconnectErr(errors.New("read loop failed")),
+	}
+
+	deadline := time.After(time.Second)
+	for h.State() != ConnectionStateReconnecting {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for RECONNECTING state")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	r.Equal("flush", <-events)
+	r.Equal("start-2", <-events)
+
+	cancelConnect()
+	r.NoError(h.Close())
+}
+
+func TestConnectNonReconnectableCloseReasonStopsManager(t *testing.T) {
+	r := require.New(t)
+
+	connectCtx, cancelConnect := context.WithCancel(context.Background())
+	defer cancelConnect()
+
+	apiClient := newWorkerApiClient("", nil)
+	started := make(chan struct{}, 2)
+	h := &connectHandler{
+		opts:                   Opts{IsDev: true},
+		logger:                 slog.New(slog.DiscardHandler),
+		notifyConnectDoneChan:  make(chan connectReport),
+		notifyConnectedChan:    make(chan struct{}),
+		initiateConnectionChan: make(chan struct{}, 1),
+		apiClient:              apiClient,
+		messageBuffer:          newMessageBuffer(apiClient, slog.New(slog.DiscardHandler)),
+		state:                  ConnectionStateConnecting,
+		reconnectBackoff: func(int) time.Duration {
+			return 0
+		},
+	}
+	h.startConnection = func(context.Context, connectionEstablishData, ...connectOpt) {
+		started <- struct{}{}
+	}
+	h.workerCtx, h.cancelWorkerCtx = context.WithCancel(context.Background())
+	defer h.cancelWorkerCtx()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.Connect(connectCtx)
+		done <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for initial connection attempt")
+	}
+
+	h.notifyConnectDoneChan <- connectReport{
+		reconnect: true,
+		err: websocket.CloseError{
+			Code:   websocket.StatusPolicyViolation,
+			Reason: "not_retriable",
+		},
+	}
+
+	select {
+	case err := <-done:
+		r.Error(err)
+		r.Contains(err.Error(), `connect failed with error code "not_retriable"`)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Connect to return")
+	}
+
+	select {
+	case <-started:
+		t.Fatal("unexpected reconnect attempt for non-reconnectable close reason")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	cancelConnect()
+	r.NoError(h.gracefulCloseEg.Wait())
 }
 
 func TestCloseTransitionsThroughClosing(t *testing.T) {
