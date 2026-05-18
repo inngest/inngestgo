@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -187,6 +188,46 @@ func TestConnectReturnsTooManyConnectionsError(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for Connect to return")
 	}
+}
+
+func TestCloseTransitionsThroughClosing(t *testing.T) {
+	r := require.New(t)
+
+	releaseClose := make(chan struct{})
+	h := &connectHandler{
+		logger: slog.New(slog.DiscardHandler),
+		state:  ConnectionStateActive,
+	}
+	h.workerCtx, h.cancelWorkerCtx = context.WithCancel(context.Background())
+	h.gracefulCloseEg.Go(func() error {
+		<-releaseClose
+		return nil
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- h.Close()
+	}()
+
+	deadline := time.After(time.Second)
+	for h.State() != ConnectionStateClosing {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for CLOSING state")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	close(releaseClose)
+
+	select {
+	case err := <-done:
+		r.NoError(err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Close")
+	}
+	r.Equal(ConnectionStateClosed, h.State())
 }
 
 func TestConnectInvokeUsesProtoRequestAndJobIDs(t *testing.T) {
@@ -716,6 +757,122 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 	case <-serverSawAck:
 	default:
 		t.Fatal("server did not receive worker request ack")
+	}
+}
+
+func TestHandleConnectionGracefulShutdownPausesDrainsAndFlushes(t *testing.T) {
+	r := require.New(t)
+
+	pauseSeen := make(chan struct{})
+	serverDone := make(chan struct{})
+	flushSeen := make(chan *connectproto.SDKResponse, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/ws":
+			conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
+				InsecureSkipVerify: true,
+			})
+			r.NoError(err)
+
+			defer close(serverDone)
+			defer func() { _ = conn.CloseNow() }()
+
+			for {
+				var msg connectproto.ConnectMessage
+				err := wsReadProto(context.Background(), conn, &msg)
+				if err != nil {
+					return
+				}
+				if msg.Kind == connectproto.GatewayMessageType_WORKER_PAUSE {
+					close(pauseSeen)
+				}
+			}
+		case "/v0/connect/flush":
+			body, err := io.ReadAll(req.Body)
+			r.NoError(err)
+
+			var resp connectproto.SDKResponse
+			r.NoError(proto.Unmarshal(body, &resp))
+			flushSeen <- &resp
+
+			payload, err := proto.Marshal(&connectproto.FlushResponse{})
+			r.NoError(err)
+			w.Header().Set("Content-Type", "application/protobuf")
+			_, _ = w.Write(payload)
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
+	clientConn, _, err := websocket.Dial(ctx, wsURL, nil)
+	r.NoError(err)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	logger := slog.New(slog.DiscardHandler)
+	apiClient := newWorkerApiClient(server.URL, nil)
+	h := &connectHandler{
+		logger:        logger,
+		messageBuffer: newMessageBuffer(apiClient, logger),
+		workerPool: &workerPool{
+			inProgressLeases:     map[string]string{},
+			inProgressLeasesLock: sync.Mutex{},
+		},
+	}
+	h.workerPool.inProgress.Add(1)
+
+	preparedConn := &connection{
+		ws:                  clientConn,
+		connectionId:        "old-connection",
+		heartbeatInterval:   time.Hour,
+		extendLeaseInterval: time.Hour,
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- h.handleConnection(ctx, connectionEstablishData{
+			hashedSigningKey: []byte("signing-key"),
+		}, preparedConn)
+	}()
+
+	cancel()
+
+	select {
+	case <-pauseSeen:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for worker pause")
+	}
+
+	h.messageBuffer.append(&connectproto.SDKResponse{
+		RequestId: "request-id",
+	})
+	h.workerPool.Done()
+
+	select {
+	case err := <-done:
+		r.NoError(err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for handleConnection")
+	}
+
+	r.True(preparedConn.isRetired())
+
+	select {
+	case resp := <-flushSeen:
+		r.Equal("request-id", resp.RequestId)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for buffered response flush")
+	}
+
+	select {
+	case <-serverDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for websocket close")
 	}
 }
 

@@ -501,12 +501,12 @@ Purpose: capture current lifecycle expectations before moving code.
   - [X] later queued pre-ACK work for that generation skips before ACK;
   - [X] only the first retire transition is observable; Phase 0 intentionally
     preserves existing close ownership outside request goroutines.
-- [ ] Add or confirm coverage for graceful shutdown behavior:
-  - [ ] manager enters =CLOSING=;
-  - [ ] current active generation sends =WORKER_PAUSE=;
-  - [ ] worker pool is waited on;
-  - [ ] generation is retired and closed;
-  - [ ] buffered messages are flushed.
+- [X] Add or confirm coverage for graceful shutdown behavior:
+  - [X] manager enters =CLOSING=;
+  - [X] current active generation sends =WORKER_PAUSE=;
+  - [X] worker pool is waited on;
+  - [X] generation is retired and closed;
+  - [X] buffered messages are flushed.
 - [ ] Add or confirm coverage for reconnect behavior:
   - [ ] reconnectable read-loop errors move manager to =RECONNECTING=;
   - [ ] buffered replies flush before reconnect attempt;
