@@ -1,7 +1,7 @@
 #+TITLE: Connect Lifecycle Controller
 #+AUTHOR: Darwin D. Wu
 #+DATE: 2026-05-08
-#+STATUS: Draft
+#+STATUS: Active
 #+STARTUP: showall
 
 * Overview
@@ -490,41 +490,57 @@ Purpose: capture current lifecycle expectations before moving code.
 
 *** Implementation checklist
 
-- [ ] Keep the SYS-856 regressions covering reply ACK cleanup and stale
+- [X] Keep the SYS-856 regressions covering reply ACK cleanup and stale
   websocket writes.
-- [ ] Keep the SYS-883 regression covering ACK write failure:
-  - [ ] ACK write failure does not invoke the function;
-  - [ ] returned/logged error preserves the underlying websocket write error;
-  - [ ] returned/logged error does not render as =!PANIC=.
-- [ ] Add or confirm coverage for ACK write-failure fanout:
-  - [ ] first hard ACK write failure retires the generation;
-  - [ ] later queued pre-ACK work for that generation skips before ACK;
-  - [ ] only the first transition performs close side effects.
-- [ ] Add or confirm coverage for graceful shutdown behavior:
-  - [ ] manager enters =CLOSING=;
-  - [ ] current active generation sends =WORKER_PAUSE=;
-  - [ ] worker pool is waited on;
-  - [ ] generation is retired and closed;
-  - [ ] buffered messages are flushed.
-- [ ] Add or confirm coverage for reconnect behavior:
-  - [ ] reconnectable read-loop errors move manager to =RECONNECTING=;
-  - [ ] buffered replies flush before reconnect attempt;
-  - [ ] non-reconnectable close reasons stop the manager.
-- [ ] Document any behavior that is intentionally preserved even if awkward.
+- [X] Keep the SYS-883 regression covering ACK write failure:
+  - [X] ACK write failure does not invoke the function;
+  - [X] returned/logged error preserves the underlying websocket write error;
+  - [X] returned/logged error does not render as =!PANIC=.
+- [X] Add or confirm coverage for ACK write-failure fanout:
+  - [X] first hard ACK write failure retires the generation;
+  - [X] later queued pre-ACK work for that generation skips before ACK;
+  - [X] only the first retire transition is observable; Phase 0 intentionally
+    preserves existing close ownership outside request goroutines.
+- [X] Add or confirm coverage for graceful shutdown behavior:
+  - [X] manager enters =CLOSING=;
+  - [X] current active generation sends =WORKER_PAUSE=;
+  - [X] worker pool is waited on;
+  - [X] generation is retired and closed;
+  - [X] buffered messages are flushed.
+- [X] Add or confirm coverage for reconnect behavior:
+  - [X] reconnectable read-loop errors move manager to =RECONNECTING=;
+  - [X] buffered replies flush before reconnect attempt;
+  - [X] non-reconnectable close reasons stop the manager.
+- [X] Document any behavior that is intentionally preserved even if awkward.
+
+*** Preserved behavior notes
+
+- ACK write failure retires the generation so later queued pre-ACK work skips,
+  but it does not close the websocket, flush buffered replies, or notify the
+  manager directly. Existing read-loop and manager shutdown paths still own
+  transport close and API flush side effects until the lifecycle controller is
+  introduced.
+- Reply write failure after invocation still buffers the response without
+  retiring the generation. Retiring on reply failure remains an explicit policy
+  decision for a later phase.
 
 *** Validation checklist
 
-- [ ] =go test ./connect -count=1=
-- [ ] Tests fail if queued pre-ACK work invokes on a retired generation.
-- [ ] Tests fail if post-ACK in-flight work is canceled by generation
+- [X] =go test ./connect -count=1=
+- [X] Tests fail if queued pre-ACK work invokes on a retired generation.
+- [X] Tests fail if post-ACK in-flight work is canceled by generation
   retirement.
-- [ ] Tests fail if ACK write failure logs hide the underlying transport error
+- [X] Tests fail if ACK write failure logs hide the underlying transport error
   behind panic-shaped formatting.
 
 *** Exit criteria
 
-- [ ] Existing behavior is covered well enough to refactor with confidence.
-- [ ] Any known gaps are written down as explicit follow-up checkboxes.
+- [X] Existing behavior is covered well enough to refactor with confidence.
+- [X] Any known gaps are written down as explicit follow-up checkboxes.
+
+*** Known follow-up gaps
+
+- None for Phase 0.
 
 ** Phase 1: Name and centralize websocket generation state
 

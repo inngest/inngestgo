@@ -1,9 +1,12 @@
 package connect
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -186,6 +189,196 @@ func TestConnectReturnsTooManyConnectionsError(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for Connect to return")
 	}
+}
+
+func TestConnectReconnectableErrorEntersReconnectingAndFlushesBeforeNextAttempt(t *testing.T) {
+	r := require.New(t)
+
+	events := make(chan string, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		r.Equal("/v0/connect/flush", req.URL.Path)
+
+		body, err := io.ReadAll(req.Body)
+		r.NoError(err)
+
+		var resp connectproto.SDKResponse
+		r.NoError(proto.Unmarshal(body, &resp))
+		r.Equal("request-id", resp.RequestId)
+
+		events <- "flush"
+
+		payload, err := proto.Marshal(&connectproto.FlushResponse{})
+		r.NoError(err)
+		w.Header().Set("Content-Type", "application/protobuf")
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	connectCtx, cancelConnect := context.WithCancel(context.Background())
+	defer cancelConnect()
+
+	logger := slog.New(slog.DiscardHandler)
+	apiClient := newWorkerApiClient(server.URL, nil)
+	var startCalls atomic.Int32
+	h := &connectHandler{
+		opts:                   Opts{IsDev: true},
+		logger:                 logger,
+		notifyConnectDoneChan:  make(chan connectReport),
+		notifyConnectedChan:    make(chan struct{}),
+		initiateConnectionChan: make(chan struct{}, 1),
+		apiClient:              apiClient,
+		messageBuffer:          newMessageBuffer(apiClient, logger),
+		state:                  ConnectionStateConnecting,
+		auth: authContext{
+			hashedSigningKey: []byte("signing-key"),
+		},
+		reconnectBackoff: func(int) time.Duration {
+			return 0
+		},
+	}
+	h.startConnection = func(context.Context, connectionEstablishData, ...connectOpt) {
+		call := startCalls.Add(1)
+		events <- fmt.Sprintf("start-%d", call)
+		if call == 1 {
+			h.notifyConnectedChan <- struct{}{}
+		}
+	}
+	h.workerCtx, h.cancelWorkerCtx = context.WithCancel(context.Background())
+	defer h.cancelWorkerCtx()
+
+	conn, err := h.Connect(connectCtx)
+	r.NoError(err)
+	r.Equal(h, conn)
+	r.Equal("start-1", <-events)
+
+	h.messageBuffer.append(&connectproto.SDKResponse{
+		RequestId: "request-id",
+	})
+	h.notifyConnectDoneChan <- connectReport{
+		reconnect: true,
+		err:       newReconnectErr(errors.New("read loop failed")),
+	}
+
+	deadline := time.After(time.Second)
+	for h.State() != ConnectionStateReconnecting {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for RECONNECTING state")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	r.Equal("flush", <-events)
+	r.Equal("start-2", <-events)
+
+	cancelConnect()
+	r.NoError(h.Close())
+}
+
+func TestConnectNonReconnectableCloseReasonStopsManager(t *testing.T) {
+	r := require.New(t)
+
+	connectCtx, cancelConnect := context.WithCancel(context.Background())
+	defer cancelConnect()
+
+	apiClient := newWorkerApiClient("", nil)
+	started := make(chan struct{}, 2)
+	h := &connectHandler{
+		opts:                   Opts{IsDev: true},
+		logger:                 slog.New(slog.DiscardHandler),
+		notifyConnectDoneChan:  make(chan connectReport),
+		notifyConnectedChan:    make(chan struct{}),
+		initiateConnectionChan: make(chan struct{}, 1),
+		apiClient:              apiClient,
+		messageBuffer:          newMessageBuffer(apiClient, slog.New(slog.DiscardHandler)),
+		state:                  ConnectionStateConnecting,
+		reconnectBackoff: func(int) time.Duration {
+			return 0
+		},
+	}
+	h.startConnection = func(context.Context, connectionEstablishData, ...connectOpt) {
+		started <- struct{}{}
+	}
+	h.workerCtx, h.cancelWorkerCtx = context.WithCancel(context.Background())
+	defer h.cancelWorkerCtx()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.Connect(connectCtx)
+		done <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for initial connection attempt")
+	}
+
+	h.notifyConnectDoneChan <- connectReport{
+		reconnect: true,
+		err: websocket.CloseError{
+			Code:   websocket.StatusPolicyViolation,
+			Reason: "not_retriable",
+		},
+	}
+
+	select {
+	case err := <-done:
+		r.Error(err)
+		r.Contains(err.Error(), `connect failed with error code "not_retriable"`)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Connect to return")
+	}
+
+	select {
+	case <-started:
+		t.Fatal("unexpected reconnect attempt for non-reconnectable close reason")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	cancelConnect()
+	r.NoError(h.gracefulCloseEg.Wait())
+}
+
+func TestCloseTransitionsThroughClosing(t *testing.T) {
+	r := require.New(t)
+
+	releaseClose := make(chan struct{})
+	h := &connectHandler{
+		logger: slog.New(slog.DiscardHandler),
+		state:  ConnectionStateActive,
+	}
+	h.workerCtx, h.cancelWorkerCtx = context.WithCancel(context.Background())
+	h.gracefulCloseEg.Go(func() error {
+		<-releaseClose
+		return nil
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- h.Close()
+	}()
+
+	deadline := time.After(time.Second)
+	for h.State() != ConnectionStateClosing {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for CLOSING state")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	close(releaseClose)
+
+	select {
+	case err := <-done:
+		r.NoError(err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Close")
+	}
+	r.Equal(ConnectionStateClosed, h.State())
 }
 
 func TestConnectInvokeUsesProtoRequestAndJobIDs(t *testing.T) {
@@ -662,6 +855,7 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 	invoker := &blockingTestInvoker{
 		release: invokerRelease,
 	}
+	logger := slog.New(slog.DiscardHandler)
 	h := &connectHandler{
 		opts: Opts{
 			SDKLanguage: "go",
@@ -670,8 +864,8 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 		invokers: map[string]FunctionInvoker{
 			"test-app": invoker,
 		},
-		logger:        slog.Default(),
-		messageBuffer: newMessageBuffer(apiClient, slog.Default()),
+		logger:        logger,
+		messageBuffer: newMessageBuffer(apiClient, logger),
 		workerPool: &workerPool{
 			inProgressLeases:     map[string]string{},
 			inProgressLeasesLock: sync.Mutex{},
@@ -717,8 +911,125 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 	}
 }
 
+func TestHandleConnectionGracefulShutdownPausesDrainsAndFlushes(t *testing.T) {
+	r := require.New(t)
+
+	pauseSeen := make(chan struct{})
+	serverDone := make(chan struct{})
+	flushSeen := make(chan *connectproto.SDKResponse, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/ws":
+			conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
+				InsecureSkipVerify: true,
+			})
+			r.NoError(err)
+
+			defer close(serverDone)
+			defer func() { _ = conn.CloseNow() }()
+
+			for {
+				var msg connectproto.ConnectMessage
+				err := wsReadProto(context.Background(), conn, &msg)
+				if err != nil {
+					return
+				}
+				if msg.Kind == connectproto.GatewayMessageType_WORKER_PAUSE {
+					close(pauseSeen)
+				}
+			}
+		case "/v0/connect/flush":
+			body, err := io.ReadAll(req.Body)
+			r.NoError(err)
+
+			var resp connectproto.SDKResponse
+			r.NoError(proto.Unmarshal(body, &resp))
+			flushSeen <- &resp
+
+			payload, err := proto.Marshal(&connectproto.FlushResponse{})
+			r.NoError(err)
+			w.Header().Set("Content-Type", "application/protobuf")
+			_, _ = w.Write(payload)
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
+	clientConn, _, err := websocket.Dial(ctx, wsURL, nil)
+	r.NoError(err)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	logger := slog.New(slog.DiscardHandler)
+	apiClient := newWorkerApiClient(server.URL, nil)
+	h := &connectHandler{
+		logger:        logger,
+		messageBuffer: newMessageBuffer(apiClient, logger),
+		workerPool: &workerPool{
+			inProgressLeases:     map[string]string{},
+			inProgressLeasesLock: sync.Mutex{},
+		},
+	}
+	h.workerPool.inProgress.Add(1)
+
+	preparedConn := &connection{
+		ws:                  clientConn,
+		connectionId:        "old-connection",
+		heartbeatInterval:   time.Hour,
+		extendLeaseInterval: time.Hour,
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- h.handleConnection(ctx, connectionEstablishData{
+			hashedSigningKey: []byte("signing-key"),
+		}, preparedConn)
+	}()
+
+	cancel()
+
+	select {
+	case <-pauseSeen:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for worker pause")
+	}
+
+	h.messageBuffer.append(&connectproto.SDKResponse{
+		RequestId: "request-id",
+	})
+	h.workerPool.Done()
+
+	select {
+	case err := <-done:
+		r.NoError(err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for handleConnection")
+	}
+
+	r.True(preparedConn.isRetired())
+
+	select {
+	case resp := <-flushSeen:
+		r.Equal("request-id", resp.RequestId)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for buffered response flush")
+	}
+
+	select {
+	case <-serverDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for websocket close")
+	}
+}
+
 func TestHandleInvokeMessageReturnsErrorWhenConnectionClosesBeforeAck(t *testing.T) {
 	r := require.New(t)
+	var logOutput bytes.Buffer
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
@@ -745,6 +1056,7 @@ func TestHandleInvokeMessageReturnsErrorWhenConnectionClosesBeforeAck(t *testing
 	invoker := &blockingTestInvoker{
 		release: invokerRelease,
 	}
+	logger := slog.New(slog.NewTextHandler(&logOutput, nil))
 	h := &connectHandler{
 		opts: Opts{
 			SDKLanguage: "go",
@@ -753,8 +1065,8 @@ func TestHandleInvokeMessageReturnsErrorWhenConnectionClosesBeforeAck(t *testing
 		invokers: map[string]FunctionInvoker{
 			"test-app": invoker,
 		},
-		logger:        slog.Default(),
-		messageBuffer: newMessageBuffer(apiClient, slog.Default()),
+		logger:        logger,
+		messageBuffer: newMessageBuffer(apiClient, logger),
 		workerPool: &workerPool{
 			inProgressLeases:     map[string]string{},
 			inProgressLeasesLock: sync.Mutex{},
@@ -783,8 +1095,11 @@ func TestHandleInvokeMessageReturnsErrorWhenConnectionClosesBeforeAck(t *testing
 
 	err = h.handleInvokeMessage(ctx, preparedConn, msg)
 	r.Error(err)
+	r.ErrorIs(err, context.Canceled)
 	r.Contains(err.Error(), "could not write message to websocket")
 	r.NotContains(err.Error(), "PANIC")
+	r.Contains(logOutput.String(), "could not write message to websocket")
+	r.NotContains(logOutput.String(), "PANIC")
 	r.False(invoker.called.Load())
 }
 
@@ -827,6 +1142,100 @@ func TestHandleInvokeMessageSkipsQueuedRequestForRetiredConnection(t *testing.T)
 	defer h.messageBuffer.lock.Unlock()
 	r.Empty(h.messageBuffer.buffered)
 	r.Empty(h.messageBuffer.pendingAck)
+}
+
+func TestHandleInvokeMessageRetiresConnectionAfterAckWriteFailure(t *testing.T) {
+	r := require.New(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
+			InsecureSkipVerify: true,
+		})
+		r.NoError(err)
+
+		defer func() { _ = conn.CloseNow() }()
+		<-req.Context().Done()
+	}))
+	defer server.Close()
+
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelDial()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	clientConn, _, err := websocket.Dial(dialCtx, wsURL, nil)
+	r.NoError(err)
+	_ = clientConn.CloseNow()
+
+	apiClient := newWorkerApiClient("", nil)
+	invokerRelease := make(chan struct{})
+	close(invokerRelease)
+	invoker := &blockingTestInvoker{
+		release: invokerRelease,
+	}
+	logger := slog.New(slog.DiscardHandler)
+	h := &connectHandler{
+		opts: Opts{
+			SDKLanguage: "go",
+			SDKVersion:  "test",
+		},
+		invokers: map[string]FunctionInvoker{
+			"test-app": invoker,
+		},
+		logger:        logger,
+		messageBuffer: newMessageBuffer(apiClient, logger),
+		workerPool: &workerPool{
+			inProgressLeases:     map[string]string{},
+			inProgressLeasesLock: sync.Mutex{},
+		},
+	}
+
+	preparedConn := &connection{
+		ws:                  clientConn,
+		connectionId:        "old-connection",
+		extendLeaseInterval: time.Hour,
+	}
+
+	firstMsg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+		RequestId:      "request-id-1",
+		AccountId:      "account-id",
+		EnvId:          "env-id",
+		AppId:          "app-id",
+		AppName:        "test-app",
+		FunctionSlug:   "test-fn",
+		RequestPayload: mustJSON(t, sdkrequest.Request{}),
+		LeaseId:        "lease-id",
+	})
+
+	err = h.handleInvokeMessage(context.Background(), preparedConn, firstMsg)
+	r.Error(err)
+	r.Contains(err.Error(), "could not write message to websocket")
+	r.True(preparedConn.isRetired())
+	r.False(invoker.called.Load())
+
+	secondMsg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+		RequestId:      "request-id-2",
+		AccountId:      "account-id",
+		EnvId:          "env-id",
+		AppId:          "app-id",
+		AppName:        "test-app",
+		FunctionSlug:   "test-fn",
+		RequestPayload: mustJSON(t, sdkrequest.Request{}),
+		LeaseId:        "lease-id",
+	})
+
+	err = h.handleInvokeMessage(context.Background(), preparedConn, secondMsg)
+	r.NoError(err)
+	r.False(invoker.called.Load())
+}
+
+func TestConnectionRetireIsIdempotent(t *testing.T) {
+	r := require.New(t)
+
+	conn := &connection{}
+
+	r.True(conn.retire())
+	r.False(conn.retire())
+	r.True(conn.isRetired())
 }
 
 type blockingTestInvoker struct {
