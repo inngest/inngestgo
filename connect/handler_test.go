@@ -1,6 +1,7 @@
 package connect
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -719,6 +720,7 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 
 func TestHandleInvokeMessageReturnsErrorWhenConnectionClosesBeforeAck(t *testing.T) {
 	r := require.New(t)
+	var logOutput bytes.Buffer
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
@@ -745,6 +747,7 @@ func TestHandleInvokeMessageReturnsErrorWhenConnectionClosesBeforeAck(t *testing
 	invoker := &blockingTestInvoker{
 		release: invokerRelease,
 	}
+	logger := slog.New(slog.NewTextHandler(&logOutput, nil))
 	h := &connectHandler{
 		opts: Opts{
 			SDKLanguage: "go",
@@ -753,8 +756,8 @@ func TestHandleInvokeMessageReturnsErrorWhenConnectionClosesBeforeAck(t *testing
 		invokers: map[string]FunctionInvoker{
 			"test-app": invoker,
 		},
-		logger:        slog.Default(),
-		messageBuffer: newMessageBuffer(apiClient, slog.Default()),
+		logger:        logger,
+		messageBuffer: newMessageBuffer(apiClient, logger),
 		workerPool: &workerPool{
 			inProgressLeases:     map[string]string{},
 			inProgressLeasesLock: sync.Mutex{},
@@ -783,8 +786,11 @@ func TestHandleInvokeMessageReturnsErrorWhenConnectionClosesBeforeAck(t *testing
 
 	err = h.handleInvokeMessage(ctx, preparedConn, msg)
 	r.Error(err)
+	r.ErrorIs(err, context.Canceled)
 	r.Contains(err.Error(), "could not write message to websocket")
 	r.NotContains(err.Error(), "PANIC")
+	r.Contains(logOutput.String(), "could not write message to websocket")
+	r.NotContains(logOutput.String(), "PANIC")
 	r.False(invoker.called.Load())
 }
 

@@ -490,12 +490,12 @@ Purpose: capture current lifecycle expectations before moving code.
 
 *** Implementation checklist
 
-- [ ] Keep the SYS-856 regressions covering reply ACK cleanup and stale
+- [X] Keep the SYS-856 regressions covering reply ACK cleanup and stale
   websocket writes.
-- [ ] Keep the SYS-883 regression covering ACK write failure:
-  - [ ] ACK write failure does not invoke the function;
-  - [ ] returned/logged error preserves the underlying websocket write error;
-  - [ ] returned/logged error does not render as =!PANIC=.
+- [X] Keep the SYS-883 regression covering ACK write failure:
+  - [X] ACK write failure does not invoke the function;
+  - [X] returned/logged error preserves the underlying websocket write error;
+  - [X] returned/logged error does not render as =!PANIC=.
 - [ ] Add or confirm coverage for ACK write-failure fanout:
   - [ ] first hard ACK write failure retires the generation;
   - [ ] later queued pre-ACK work for that generation skips before ACK;
@@ -515,10 +515,10 @@ Purpose: capture current lifecycle expectations before moving code.
 *** Validation checklist
 
 - [ ] =go test ./connect -count=1=
-- [ ] Tests fail if queued pre-ACK work invokes on a retired generation.
-- [ ] Tests fail if post-ACK in-flight work is canceled by generation
+- [X] Tests fail if queued pre-ACK work invokes on a retired generation.
+- [X] Tests fail if post-ACK in-flight work is canceled by generation
   retirement.
-- [ ] Tests fail if ACK write failure logs hide the underlying transport error
+- [X] Tests fail if ACK write failure logs hide the underlying transport error
   behind panic-shaped formatting.
 
 *** Exit criteria
