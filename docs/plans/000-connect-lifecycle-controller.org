@@ -14,10 +14,17 @@ transitions and their side effects so connection behavior is easier to reason
 about, easier to test, and less dependent on scattered booleans, deferred
 closes, channel sends, and context cancellation.
 
-The immediate motivation is SYS-856: queued and in-flight worker-pool jobs held
-a concrete =*connection= after the websocket read loop exited. Once that old
-websocket was closed, those jobs could still attempt ACK, reply, or lease
-extension writes through the stale =preparedConn.ws=.
+The immediate motivation is SYS-856 and SYS-883: queued and in-flight
+worker-pool jobs held a concrete =*connection= after the websocket read loop
+exited. Once that old websocket was closed, those jobs could still attempt ACK,
+reply, or lease extension writes through the stale =preparedConn.ws=.
+
+SYS-883 added a second finding: ACK write failure returned a malformed
+=publicerr.Error= with no wrapped cause, so logging the error produced
+=!PANIC: runtime error: invalid memory address or nil pointer dereference=.
+That panic-shaped log was secondary noise. The underlying lifecycle issue was
+many queued pre-ACK requests concurrently attempting =WORKER_REQUEST_ACK= on
+the same dead websocket generation.
 
 * Goals
 
@@ -108,6 +115,7 @@ Current request behavior after the SYS-856 fix:
 
 - queued request on a retired connection: skip before ACK and do not invoke;
 - request that ACKs successfully: invoke function with =context.Background()=;
+- ACK write failure: skip invocation and return the transport/protocol error;
 - connection retired before reply: buffer the reply for API flush;
 - connection retired while lease extension loop is active: stop extending.
 
@@ -131,8 +139,37 @@ This makes it hard to answer basic questions locally:
 - Are in-flight jobs allowed to finish?
 - Does drain behave differently from unexpected close?
 - Which side effects are guaranteed when a read loop exits?
+- Does a write failure prove this generation is no longer writable?
+- If one goroutine discovers a closed websocket during ACK, how do other queued
+  pre-ACK goroutines stop attempting the same stale write?
 
 The current model can be made reliable, but the rules need a single home.
+
+* SYS-883 Findings
+
+Observed production sequence on 2026-05-18:
+
+1. many gateway executor requests were queued or in progress for one Connect
+   websocket generation;
+2. the generation missed gateway heartbeat or otherwise lost transport
+   liveness;
+3. many worker-pool goroutines attempted =WORKER_REQUEST_ACK= against the
+   closed websocket within the same millisecond window;
+4. each ACK write failed with =use of closed network connection=;
+5. the malformed public error caused the follow-up =failed to handle sdk
+   request= log to render as =!PANIC=.
+
+The lifecycle conclusion is that ACK write failure is not just a per-request
+failure. It is strong evidence that the current websocket generation can no
+longer be used for protocol writes. The controller should let the first writer
+that observes a hard transport failure retire the generation, using an
+idempotent transition so concurrent writers race to the same final state.
+
+Open decision: whether reply write failure should also retire the generation.
+Reply write failure must always buffer the reply, but retiring on every reply
+write error may be more aggressive than necessary. ACK write failure is the
+safer first boundary because ACK is the request ownership boundary and no user
+function has started yet.
 
 * Design Direction
 
@@ -435,6 +472,11 @@ Operational distinction:
   =Closed=, are expected lifecycle skips and should be logged at debug level;
 - ACK write failure while the generation is =Active= is a transport/protocol
   failure and should be logged more prominently;
+- hard ACK transport failure should retire the generation through an
+  idempotent transition so queued pre-ACK work on the same generation skips
+  instead of amplifying stale websocket writes;
+- reply write failure after ACK should buffer the reply; whether it also
+  retires the generation is an explicit policy decision for implementation;
 - both cases skip invocation.
 
 * Phased Implementation Plan
@@ -450,6 +492,14 @@ Purpose: capture current lifecycle expectations before moving code.
 
 - [ ] Keep the SYS-856 regressions covering reply ACK cleanup and stale
   websocket writes.
+- [ ] Keep the SYS-883 regression covering ACK write failure:
+  - [ ] ACK write failure does not invoke the function;
+  - [ ] returned/logged error preserves the underlying websocket write error;
+  - [ ] returned/logged error does not render as =!PANIC=.
+- [ ] Add or confirm coverage for ACK write-failure fanout:
+  - [ ] first hard ACK write failure retires the generation;
+  - [ ] later queued pre-ACK work for that generation skips before ACK;
+  - [ ] only the first transition performs close side effects.
 - [ ] Add or confirm coverage for graceful shutdown behavior:
   - [ ] manager enters =CLOSING=;
   - [ ] current active generation sends =WORKER_PAUSE=;
@@ -468,6 +518,8 @@ Purpose: capture current lifecycle expectations before moving code.
 - [ ] Tests fail if queued pre-ACK work invokes on a retired generation.
 - [ ] Tests fail if post-ACK in-flight work is canceled by generation
   retirement.
+- [ ] Tests fail if ACK write failure logs hide the underlying transport error
+  behind panic-shaped formatting.
 
 *** Exit criteria
 
@@ -502,6 +554,8 @@ protocol behavior.
   - [ ] =retire(reason string, attrs ...any)=
   - [ ] =closeNormal(reason string, attrs ...any)=
   - [ ] =closeNow(reason string, attrs ...any)=
+- [ ] Make retire/close helpers idempotent with compare-and-swap semantics so
+  concurrent request goroutines do not all perform close side effects.
 - [ ] Add a non-blocking manager flush notification hook that =retire= can
   call without performing API I/O directly.
 - [ ] Keep =Retired= as the state that means no future protocol writes.
@@ -518,6 +572,7 @@ protocol behavior.
 - [ ] =Draining -> Retired= succeeds.
 - [ ] =Active -> Closing -> Retired= succeeds.
 - [ ] =Retired -> Closed= is idempotent.
+- [ ] Concurrent retire/close attempts perform transition side effects once.
 - [ ] =Active -> Closed= applies retire effects before close.
 - [ ] Invalid transitions are rejected or logged clearly.
 
@@ -558,12 +613,18 @@ Purpose: make write eligibility state-driven rather than scattered
   heartbeat, and lease extension paths.
 - [ ] Return explicit no-write outcomes instead of attempting stale websocket
   writes.
-- [ ] Keep websocket write failures after invocation as buffer-and-return-nil.
+- [ ] On hard ACK transport failure, transition the generation to =Retired=
+  or =Closed= before returning the request error.
+- [ ] Keep websocket write failures after invocation as buffer-and-return-nil;
+  decide separately whether hard reply transport failures should retire the
+  generation.
 
 *** Test checklist
 
 - [ ] Request ACK is not attempted outside allowed phases.
 - [ ] ACK write failure does not invoke the function.
+- [ ] ACK write failure retires the generation so later queued requests skip
+  before ACK.
 - [ ] Non-writable pre-ACK phases and ACK transport failures produce distinct
   log messages.
 - [ ] Reply write is not attempted after =Retired=.
@@ -571,6 +632,8 @@ Purpose: make write eligibility state-driven rather than scattered
 - [ ] Lease extension write is not attempted after =Retired=.
 - [ ] Websocket write failure after invocation buffers reply and returns no
   request failure.
+- [ ] Reply write-failure retirement behavior is documented by test, whichever
+  policy is chosen.
 
 *** Validation checklist
 
@@ -727,6 +790,7 @@ cancellation semantics.
 - [ ] Encode request boundaries:
   - [ ] before ACK: require generation phase that allows ACK;
   - [ ] ACK write must succeed before invocation starts;
+  - [ ] hard ACK write failure retires the generation before returning;
   - [ ] after ACK: invocation continues independent of generation phase;
   - [ ] before reply write: require generation phase that allows reply;
   - [ ] otherwise buffer reply;
@@ -740,6 +804,8 @@ cancellation semantics.
 
 - [ ] Queued request on =Retired= does not ACK and does not invoke.
 - [ ] ACK write failure while =Active= does not invoke.
+- [ ] ACK write failure while =Active= retires the generation and suppresses
+  repeated stale ACK attempts from later queued work.
 - [ ] ACKed in-flight request on =Retired= completes and buffers reply.
 - [ ] Reply ACK clears =pendingAck=.
 - [ ] Lease extension exits when generation becomes =Retired=.
