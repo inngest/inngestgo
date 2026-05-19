@@ -76,6 +76,9 @@ func TestHandleInvokeMessageSkipsAckWhenPhaseDisallowsAck(t *testing.T) {
 		messageBuffer: newMessageBuffer(apiClient, logger),
 	}
 	preparedConn := newLifecycleTestConnection(nil)
+	preparedConn.connectionId = "test-connection"
+	preparedConn.gatewayGroupName = "test-group"
+	preparedConn.gatewayEndpoint = "wss://test-gateway"
 	r.NoError(preparedConn.transition(connPhaseHandshaking, "test"))
 	r.NoError(preparedConn.markActive("test"))
 	r.NoError(preparedConn.beginDrain("test"))
@@ -94,6 +97,8 @@ func TestHandleInvokeMessageSkipsAckWhenPhaseDisallowsAck(t *testing.T) {
 	r.NoError(err)
 	r.False(invoker.called.Load())
 	r.Contains(logOutput.String(), "phase does not allow request ack")
+	r.Contains(logOutput.String(), "phase=Draining")
+	r.Contains(logOutput.String(), "connection_id=test-connection")
 	r.NotContains(logOutput.String(), "error sending request ack")
 }
 
