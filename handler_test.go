@@ -467,6 +467,52 @@ func TestServe(t *testing.T) {
 		}()
 		require.Equal(t, 410, resp.StatusCode)
 	})
+
+	t.Run("It marks event payload parsing errors as no retry", func(t *testing.T) {
+		type TimeData struct {
+			Date time.Time `json:"date"`
+		}
+
+		c, err := NewClient(ClientOpts{AppID: "parse-errors"})
+		r.NoError(err)
+
+		var called int32
+		fn, err := CreateFunction(
+			c,
+			FunctionOpts{ID: "time-func"},
+			EventTrigger("test/time", nil),
+			func(ctx context.Context, input Input[TimeData]) (any, error) {
+				atomic.AddInt32(&called, 1)
+				return nil, nil
+			},
+		)
+		r.NoError(err)
+
+		server := httptest.NewServer(c.Serve())
+		defer server.Close()
+
+		queryParams := url.Values{}
+		queryParams.Add("fnId", fn.FullyQualifiedID())
+
+		event := GenericEvent[map[string]any]{
+			Name: "test/time",
+			Data: map[string]any{
+				"date": "2024-07-01",
+			},
+		}
+		resp := handlerPost(t, fmt.Sprintf("%s?%s", server.URL, queryParams.Encode()), createRequest(t, event))
+		defer func() {
+			_ = resp.Body.Close()
+		}()
+
+		r.Equal(http.StatusInternalServerError, resp.StatusCode)
+		r.Equal("true", resp.Header.Get(HeaderKeyNoRetry))
+		r.Equal(int32(0), atomic.LoadInt32(&called))
+
+		body, err := io.ReadAll(resp.Body)
+		r.NoError(err)
+		r.Contains(string(body), "error unmarshalling event for function")
+	})
 }
 
 func TestSteps(t *testing.T) {
