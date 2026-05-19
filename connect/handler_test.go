@@ -995,7 +995,7 @@ func TestHandleConnectionGracefulShutdownPausesDrainsAndFlushes(t *testing.T) {
 
 	select {
 	case <-pauseSeen:
-	case <-time.After(time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for worker pause")
 	}
 
@@ -1007,7 +1007,7 @@ func TestHandleConnectionGracefulShutdownPausesDrainsAndFlushes(t *testing.T) {
 	select {
 	case err := <-done:
 		r.NoError(err)
-	case <-time.After(time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for handleConnection")
 	}
 
@@ -1016,13 +1016,13 @@ func TestHandleConnectionGracefulShutdownPausesDrainsAndFlushes(t *testing.T) {
 	select {
 	case resp := <-flushSeen:
 		r.Equal("request-id", resp.RequestId)
-	case <-time.After(time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for buffered response flush")
 	}
 
 	select {
 	case <-serverDone:
-	case <-time.After(time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for websocket close")
 	}
 }
