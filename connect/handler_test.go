@@ -968,10 +968,8 @@ func TestHandleConnectionGracefulShutdownPausesDrainsAndFlushes(t *testing.T) {
 	r.NoError(err)
 	defer func() { _ = clientConn.CloseNow() }()
 
-	var logOutput bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&logOutput, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}))
+	pauseLogSeen := make(chan struct{})
+	logger := slog.New(newLogPatternHandler("sending worker pause message", pauseLogSeen))
 	apiClient := newWorkerApiClient(server.URL, nil)
 	h := &connectHandler{
 		logger:        logger,
@@ -1003,7 +1001,7 @@ func TestHandleConnectionGracefulShutdownPausesDrainsAndFlushes(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	cancel()
 
-	waitForLog(t, &logOutput, "sending worker pause message")
+	waitForLogSignal(t, pauseLogSeen, "sending worker pause message")
 
 	h.messageBuffer.append(&connectproto.SDKResponse{
 		RequestId: "request-id",
@@ -1294,21 +1292,48 @@ func wsReadProto(ctx context.Context, conn *websocket.Conn, msg proto.Message) e
 	return proto.Unmarshal(data, msg)
 }
 
-func waitForLog(t *testing.T, output *bytes.Buffer, pattern string) {
+type logPatternHandler struct {
+	pattern string
+	seen    chan<- struct{}
+	once    *sync.Once
+}
+
+func newLogPatternHandler(pattern string, seen chan<- struct{}) *logPatternHandler {
+	return &logPatternHandler{
+		pattern: pattern,
+		seen:    seen,
+		once:    &sync.Once{},
+	}
+}
+
+func (h *logPatternHandler) Enabled(context.Context, slog.Level) bool {
+	return true
+}
+
+func (h *logPatternHandler) Handle(_ context.Context, record slog.Record) error {
+	if strings.Contains(record.Message, h.pattern) {
+		h.once.Do(func() {
+			close(h.seen)
+		})
+	}
+	return nil
+}
+
+func (h *logPatternHandler) WithAttrs([]slog.Attr) slog.Handler {
+	return h
+}
+
+func (h *logPatternHandler) WithGroup(string) slog.Handler {
+	return h
+}
+
+func waitForLogSignal(t *testing.T, seen <-chan struct{}, pattern string) {
 	t.Helper()
 
-	deadline := time.After(time.Second)
-	for {
-		if strings.Contains(output.String(), pattern) {
-			return
-		}
-		select {
-		case <-deadline:
-			t.Log(output.String())
-			t.Fatalf("timed out waiting for log pattern %q", pattern)
-		default:
-			time.Sleep(time.Millisecond)
-		}
+	select {
+	case <-seen:
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for log pattern %q", pattern)
 	}
 }
 
