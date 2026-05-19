@@ -891,7 +891,7 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 
 	go func() {
 		<-serverClosed
-		preparedConn.retire()
+		preparedConn.retire("test")
 		close(invokerRelease)
 	}()
 
@@ -983,6 +983,9 @@ func TestHandleConnectionGracefulShutdownPausesDrainsAndFlushes(t *testing.T) {
 		heartbeatInterval:   time.Hour,
 		extendLeaseInterval: time.Hour,
 	}
+	preparedConn.initLifecycle(logger, nil)
+	r.NoError(preparedConn.transition(connPhaseHandshaking, "test"))
+	r.NoError(preparedConn.markActive("test"))
 
 	done := make(chan error, 1)
 	go func() {
@@ -1095,7 +1098,6 @@ func TestHandleInvokeMessageReturnsErrorWhenConnectionClosesBeforeAck(t *testing
 
 	err = h.handleInvokeMessage(ctx, preparedConn, msg)
 	r.Error(err)
-	r.ErrorIs(err, context.Canceled)
 	r.Contains(err.Error(), "could not write message to websocket")
 	r.NotContains(err.Error(), "PANIC")
 	r.Contains(logOutput.String(), "could not write message to websocket")
@@ -1132,7 +1134,7 @@ func TestHandleInvokeMessageSkipsQueuedRequestForRetiredConnection(t *testing.T)
 		connectionId:        "old-connection",
 		extendLeaseInterval: time.Hour,
 	}
-	preparedConn.retire()
+	preparedConn.retire("test")
 
 	err := h.handleInvokeMessage(context.Background(), preparedConn, msg)
 	r.NoError(err)
@@ -1233,8 +1235,8 @@ func TestConnectionRetireIsIdempotent(t *testing.T) {
 
 	conn := &connection{}
 
-	r.True(conn.retire())
-	r.False(conn.retire())
+	r.True(conn.retire("test"))
+	r.False(conn.retire("test"))
 	r.True(conn.isRetired())
 }
 

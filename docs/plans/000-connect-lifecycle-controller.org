@@ -549,59 +549,59 @@ protocol behavior.
 
 *** Implementation checklist
 
-- [ ] Add internal =connPhase= values:
-  - [ ] =New=
-  - [ ] =Handshaking=
-  - [ ] =Active=
-  - [ ] =Draining=
-  - [ ] =Closing=
-  - [ ] =Retired=
-  - [ ] =Closed=
-- [ ] Add a private transition helper:
-  - [ ] validates allowed transitions;
-  - [ ] records reason and structured attrs;
-  - [ ] logs transition once;
-  - [ ] is concurrency-safe.
-- [ ] Replace the bare retired atomic with lifecycle methods:
-  - [ ] =phase()=
-  - [ ] =markActive(reason string, attrs ...any)=
-  - [ ] =beginDrain(reason string, attrs ...any)=
-  - [ ] =beginClose(reason string, attrs ...any)=
-  - [ ] =retire(reason string, attrs ...any)=
-  - [ ] =closeNormal(reason string, attrs ...any)=
-  - [ ] =closeNow(reason string, attrs ...any)=
-- [ ] Make retire/close helpers idempotent with compare-and-swap semantics so
+- [X] Add internal =connPhase= values:
+  - [X] =New=
+  - [X] =Handshaking=
+  - [X] =Active=
+  - [X] =Draining=
+  - [X] =Closing=
+  - [X] =Retired=
+  - [X] =Closed=
+- [X] Add a private transition helper:
+  - [X] validates allowed transitions;
+  - [X] records reason and structured attrs;
+  - [X] logs transition once;
+  - [X] is concurrency-safe.
+- [X] Replace the bare retired atomic with lifecycle methods:
+  - [X] =phase()=
+  - [X] =markActive(reason string, attrs ...any)=
+  - [X] =beginDrain(reason string, attrs ...any)=
+  - [X] =beginClose(reason string, attrs ...any)=
+  - [X] =retire(reason string, attrs ...any)=
+  - [X] =closeNormal(reason string, attrs ...any)=
+  - [X] =closeNow(reason string, attrs ...any)=
+- [X] Make retire/close helpers idempotent with compare-and-swap semantics so
   concurrent request goroutines do not all perform close side effects.
-- [ ] Add a non-blocking manager flush notification hook that =retire= can
+- [X] Add a non-blocking manager flush notification hook that =retire= can
   call without performing API I/O directly.
-- [ ] Keep =Retired= as the state that means no future protocol writes.
-- [ ] Route existing retire and close call sites through the lifecycle methods.
-- [ ] Preserve the current fallback =CloseNow= behavior, but make its state
+- [X] Keep =Retired= as the state that means no future protocol writes.
+- [X] Route existing retire and close call sites through the lifecycle methods.
+- [X] Preserve the current fallback =CloseNow= behavior, but make its state
   effect explicit.
 
 *** Test checklist
 
-- [ ] =New -> Handshaking -> Active= succeeds.
-- [ ] =Active -> Retired= disables writes.
-- [ ] =Active -> Retired= notifies the manager that buffered replies may need
+- [X] =New -> Handshaking -> Active= succeeds.
+- [X] =Active -> Retired= disables writes.
+- [X] =Active -> Retired= notifies the manager that buffered replies may need
   flushing.
-- [ ] =Draining -> Retired= succeeds.
-- [ ] =Active -> Closing -> Retired= succeeds.
-- [ ] =Retired -> Closed= is idempotent.
-- [ ] Concurrent retire/close attempts perform transition side effects once.
-- [ ] =Active -> Closed= applies retire effects before close.
-- [ ] Invalid transitions are rejected or logged clearly.
+- [X] =Draining -> Retired= succeeds.
+- [X] =Active -> Closing -> Retired= succeeds.
+- [X] =Retired -> Closed= is idempotent.
+- [X] Concurrent retire/close attempts perform transition side effects once.
+- [X] =Active -> Closed= applies retire effects before close.
+- [X] Invalid transitions are rejected or logged clearly.
 
 *** Validation checklist
 
-- [ ] =go test ./connect -count=1=
-- [ ] Existing SYS-856 regressions still pass.
+- [X] =go test ./connect -count=1=
+- [X] Existing SYS-856 regressions still pass.
 
 *** Exit criteria
 
-- [ ] Every websocket generation has an observable phase.
-- [ ] Retire and close side effects are routed through lifecycle methods.
-- [ ] No request behavior changes are intentionally introduced in this phase.
+- [X] Every websocket generation has an observable phase.
+- [X] Retire and close side effects are routed through lifecycle methods.
+- [X] No request behavior changes are intentionally introduced in this phase.
 
 ** Phase 2: Centralize write permission checks
 
