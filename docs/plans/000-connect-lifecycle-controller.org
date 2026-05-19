@@ -802,41 +802,41 @@ cancellation semantics.
 
 *** Implementation checklist
 
-- [ ] Add small request helper functions or a request context wrapper if needed.
-- [ ] Encode request boundaries:
-  - [ ] before ACK: require generation phase that allows ACK;
-  - [ ] ACK write must succeed before invocation starts;
-  - [ ] hard ACK write failure retires the generation before returning;
-  - [ ] after ACK: invocation continues independent of generation phase;
-  - [ ] before reply write: require generation phase that allows reply;
-  - [ ] otherwise buffer reply;
-  - [ ] before lease extend: require generation phase that allows lease extend.
-- [ ] Keep =InvokeFunction(context.Background(), ...)= behavior unless a
+- [X] Add small request helper functions or a request context wrapper if needed.
+- [X] Encode request boundaries:
+  - [X] before ACK: require generation phase that allows ACK;
+  - [X] ACK write must succeed before invocation starts;
+  - [X] hard ACK write failure retires the generation before returning;
+  - [X] after ACK: invocation continues independent of generation phase;
+  - [X] before reply write: require generation phase that allows reply;
+  - [X] otherwise buffer reply;
+  - [X] before lease extend: require generation phase that allows lease extend.
+- [X] Keep =InvokeFunction(context.Background(), ...)= behavior unless a
   separate decision changes cancellation semantics.
-- [ ] Ensure pending ACK cleanup remains independent of generation lifecycle.
-- [ ] Make request logs include connection ID and generation phase where useful.
+- [X] Ensure pending ACK cleanup remains independent of generation lifecycle.
+- [X] Make request logs include connection ID and generation phase where useful.
 
 *** Test checklist
 
-- [ ] Queued request on =Retired= does not ACK and does not invoke.
-- [ ] ACK write failure while =Active= does not invoke.
-- [ ] ACK write failure while =Active= retires the generation and suppresses
+- [X] Queued request on =Retired= does not ACK and does not invoke.
+- [X] ACK write failure while =Active= does not invoke.
+- [X] ACK write failure while =Active= retires the generation and suppresses
   repeated stale ACK attempts from later queued work.
-- [ ] ACKed in-flight request on =Retired= completes and buffers reply.
-- [ ] Reply ACK clears =pendingAck=.
-- [ ] Lease extension exits when generation becomes =Retired=.
-- [ ] Request tests assert behavior by phase, not by websocket race timing.
+- [X] ACKed in-flight request on =Retired= completes and buffers reply.
+- [X] Reply ACK clears =pendingAck=.
+- [X] Lease extension exits when generation becomes =Retired=.
+- [X] Request tests assert behavior by phase, not by websocket race timing.
 
 *** Validation checklist
 
-- [ ] =go test ./connect -count=1=
-- [ ] No SYS-856-style stale websocket write logs are expected from request
+- [X] =go test ./connect -count=1=
+- [X] No SYS-856-style stale websocket write logs are expected from request
   paths after =Retired=.
 
 *** Exit criteria
 
-- [ ] Request behavior is explicit for each relevant generation phase.
-- [ ] In-flight ACKed function execution still completes across reconnect.
+- [X] Request behavior is explicit for each relevant generation phase.
+- [X] In-flight ACKed function execution still completes across reconnect.
 
 ** Phase 6: Cleanup and documentation
 
