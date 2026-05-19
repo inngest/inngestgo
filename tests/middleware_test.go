@@ -11,7 +11,7 @@ import (
 
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngestgo"
-	"github.com/inngest/inngestgo/experimental"
+	"github.com/inngest/inngestgo/middleware"
 	"github.com/inngest/inngestgo/step"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,9 +30,9 @@ func TestClientMiddleware(t *testing.T) {
 			hit      int32
 		)
 
-		newMW := func() experimental.Middleware {
+		newMW := func() middleware.Middleware {
 			return &inlineMiddleware{
-				onPanic: func(ctx context.Context, call experimental.CallContext, r any, s string) {
+				onPanic: func(ctx context.Context, call middleware.CallContext, r any, s string) {
 					recovery = r
 					stack = s
 
@@ -43,7 +43,7 @@ func TestClientMiddleware(t *testing.T) {
 
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID:      randomSuffix("app"),
-			Middleware: []func() experimental.Middleware{newMW},
+			Middleware: []func() middleware.Middleware{newMW},
 			Logger:     slog.New(slog.DiscardHandler),
 		})
 		r.NoError(err)
@@ -98,13 +98,13 @@ func TestClientMiddleware(t *testing.T) {
 			transforms         int32
 		)
 
-		newMW := func() experimental.Middleware {
+		newMW := func() middleware.Middleware {
 			return &inlineMiddleware{
-				afterExecutionFn: func(ctx context.Context, call experimental.CallContext, result any, err error) {
+				afterExecutionFn: func(ctx context.Context, call middleware.CallContext, result any, err error) {
 					results.Append(result)
 					errors.Append(err)
 				},
-				transformOutputFn: func(ctx context.Context, call experimental.CallContext, output *experimental.TransformableOutput) {
+				transformOutputFn: func(ctx context.Context, call middleware.CallContext, output *middleware.TransformableOutput) {
 					// Mutate output
 					switch atomic.AddInt32(&transforms, 1) {
 					case 1:
@@ -117,9 +117,9 @@ func TestClientMiddleware(t *testing.T) {
 			}
 		}
 
-		verifyTransformMw := func() experimental.Middleware {
+		verifyTransformMw := func() middleware.Middleware {
 			return &inlineMiddleware{
-				transformOutputFn: func(ctx context.Context, call experimental.CallContext, output *experimental.TransformableOutput) {
+				transformOutputFn: func(ctx context.Context, call middleware.CallContext, output *middleware.TransformableOutput) {
 					transformedResults.Append(output.Result)
 					transformedErrors.Append(output.Error)
 				},
@@ -129,7 +129,7 @@ func TestClientMiddleware(t *testing.T) {
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID: randomSuffix("app"),
 			// middleware runs in reverse order, so put verify first.
-			Middleware: []func() experimental.Middleware{verifyTransformMw, newMW},
+			Middleware: []func() middleware.Middleware{verifyTransformMw, newMW},
 			Logger:     slog.New(slog.DiscardHandler),
 		})
 		r.NoError(err)
@@ -191,9 +191,9 @@ func TestClientMiddleware(t *testing.T) {
 			errors  SafeSlice[error]
 		)
 
-		newMW := func() experimental.Middleware {
+		newMW := func() middleware.Middleware {
 			return &inlineMiddleware{
-				afterExecutionFn: func(ctx context.Context, call experimental.CallContext, result any, err error) {
+				afterExecutionFn: func(ctx context.Context, call middleware.CallContext, result any, err error) {
 					results.Append(result)
 					errors.Append(err)
 				},
@@ -202,7 +202,7 @@ func TestClientMiddleware(t *testing.T) {
 
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID:      randomSuffix("app"),
-			Middleware: []func() experimental.Middleware{newMW},
+			Middleware: []func() middleware.Middleware{newMW},
 			Logger:     slog.New(slog.DiscardHandler),
 		})
 		r.NoError(err)
@@ -252,9 +252,9 @@ func TestClientMiddleware(t *testing.T) {
 			errors  SafeSlice[error]
 		)
 
-		newMW := func() experimental.Middleware {
+		newMW := func() middleware.Middleware {
 			return &inlineMiddleware{
-				afterExecutionFn: func(ctx context.Context, call experimental.CallContext, result any, err error) {
+				afterExecutionFn: func(ctx context.Context, call middleware.CallContext, result any, err error) {
 					results.Append(result)
 					errors.Append(err)
 				},
@@ -263,7 +263,7 @@ func TestClientMiddleware(t *testing.T) {
 
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID:      randomSuffix("app"),
-			Middleware: []func() experimental.Middleware{newMW},
+			Middleware: []func() middleware.Middleware{newMW},
 			Logger:     slog.New(slog.DiscardHandler),
 		})
 		r.NoError(err)
@@ -306,13 +306,13 @@ func TestClientMiddleware(t *testing.T) {
 		r := require.New(t)
 		ctx := context.Background()
 
-		newMW := func() experimental.Middleware {
-			return &experimental.BaseMiddleware{}
+		newMW := func() middleware.Middleware {
+			return &middleware.BaseMiddleware{}
 		}
 
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID:      randomSuffix("app"),
-			Middleware: []func() experimental.Middleware{newMW},
+			Middleware: []func() middleware.Middleware{newMW},
 		})
 		r.NoError(err)
 
@@ -346,25 +346,25 @@ func TestClientMiddleware(t *testing.T) {
 		ctx := context.Background()
 
 		var logs SafeSlice[string]
-		newMW := func() experimental.Middleware {
+		newMW := func() middleware.Middleware {
 			return &inlineMiddleware{
-				afterExecutionFn: func(ctx context.Context, call experimental.CallContext, result any, err error) {
+				afterExecutionFn: func(ctx context.Context, call middleware.CallContext, result any, err error) {
 					logs.Append("mw: AfterExecution")
 				},
-				beforeExecutionFn: func(ctx context.Context, call experimental.CallContext) {
+				beforeExecutionFn: func(ctx context.Context, call middleware.CallContext) {
 					logs.Append("mw: BeforeExecution")
 				},
 				transformInputFn: func(
 					ctx context.Context,
-					call experimental.CallContext,
-					input *experimental.TransformableInput,
+					call middleware.CallContext,
+					input *middleware.TransformableInput,
 				) {
 					logs.Append("mw: TransformInput")
 				},
 				transformOutputFn: func(
 					ctx context.Context,
-					call experimental.CallContext,
-					output *experimental.TransformableOutput,
+					call middleware.CallContext,
+					output *middleware.TransformableOutput,
 				) {
 					logs.Append("mw: TransformOutput")
 				},
@@ -373,7 +373,7 @@ func TestClientMiddleware(t *testing.T) {
 
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID:      randomSuffix("app"),
-			Middleware: []func() experimental.Middleware{newMW},
+			Middleware: []func() middleware.Middleware{newMW},
 		})
 		r.NoError(err)
 
@@ -455,12 +455,12 @@ func TestClientMiddleware(t *testing.T) {
 		var logs SafeSlice[string]
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID: randomSuffix("app"),
-			Middleware: []func() experimental.Middleware{
-				func() experimental.Middleware {
+			Middleware: []func() middleware.Middleware{
+				func() middleware.Middleware {
 					return &inlineMiddleware{
 						afterExecutionFn: func(
 							ctx context.Context,
-							call experimental.CallContext,
+							call middleware.CallContext,
 							result any,
 							err error,
 						) {
@@ -468,7 +468,7 @@ func TestClientMiddleware(t *testing.T) {
 						},
 						beforeExecutionFn: func(
 							ctx context.Context,
-							call experimental.CallContext,
+							call middleware.CallContext,
 						) {
 							logs.Append("mw: BeforeExecution")
 						},
@@ -533,18 +533,18 @@ func TestClientMiddleware(t *testing.T) {
 		ctx := context.Background()
 
 		var logs SafeSlice[string]
-		newMW := func() experimental.Middleware {
+		newMW := func() middleware.Middleware {
 			return &inlineMiddleware{
-				afterExecutionFn: func(ctx context.Context, call experimental.CallContext, result any, err error) {
+				afterExecutionFn: func(ctx context.Context, call middleware.CallContext, result any, err error) {
 					logs.Append("mw: AfterExecution")
 				},
-				beforeExecutionFn: func(ctx context.Context, call experimental.CallContext) {
+				beforeExecutionFn: func(ctx context.Context, call middleware.CallContext) {
 					logs.Append("mw: BeforeExecution")
 				},
 				transformInputFn: func(
 					ctx context.Context,
-					call experimental.CallContext,
-					input *experimental.TransformableInput,
+					call middleware.CallContext,
+					input *middleware.TransformableInput,
 				) {
 					logs.Append("mw: TransformInput")
 				},
@@ -553,7 +553,7 @@ func TestClientMiddleware(t *testing.T) {
 
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID:      randomSuffix("app"),
-			Middleware: []func() experimental.Middleware{newMW},
+			Middleware: []func() middleware.Middleware{newMW},
 			Logger:     slog.New(slog.DiscardHandler),
 		})
 		r.NoError(err)
@@ -610,16 +610,16 @@ func TestClientMiddleware(t *testing.T) {
 		r := require.New(t)
 		ctx := context.Background()
 
-		newMW := func() experimental.Middleware {
+		newMW := func() middleware.Middleware {
 			return &inlineMiddleware{
-				afterExecutionFn:  func(ctx context.Context, call experimental.CallContext, result any, err error) {},
-				beforeExecutionFn: func(ctx context.Context, call experimental.CallContext) {},
+				afterExecutionFn:  func(ctx context.Context, call middleware.CallContext, result any, err error) {},
+				beforeExecutionFn: func(ctx context.Context, call middleware.CallContext) {},
 			}
 		}
 
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID:      randomSuffix("app"),
-			Middleware: []func() experimental.Middleware{newMW},
+			Middleware: []func() middleware.Middleware{newMW},
 			Logger:     slog.New(slog.DiscardHandler),
 		})
 		r.NoError(err)
@@ -660,50 +660,50 @@ func TestClientMiddleware(t *testing.T) {
 
 		var logs SafeSlice[string]
 
-		newMW1 := func() experimental.Middleware {
+		newMW1 := func() middleware.Middleware {
 			return &inlineMiddleware{
-				afterExecutionFn: func(ctx context.Context, call experimental.CallContext, result any, err error) {
+				afterExecutionFn: func(ctx context.Context, call middleware.CallContext, result any, err error) {
 					logs.Append("1: AfterExecution")
 				},
-				beforeExecutionFn: func(ctx context.Context, call experimental.CallContext) {
+				beforeExecutionFn: func(ctx context.Context, call middleware.CallContext) {
 					logs.Append("1: BeforeExecution")
 				},
 				transformInputFn: func(
 					ctx context.Context,
-					call experimental.CallContext,
-					input *experimental.TransformableInput,
+					call middleware.CallContext,
+					input *middleware.TransformableInput,
 				) {
 					logs.Append("1: TransformInput")
 				},
 				transformOutputFn: func(
 					ctx context.Context,
-					call experimental.CallContext,
-					output *experimental.TransformableOutput,
+					call middleware.CallContext,
+					output *middleware.TransformableOutput,
 				) {
 					logs.Append("1: TransformOutput")
 				},
 			}
 		}
 
-		newMW2 := func() experimental.Middleware {
+		newMW2 := func() middleware.Middleware {
 			return &inlineMiddleware{
-				afterExecutionFn: func(ctx context.Context, call experimental.CallContext, result any, err error) {
+				afterExecutionFn: func(ctx context.Context, call middleware.CallContext, result any, err error) {
 					logs.Append("2: AfterExecution")
 				},
-				beforeExecutionFn: func(ctx context.Context, call experimental.CallContext) {
+				beforeExecutionFn: func(ctx context.Context, call middleware.CallContext) {
 					logs.Append("2: BeforeExecution")
 				},
 				transformInputFn: func(
 					ctx context.Context,
-					call experimental.CallContext,
-					input *experimental.TransformableInput,
+					call middleware.CallContext,
+					input *middleware.TransformableInput,
 				) {
 					logs.Append("2: TransformInput")
 				},
 				transformOutputFn: func(
 					ctx context.Context,
-					call experimental.CallContext,
-					output *experimental.TransformableOutput,
+					call middleware.CallContext,
+					output *middleware.TransformableOutput,
 				) {
 					logs.Append("2: TransformOutput")
 				},
@@ -712,7 +712,7 @@ func TestClientMiddleware(t *testing.T) {
 
 		c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 			AppID:      randomSuffix("app"),
-			Middleware: []func() experimental.Middleware{newMW1, newMW2},
+			Middleware: []func() middleware.Middleware{newMW1, newMW2},
 		})
 		r.NoError(err)
 
@@ -759,12 +759,12 @@ func TestClientMiddleware(t *testing.T) {
 			r := require.New(t)
 			ctx := context.Background()
 
-			newMW := func() experimental.Middleware {
+			newMW := func() middleware.Middleware {
 				return &inlineMiddleware{
 					transformInputFn: func(
 						ctx context.Context,
-						call experimental.CallContext,
-						input *experimental.TransformableInput,
+						call middleware.CallContext,
+						input *middleware.TransformableInput,
 					) {
 						input.Event.Data["transformed"] = true
 
@@ -777,7 +777,7 @@ func TestClientMiddleware(t *testing.T) {
 
 			c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 				AppID:      randomSuffix("app"),
-				Middleware: []func() experimental.Middleware{newMW},
+				Middleware: []func() middleware.Middleware{newMW},
 			})
 			r.NoError(err)
 
@@ -837,12 +837,12 @@ func TestClientMiddleware(t *testing.T) {
 			r := require.New(t)
 			ctx := context.Background()
 
-			newMW := func() experimental.Middleware {
+			newMW := func() middleware.Middleware {
 				return &inlineMiddleware{
 					transformInputFn: func(
 						ctx context.Context,
-						call experimental.CallContext,
-						input *experimental.TransformableInput,
+						call middleware.CallContext,
+						input *middleware.TransformableInput,
 					) {
 						input.Event.Data["transformed"] = true
 
@@ -855,7 +855,7 @@ func TestClientMiddleware(t *testing.T) {
 
 			c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 				AppID:      randomSuffix("app"),
-				Middleware: []func() experimental.Middleware{newMW},
+				Middleware: []func() middleware.Middleware{newMW},
 			})
 			r.NoError(err)
 
@@ -918,12 +918,12 @@ func TestClientMiddleware(t *testing.T) {
 			type contextKeyType struct{}
 			contextKey := contextKeyType{}
 
-			newMW := func() experimental.Middleware {
+			newMW := func() middleware.Middleware {
 				return &inlineMiddleware{
 					transformInputFn: func(
 						ctx context.Context,
-						call experimental.CallContext,
-						input *experimental.TransformableInput,
+						call middleware.CallContext,
+						input *middleware.TransformableInput,
 					) {
 						input.WithContext(context.WithValue(
 							input.Context(), contextKey, "hello",
@@ -934,7 +934,7 @@ func TestClientMiddleware(t *testing.T) {
 
 			c, err := inngestgo.NewClient(inngestgo.ClientOpts{
 				AppID:      randomSuffix("app"),
-				Middleware: []func() experimental.Middleware{newMW},
+				Middleware: []func() middleware.Middleware{newMW},
 			})
 			r.NoError(err)
 
@@ -1011,7 +1011,7 @@ func TestLoggerMiddleware(t *testing.T) {
 			ctx context.Context,
 			input inngestgo.Input[any],
 		) (any, error) {
-			l := experimental.LoggerFromContext(ctx)
+			l := middleware.LoggerFromContext(ctx)
 			l.Log(ctx, slog.Level(fakeLevel), "fn start")
 
 			_, err = step.Run(ctx, "a", func(ctx context.Context) (any, error) {
@@ -1058,30 +1058,30 @@ func TestLoggerMiddleware(t *testing.T) {
 // functions.
 type inlineMiddleware struct {
 	// automatically implement any new methods.
-	experimental.BaseMiddleware
+	middleware.BaseMiddleware
 
-	beforeExecutionFn func(ctx context.Context, call experimental.CallContext)
-	afterExecutionFn  func(ctx context.Context, call experimental.CallContext, result any, err error)
-	transformInputFn  func(ctx context.Context, call experimental.CallContext, input *experimental.TransformableInput)
-	transformOutputFn func(ctx context.Context, call experimental.CallContext, output *experimental.TransformableOutput)
-	onPanic           func(ctx context.Context, call experimental.CallContext, recovery any, stack string)
+	beforeExecutionFn func(ctx context.Context, call middleware.CallContext)
+	afterExecutionFn  func(ctx context.Context, call middleware.CallContext, result any, err error)
+	transformInputFn  func(ctx context.Context, call middleware.CallContext, input *middleware.TransformableInput)
+	transformOutputFn func(ctx context.Context, call middleware.CallContext, output *middleware.TransformableOutput)
+	onPanic           func(ctx context.Context, call middleware.CallContext, recovery any, stack string)
 }
 
-func (m *inlineMiddleware) BeforeExecution(ctx context.Context, call experimental.CallContext) {
+func (m *inlineMiddleware) BeforeExecution(ctx context.Context, call middleware.CallContext) {
 	if m.beforeExecutionFn == nil {
 		return
 	}
 	m.beforeExecutionFn(ctx, call)
 }
 
-func (m *inlineMiddleware) AfterExecution(ctx context.Context, call experimental.CallContext, result any, err error) {
+func (m *inlineMiddleware) AfterExecution(ctx context.Context, call middleware.CallContext, result any, err error) {
 	if m.afterExecutionFn == nil {
 		return
 	}
 	m.afterExecutionFn(ctx, call, result, err)
 }
 
-func (m *inlineMiddleware) OnPanic(ctx context.Context, call experimental.CallContext, recovery any, stack string) {
+func (m *inlineMiddleware) OnPanic(ctx context.Context, call middleware.CallContext, recovery any, stack string) {
 	if m.onPanic == nil {
 		return
 	}
@@ -1090,8 +1090,8 @@ func (m *inlineMiddleware) OnPanic(ctx context.Context, call experimental.CallCo
 
 func (m *inlineMiddleware) TransformInput(
 	ctx context.Context,
-	call experimental.CallContext,
-	input *experimental.TransformableInput,
+	call middleware.CallContext,
+	input *middleware.TransformableInput,
 ) {
 	if m.transformInputFn == nil {
 		return
@@ -1101,8 +1101,8 @@ func (m *inlineMiddleware) TransformInput(
 
 func (m *inlineMiddleware) TransformOutput(
 	ctx context.Context,
-	call experimental.CallContext,
-	output *experimental.TransformableOutput,
+	call middleware.CallContext,
+	output *middleware.TransformableOutput,
 ) {
 	if m.transformOutputFn == nil {
 		return
