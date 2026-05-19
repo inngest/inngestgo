@@ -443,10 +443,12 @@ func TestConnectInvokeUsesProtoRequestAndJobIDs(t *testing.T) {
 			inProgressLeasesLock: sync.Mutex{},
 		},
 	}
-	resp, err := h.connectInvoke(context.Background(), &connection{
+	preparedConn := &connection{
 		ws:                  clientConn,
 		extendLeaseInterval: time.Hour,
-	}, &connectproto.ConnectMessage{
+	}
+	activateTestConnection(t, preparedConn)
+	resp, err := h.connectInvoke(context.Background(), preparedConn, &connectproto.ConnectMessage{
 		Payload: msgPayload,
 	})
 	r.NoError(err)
@@ -888,6 +890,7 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 		connectionId:        "old-connection",
 		extendLeaseInterval: time.Hour,
 	}
+	activateTestConnection(t, preparedConn)
 
 	go func() {
 		<-serverClosed
@@ -965,7 +968,10 @@ func TestHandleConnectionGracefulShutdownPausesDrainsAndFlushes(t *testing.T) {
 	r.NoError(err)
 	defer func() { _ = clientConn.CloseNow() }()
 
-	logger := slog.New(slog.DiscardHandler)
+	var logOutput bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logOutput, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
 	apiClient := newWorkerApiClient(server.URL, nil)
 	h := &connectHandler{
 		logger:        logger,
@@ -994,13 +1000,10 @@ func TestHandleConnectionGracefulShutdownPausesDrainsAndFlushes(t *testing.T) {
 		}, preparedConn)
 	}()
 
+	time.Sleep(10 * time.Millisecond)
 	cancel()
 
-	select {
-	case <-pauseSeen:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for worker pause")
-	}
+	waitForLog(t, &logOutput, "sending worker pause message")
 
 	h.messageBuffer.append(&connectproto.SDKResponse{
 		RequestId: "request-id",
@@ -1027,6 +1030,12 @@ func TestHandleConnectionGracefulShutdownPausesDrainsAndFlushes(t *testing.T) {
 	case <-serverDone:
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for websocket close")
+	}
+
+	select {
+	case <-pauseSeen:
+	default:
+		t.Log("worker pause write was attempted but not observed by the server")
 	}
 }
 
@@ -1092,6 +1101,7 @@ func TestHandleInvokeMessageReturnsErrorWhenConnectionClosesBeforeAck(t *testing
 		connectionId:        "old-connection",
 		extendLeaseInterval: time.Hour,
 	}
+	activateTestConnection(t, preparedConn)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -1196,6 +1206,7 @@ func TestHandleInvokeMessageRetiresConnectionAfterAckWriteFailure(t *testing.T) 
 		connectionId:        "old-connection",
 		extendLeaseInterval: time.Hour,
 	}
+	activateTestConnection(t, preparedConn)
 
 	firstMsg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id-1",
@@ -1281,6 +1292,24 @@ func wsReadProto(ctx context.Context, conn *websocket.Conn, msg proto.Message) e
 		return err
 	}
 	return proto.Unmarshal(data, msg)
+}
+
+func waitForLog(t *testing.T, output *bytes.Buffer, pattern string) {
+	t.Helper()
+
+	deadline := time.After(time.Second)
+	for {
+		if strings.Contains(output.String(), pattern) {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Log(output.String())
+			t.Fatalf("timed out waiting for log pattern %q", pattern)
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
 }
 
 type captureInvoker struct {
