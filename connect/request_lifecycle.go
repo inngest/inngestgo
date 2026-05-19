@@ -68,6 +68,16 @@ func (h *connectHandler) writeReply(ctx context.Context, preparedConn *connectio
 
 func (h *connectHandler) bufferReply(resp *connectproto.SDKResponse) {
 	h.messageBuffer.append(resp)
+
+	// A reply can be buffered after the connection lifecycle notification was
+	// already consumed, so appending flushable work must also wake the manager.
+	if h.notifyFlushChan == nil {
+		return
+	}
+	select {
+	case h.notifyFlushChan <- struct{}{}:
+	default:
+	}
 }
 
 func canExtendRequestLease(preparedConn *connection) bool {
