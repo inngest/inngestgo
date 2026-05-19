@@ -1250,6 +1250,96 @@ func TestConnectionRetireIsIdempotent(t *testing.T) {
 	r.Equal(connPhaseRetired, conn.phase())
 }
 
+// TestConnectNoDeadlockWhenContextCancelledDuringInitialConnection verifies that
+// cancelling the parent context while the run loop is sending on initialConnectionDone
+// does not deadlock. Without buffered channels this test will hang indefinitely.
+//
+// The deadlock scenario:
+//  1. Connect() selects on startCtx.Done() and initialConnectionDone
+//  2. startCtx is cancelled, Connect() picks startCtx.Done() and calls Close()
+//  3. Close() cancels workerCtx and waits on gracefulCloseEg
+//  4. gracefulCloseEg waits on runLoop.Wait()
+//  5. The runLoop has received a connectReport and is blocked sending on
+//     initialConnectionDone (unbuffered, no receiver) → deadlock
+//
+// With a buffered initialConnectionDone (cap 1), the send in step 5 completes
+// immediately into the buffer, and the runLoop exits cleanly.
+func TestConnectNoDeadlockWhenContextCancelledDuringInitialConnection(t *testing.T) {
+	r := require.New(t)
+
+	apiClient := newWorkerApiClient("", nil)
+	logger := slog.New(slog.DiscardHandler)
+
+	// Use a very short context so startCtx.Done() fires quickly
+	ctx, cancel := context.WithCancel(context.Background())
+
+	h := &connectHandler{
+		opts:                   Opts{IsDev: true},
+		logger:                 logger,
+		notifyConnectDoneChan:  make(chan connectReport, 1),
+		notifyConnectedChan:    make(chan struct{}),
+		initiateConnectionChan: make(chan struct{}, 1),
+		notifyFlushChan:        make(chan struct{}, 1),
+		apiClient:              apiClient,
+		messageBuffer:          newMessageBuffer(apiClient, logger),
+		state:                  ConnectionStateConnecting,
+		reconnectBackoff: func(int) time.Duration {
+			return 0
+		},
+	}
+	h.workerCtx, h.cancelWorkerCtx = context.WithCancel(context.Background())
+	defer h.cancelWorkerCtx()
+
+	// We need to ensure the runLoop receives the connectReport and attempts to send
+	// on initialConnectionDone AFTER Connect() has already exited via startCtx.Done().
+	//
+	// Strategy: startConnection sends the error immediately. The runLoop processes it
+	// and tries to send on initialConnectionDone. Meanwhile we cancel ctx after a
+	// small delay. If the Go select in Connect() picks startCtx.Done() (which it
+	// will when both are ready since select is random), we get the deadlock.
+	//
+	// To make this reliable, we run the test multiple times with -count flag.
+	// We also use a synchronization channel to ensure proper ordering.
+	startCalled := make(chan struct{})
+	h.startConnection = func(_ context.Context, _ connectionEstablishData, _ ...connectOpt) {
+		close(startCalled)
+		// Send a non-reconnectable error immediately
+		h.notifyConnectDoneChan <- connectReport{
+			err:       errors.New("simulated failure"),
+			reconnect: false,
+		}
+	}
+
+	// Wait for startConnection to begin, then cancel context.
+	// This creates a race between initialConnectionDone <- err and startCtx.Done()
+	// in the Connect() select. With unbuffered initialConnectionDone, if startCtx.Done()
+	// wins, the runLoop blocks forever.
+	go func() {
+		<-startCalled
+		// Give just enough time for the runLoop to process the report
+		// but also let startCtx.Done() be ready at the same time
+		cancel()
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, err := h.Connect(ctx)
+		// We expect an error (context canceled)
+		r.Error(err)
+	}()
+
+	// The test must complete within 2 seconds. Without the buffered channel fix,
+	// this would deadlock because the runLoop blocks on initialConnectionDone <- err
+	// while Connect() has already exited via startCtx.Done() and is blocked in Close().
+	select {
+	case <-done:
+		// Success: no deadlock
+	case <-time.After(2 * time.Second):
+		t.Fatal("deadlock detected: Connect did not return within 2 seconds")
+	}
+}
+
 type blockingTestInvoker struct {
 	release <-chan struct{}
 	called  atomic.Bool
