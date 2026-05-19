@@ -117,7 +117,6 @@ func TestHandleConnectionGatewayClosingDrainsUntilReplacementConnected(t *testin
 	}
 
 	r.Equal(connPhaseClosed, preparedConn.phase())
-	r.True(preparedConn.isRetired())
 
 	select {
 	case <-serverDone:
@@ -210,7 +209,6 @@ func TestHandleConnectionGatewayClosingRetiresAndClosesAfterReplacementTimeout(t
 	}
 
 	r.Equal(connPhaseClosed, preparedConn.phase())
-	r.True(preparedConn.isRetired())
 
 	select {
 	case <-serverDone:
@@ -517,7 +515,7 @@ func TestHandleInvokeMessageBuffersDrainingReplyWriteFailure(t *testing.T) {
 		t.Fatal("timed out waiting for invoke")
 	}
 
-	r.False(preparedConn.isRetired())
+	r.Equal(connPhaseDraining, preparedConn.phase())
 
 	h.messageBuffer.lock.Lock()
 	defer h.messageBuffer.lock.Unlock()

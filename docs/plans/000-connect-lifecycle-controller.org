@@ -1,7 +1,7 @@
 #+TITLE: Connect Lifecycle Controller
 #+AUTHOR: Darwin D. Wu
 #+DATE: 2026-05-08
-#+STATUS: Active
+#+STATUS: Done
 #+STARTUP: showall
 
 * Overview
@@ -754,46 +754,46 @@ websocket generation state.
 
 *** Implementation checklist
 
-- [ ] Add manager transition validation around =setState=.
-- [ ] Keep manager states coarse:
-  - [ ] =CONNECTING=
-  - [ ] =ACTIVE=
-  - [ ] =RECONNECTING=
-  - [ ] =CLOSING=
-  - [ ] =CLOSED=
-- [ ] Decide what to do with =PAUSED=:
-  - [ ] define exactly when it is entered; or
-  - [ ] remove it if it remains unused.
-- [ ] Make invalid manager transitions visible in logs.
-- [ ] Ensure reconnect overlap does not require changing manager state away
+- [X] Add manager transition validation around =setState=.
+- [X] Keep manager states coarse:
+  - [X] =CONNECTING=
+  - [X] =ACTIVE=
+  - [X] =RECONNECTING=
+  - [X] =CLOSING=
+  - [X] =CLOSED=
+- [X] Decide what to do with =PAUSED=:
+  - [X] retain it for source compatibility;
+  - [X] document that the manager lifecycle no longer enters it.
+- [X] Make invalid manager transitions visible in logs.
+- [X] Ensure reconnect overlap does not require changing manager state away
   from =ACTIVE= while old generation drains.
-- [ ] Add a serialized manager-owned flush path for lifecycle flush
+- [X] Add a serialized manager-owned flush path for lifecycle flush
   notifications:
-  - [ ] notification is non-blocking;
-  - [ ] repeated notifications are coalesced or serialized;
-  - [ ] flush uses current manager auth state;
-  - [ ] reconnect and close flushes remain safety points.
+  - [X] notification is non-blocking;
+  - [X] repeated notifications are coalesced or serialized;
+  - [X] flush uses current manager auth state;
+  - [X] reconnect and close flushes remain safety points.
 
 *** Test checklist
 
-- [ ] Initial connection moves =CONNECTING -> ACTIVE=.
-- [ ] Reconnectable failure moves =ACTIVE -> RECONNECTING -> ACTIVE=.
-- [ ] Non-reconnectable failure moves to =CLOSED=.
-- [ ] =Close= moves =ACTIVE/RECONNECTING -> CLOSING -> CLOSED=.
-- [ ] Double =Close= is idempotent.
-- [ ] Manager flush notification triggers one serialized API flush.
-- [ ] Repeated flush notifications do not start concurrent flushes.
-- [ ] Invalid transitions are rejected or logged clearly.
+- [X] Initial connection moves =CONNECTING -> ACTIVE=.
+- [X] Reconnectable failure moves =ACTIVE -> RECONNECTING -> ACTIVE=.
+- [X] Non-reconnectable failure moves to =CLOSED=.
+- [X] =Close= moves =ACTIVE/RECONNECTING -> CLOSING -> CLOSED=.
+- [X] Double =Close= is idempotent.
+- [X] Manager flush notification triggers one serialized API flush.
+- [X] Repeated flush notifications do not start concurrent flushes.
+- [X] Invalid transitions are rejected or logged clearly.
 
 *** Validation checklist
 
-- [ ] =go test ./connect -count=1=
-- [ ] Existing public =State()= behavior remains compatible.
+- [X] =go test ./connect -count=1=
+- [X] Existing public =State()= behavior remains compatible.
 
 *** Exit criteria
 
-- [ ] Manager state documents user-visible lifecycle only.
-- [ ] Websocket generation state owns write and transport lifecycle.
+- [X] Manager state documents user-visible lifecycle only.
+- [X] Websocket generation state owns write and transport lifecycle.
 
 ** Phase 5: Tighten request lifecycle boundaries
 
@@ -802,41 +802,41 @@ cancellation semantics.
 
 *** Implementation checklist
 
-- [ ] Add small request helper functions or a request context wrapper if needed.
-- [ ] Encode request boundaries:
-  - [ ] before ACK: require generation phase that allows ACK;
-  - [ ] ACK write must succeed before invocation starts;
-  - [ ] hard ACK write failure retires the generation before returning;
-  - [ ] after ACK: invocation continues independent of generation phase;
-  - [ ] before reply write: require generation phase that allows reply;
-  - [ ] otherwise buffer reply;
-  - [ ] before lease extend: require generation phase that allows lease extend.
-- [ ] Keep =InvokeFunction(context.Background(), ...)= behavior unless a
+- [X] Add small request helper functions or a request context wrapper if needed.
+- [X] Encode request boundaries:
+  - [X] before ACK: require generation phase that allows ACK;
+  - [X] ACK write must succeed before invocation starts;
+  - [X] hard ACK write failure retires the generation before returning;
+  - [X] after ACK: invocation continues independent of generation phase;
+  - [X] before reply write: require generation phase that allows reply;
+  - [X] otherwise buffer reply;
+  - [X] before lease extend: require generation phase that allows lease extend.
+- [X] Keep =InvokeFunction(context.Background(), ...)= behavior unless a
   separate decision changes cancellation semantics.
-- [ ] Ensure pending ACK cleanup remains independent of generation lifecycle.
-- [ ] Make request logs include connection ID and generation phase where useful.
+- [X] Ensure pending ACK cleanup remains independent of generation lifecycle.
+- [X] Make request logs include connection ID and generation phase where useful.
 
 *** Test checklist
 
-- [ ] Queued request on =Retired= does not ACK and does not invoke.
-- [ ] ACK write failure while =Active= does not invoke.
-- [ ] ACK write failure while =Active= retires the generation and suppresses
+- [X] Queued request on =Retired= does not ACK and does not invoke.
+- [X] ACK write failure while =Active= does not invoke.
+- [X] ACK write failure while =Active= retires the generation and suppresses
   repeated stale ACK attempts from later queued work.
-- [ ] ACKed in-flight request on =Retired= completes and buffers reply.
-- [ ] Reply ACK clears =pendingAck=.
-- [ ] Lease extension exits when generation becomes =Retired=.
-- [ ] Request tests assert behavior by phase, not by websocket race timing.
+- [X] ACKed in-flight request on =Retired= completes and buffers reply.
+- [X] Reply ACK clears =pendingAck=.
+- [X] Lease extension exits when generation becomes =Retired=.
+- [X] Request tests assert behavior by phase, not by websocket race timing.
 
 *** Validation checklist
 
-- [ ] =go test ./connect -count=1=
-- [ ] No SYS-856-style stale websocket write logs are expected from request
+- [X] =go test ./connect -count=1=
+- [X] No SYS-856-style stale websocket write logs are expected from request
   paths after =Retired=.
 
 *** Exit criteria
 
-- [ ] Request behavior is explicit for each relevant generation phase.
-- [ ] In-flight ACKed function execution still completes across reconnect.
+- [X] Request behavior is explicit for each relevant generation phase.
+- [X] In-flight ACKed function execution still completes across reconnect.
 
 ** Phase 6: Cleanup and documentation
 
@@ -844,30 +844,43 @@ Purpose: remove redundant lifecycle mechanisms and document the final contract.
 
 *** Implementation checklist
 
-- [ ] Remove obsolete direct retired checks after all writes use phase helpers.
-- [ ] Remove redundant close calls if lifecycle close helpers make them
+- [X] Remove obsolete direct retired checks after all writes use phase helpers.
+- [X] Remove redundant close calls if lifecycle close helpers make them
   unnecessary.
-- [ ] Keep fallback close safeguards where they are still useful.
-- [ ] Update code comments around gateway drain, unexpected close, and graceful
+- [X] Keep fallback close safeguards where they are still useful.
+- [X] Update code comments around gateway drain, unexpected close, and graceful
   shutdown.
-- [ ] Update this plan with decisions made during implementation.
+- [X] Update this plan with decisions made during implementation.
+
+Decision notes:
+
+- The old =isRetired()= shortcut was removed. Tests now assert concrete
+  generation phases so they stay aligned with the write policy table.
+- Explicit close calls in gateway drain and graceful shutdown remain because
+  they provide protocol-specific close reasons at the point the lifecycle moves
+  to =Closed=.
+- The deferred =closeNow("handle connection ended")= remains as an idempotent
+  fallback for unhandled exits that do not reach a specific drain, shutdown, or
+  read-error close path.
+- No new phase 6 behavior bug was found. The phase 5 canceled-ACK regression is
+  covered by =TestWriteRequestAckCanceledContextRetiresBeforeInvoke=.
 
 *** Test checklist
 
-- [ ] Full Connect package tests pass.
-- [ ] Add regression tests for any bug found during phases 1-5.
+- [X] Full Connect package tests pass.
+- [X] Add regression tests for any bug found during phases 1-5.
 
 *** Validation checklist
 
-- [ ] =go test ./connect -count=1=
-- [ ] Optional: run broader package test if touched imports or shared helpers
-  expand beyond =connect=.
+- [X] =go test ./connect -count=1=
+- [X] Optional broader package test was not required because phase 6 touched
+  only =connect= package lifecycle code and tests.
 
 *** Exit criteria
 
-- [ ] Lifecycle rules are discoverable from code and this plan.
-- [ ] State transitions own their side effects.
-- [ ] Tests cover each state boundary that affects writes, close behavior, or
+- [X] Lifecycle rules are discoverable from code and this plan.
+- [X] State transitions own their side effects.
+- [X] Tests cover each state boundary that affects writes, close behavior, or
   request execution.
 
 * Success Criteria

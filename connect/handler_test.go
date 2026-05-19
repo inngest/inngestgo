@@ -330,6 +330,7 @@ func TestConnectNonReconnectableCloseReasonStopsManager(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for Connect to return")
 	}
+	r.Equal(ConnectionStateClosed, h.State())
 
 	select {
 	case <-started:
@@ -1015,7 +1016,7 @@ func TestHandleConnectionGracefulShutdownPausesDrainsAndFlushes(t *testing.T) {
 		t.Fatal("timed out waiting for handleConnection")
 	}
 
-	r.True(preparedConn.isRetired())
+	r.Equal(connPhaseClosed, preparedConn.phase())
 
 	select {
 	case resp := <-flushSeen:
@@ -1220,7 +1221,7 @@ func TestHandleInvokeMessageRetiresConnectionAfterAckWriteFailure(t *testing.T) 
 	err = h.handleInvokeMessage(context.Background(), preparedConn, firstMsg)
 	r.Error(err)
 	r.Contains(err.Error(), "could not write message to websocket")
-	r.True(preparedConn.isRetired())
+	r.Equal(connPhaseRetired, preparedConn.phase())
 	r.False(invoker.called.Load())
 
 	secondMsg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
@@ -1246,7 +1247,7 @@ func TestConnectionRetireIsIdempotent(t *testing.T) {
 
 	r.True(conn.retire("test"))
 	r.False(conn.retire("test"))
-	r.True(conn.isRetired())
+	r.Equal(connPhaseRetired, conn.phase())
 }
 
 type blockingTestInvoker struct {
