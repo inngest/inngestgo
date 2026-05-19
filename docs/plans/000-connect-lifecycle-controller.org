@@ -754,46 +754,46 @@ websocket generation state.
 
 *** Implementation checklist
 
-- [ ] Add manager transition validation around =setState=.
-- [ ] Keep manager states coarse:
-  - [ ] =CONNECTING=
-  - [ ] =ACTIVE=
-  - [ ] =RECONNECTING=
-  - [ ] =CLOSING=
-  - [ ] =CLOSED=
-- [ ] Decide what to do with =PAUSED=:
-  - [ ] define exactly when it is entered; or
-  - [ ] remove it if it remains unused.
-- [ ] Make invalid manager transitions visible in logs.
-- [ ] Ensure reconnect overlap does not require changing manager state away
+- [X] Add manager transition validation around =setState=.
+- [X] Keep manager states coarse:
+  - [X] =CONNECTING=
+  - [X] =ACTIVE=
+  - [X] =RECONNECTING=
+  - [X] =CLOSING=
+  - [X] =CLOSED=
+- [X] Decide what to do with =PAUSED=:
+  - [X] retain it for source compatibility;
+  - [X] document that the manager lifecycle no longer enters it.
+- [X] Make invalid manager transitions visible in logs.
+- [X] Ensure reconnect overlap does not require changing manager state away
   from =ACTIVE= while old generation drains.
-- [ ] Add a serialized manager-owned flush path for lifecycle flush
+- [X] Add a serialized manager-owned flush path for lifecycle flush
   notifications:
-  - [ ] notification is non-blocking;
-  - [ ] repeated notifications are coalesced or serialized;
-  - [ ] flush uses current manager auth state;
-  - [ ] reconnect and close flushes remain safety points.
+  - [X] notification is non-blocking;
+  - [X] repeated notifications are coalesced or serialized;
+  - [X] flush uses current manager auth state;
+  - [X] reconnect and close flushes remain safety points.
 
 *** Test checklist
 
-- [ ] Initial connection moves =CONNECTING -> ACTIVE=.
-- [ ] Reconnectable failure moves =ACTIVE -> RECONNECTING -> ACTIVE=.
-- [ ] Non-reconnectable failure moves to =CLOSED=.
-- [ ] =Close= moves =ACTIVE/RECONNECTING -> CLOSING -> CLOSED=.
-- [ ] Double =Close= is idempotent.
-- [ ] Manager flush notification triggers one serialized API flush.
-- [ ] Repeated flush notifications do not start concurrent flushes.
-- [ ] Invalid transitions are rejected or logged clearly.
+- [X] Initial connection moves =CONNECTING -> ACTIVE=.
+- [X] Reconnectable failure moves =ACTIVE -> RECONNECTING -> ACTIVE=.
+- [X] Non-reconnectable failure moves to =CLOSED=.
+- [X] =Close= moves =ACTIVE/RECONNECTING -> CLOSING -> CLOSED=.
+- [X] Double =Close= is idempotent.
+- [X] Manager flush notification triggers one serialized API flush.
+- [X] Repeated flush notifications do not start concurrent flushes.
+- [X] Invalid transitions are rejected or logged clearly.
 
 *** Validation checklist
 
-- [ ] =go test ./connect -count=1=
-- [ ] Existing public =State()= behavior remains compatible.
+- [X] =go test ./connect -count=1=
+- [X] Existing public =State()= behavior remains compatible.
 
 *** Exit criteria
 
-- [ ] Manager state documents user-visible lifecycle only.
-- [ ] Websocket generation state owns write and transport lifecycle.
+- [X] Manager state documents user-visible lifecycle only.
+- [X] Websocket generation state owns write and transport lifecycle.
 
 ** Phase 5: Tighten request lifecycle boundaries
 
