@@ -844,30 +844,43 @@ Purpose: remove redundant lifecycle mechanisms and document the final contract.
 
 *** Implementation checklist
 
-- [ ] Remove obsolete direct retired checks after all writes use phase helpers.
-- [ ] Remove redundant close calls if lifecycle close helpers make them
+- [X] Remove obsolete direct retired checks after all writes use phase helpers.
+- [X] Remove redundant close calls if lifecycle close helpers make them
   unnecessary.
-- [ ] Keep fallback close safeguards where they are still useful.
-- [ ] Update code comments around gateway drain, unexpected close, and graceful
+- [X] Keep fallback close safeguards where they are still useful.
+- [X] Update code comments around gateway drain, unexpected close, and graceful
   shutdown.
-- [ ] Update this plan with decisions made during implementation.
+- [X] Update this plan with decisions made during implementation.
+
+Decision notes:
+
+- The old =isRetired()= shortcut was removed. Tests now assert concrete
+  generation phases so they stay aligned with the write policy table.
+- Explicit close calls in gateway drain and graceful shutdown remain because
+  they provide protocol-specific close reasons at the point the lifecycle moves
+  to =Closed=.
+- The deferred =closeNow("handle connection ended")= remains as an idempotent
+  fallback for unhandled exits that do not reach a specific drain, shutdown, or
+  read-error close path.
+- No new phase 6 behavior bug was found. The phase 5 canceled-ACK regression is
+  covered by =TestWriteRequestAckCanceledContextRetiresBeforeInvoke=.
 
 *** Test checklist
 
-- [ ] Full Connect package tests pass.
-- [ ] Add regression tests for any bug found during phases 1-5.
+- [X] Full Connect package tests pass.
+- [X] Add regression tests for any bug found during phases 1-5.
 
 *** Validation checklist
 
-- [ ] =go test ./connect -count=1=
-- [ ] Optional: run broader package test if touched imports or shared helpers
-  expand beyond =connect=.
+- [X] =go test ./connect -count=1=
+- [X] Optional broader package test was not required because phase 6 touched
+  only =connect= package lifecycle code and tests.
 
 *** Exit criteria
 
-- [ ] Lifecycle rules are discoverable from code and this plan.
-- [ ] State transitions own their side effects.
-- [ ] Tests cover each state boundary that affects writes, close behavior, or
+- [X] Lifecycle rules are discoverable from code and this plan.
+- [X] State transitions own their side effects.
+- [X] Tests cover each state boundary that affects writes, close behavior, or
   request execution.
 
 * Success Criteria
