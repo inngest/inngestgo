@@ -408,7 +408,10 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 		return newReconnectErr(fmt.Errorf("connection closed unexpectedly: %w", ctx.Err()))
 	}
 
-	// Perform graceful shutdown routine (parent context was cancelled)
+	// Graceful shutdown is local worker shutdown, not gateway-initiated
+	// replacement. Enter Closing to stop new request ACKs, notify the gateway
+	// with WORKER_PAUSE, and keep explicitly allowed writes for already-ACKed
+	// in-flight work until the worker pool drains.
 	if err := preparedConn.beginClose("worker context canceled"); err != nil {
 		l.Error("could not mark connection closing", "err", err)
 	}
@@ -433,6 +436,8 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 
 	// Wait until all in-progress requests are completed
 	h.workerPool.Wait()
+
+	preparedConn.retire("worker pool drained")
 
 	// Attempt to shut down connection if not already done
 	preparedConn.closeNormal(connectproto.WorkerDisconnectReason_WORKER_SHUTDOWN.String(), "reason", "worker shutdown")
