@@ -29,6 +29,8 @@ func TestHandleConnectionGatewayClosingDrainsUntilReplacementConnected(t *testin
 		defer close(serverDone)
 		defer func() { _ = conn.CloseNow() }()
 
+		// Simulate the gateway asking this generation to drain while keeping
+		// the old transport open for allowed in-flight replies.
 		r.NoError(wsproto.Write(context.Background(), conn, &connectproto.ConnectMessage{
 			Kind: connectproto.GatewayMessageType_GATEWAY_CLOSING,
 		}))
@@ -62,6 +64,8 @@ func TestHandleConnectionGatewayClosingDrainsUntilReplacementConnected(t *testin
 		},
 	}
 	h.startConnection = func(_ context.Context, _ connectionEstablishData, opts ...connectOpt) {
+		// Hold replacement completion so the test can observe the old
+		// generation in Draining before it is retired.
 		o := connectOpts{}
 		for _, opt := range opts {
 			opt(&o)
@@ -101,6 +105,8 @@ func TestHandleConnectionGatewayClosingDrainsUntilReplacementConnected(t *testin
 	r.False(preparedConn.canWriteRequestAck())
 	r.True(preparedConn.canWriteReply())
 
+	// Once the replacement reports connected, the old generation should retire
+	// and close through lifecycle helpers.
 	close(releaseReplacement)
 
 	select {
@@ -138,6 +144,8 @@ func TestHandleConnectionGatewayClosingRetiresAndClosesAfterReplacementTimeout(t
 		defer close(serverDone)
 		defer func() { _ = conn.CloseNow() }()
 
+		// The server keeps the socket readable so close completion is driven by
+		// the SDK replacement timeout, not by a peer-side close race.
 		r.NoError(wsproto.Write(context.Background(), conn, &connectproto.ConnectMessage{
 			Kind: connectproto.GatewayMessageType_GATEWAY_CLOSING,
 		}))
@@ -170,6 +178,8 @@ func TestHandleConnectionGatewayClosingRetiresAndClosesAfterReplacementTimeout(t
 		},
 	}
 	h.startConnection = func(context.Context, connectionEstablishData, ...connectOpt) {
+		// Start but never notify connection success; handleConnection should
+		// bound the drain with gatewayDrainReplacementTimeout.
 		close(replacementStarted)
 	}
 
@@ -261,6 +271,8 @@ func TestHandleConnectionGatewayClosingLateReplacementNotificationDoesNotBlock(t
 	h.startConnection = func(_ context.Context, _ connectionEstablishData, opts ...connectOpt) {
 		defer close(replacementFinished)
 
+		// Notify after handleConnection has already timed out. The buffered
+		// notification channel must prevent this goroutine from blocking.
 		o := connectOpts{}
 		for _, opt := range opts {
 			opt(&o)
@@ -301,6 +313,8 @@ func TestHandleConnectionGatewayClosingLateReplacementNotificationDoesNotBlock(t
 		t.Fatal("timed out waiting for replacement timeout")
 	}
 
+	// Releasing the delayed replacement after timeout verifies the notification
+	// send is still non-blocking.
 	close(releaseReplacement)
 
 	select {
@@ -391,6 +405,8 @@ func TestHandleInvokeMessageAttemptsReplyDuringDrainForAckedWork(t *testing.T) {
 		t.Fatal("server did not receive worker request ack")
 	}
 
+	// After ACK, the request remains owned by this generation. Draining should
+	// still permit the reply write before the generation is retired.
 	r.NoError(preparedConn.beginDrain("test"))
 	close(release)
 
@@ -488,6 +504,8 @@ func TestHandleInvokeMessageBuffersDrainingReplyWriteFailure(t *testing.T) {
 		t.Fatal("server did not receive worker request ack")
 	}
 
+	// Draining allows the reply attempt; forcing the transport closed proves a
+	// failed draining write buffers the response without retiring here.
 	r.NoError(preparedConn.beginDrain("test"))
 	_ = clientConn.CloseNow()
 	close(release)

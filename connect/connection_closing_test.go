@@ -58,6 +58,8 @@ func TestHandleConnectionGracefulShutdownEntersClosingBeforeRetireAndClose(t *te
 	}
 	h.workerPool.inProgress.Add(1)
 
+	// Keep one worker-pool item in progress so the test can observe Closing
+	// before worker-pool drain advances the generation to Retired and Closed.
 	preparedConn := &connection{
 		ws:                  clientConn,
 		connectionId:        "old-connection",
@@ -73,6 +75,9 @@ func TestHandleConnectionGracefulShutdownEntersClosingBeforeRetireAndClose(t *te
 
 	cancelHandle()
 
+	// The local shutdown path attempts WORKER_PAUSE while entering Closing.
+	// The log signal is deterministic even if the peer does not observe the
+	// frame before the read context unwinds.
 	waitForLogSignal(t, pauseLogSeen, "sending worker pause message")
 
 	r.Equal(connPhaseClosing, preparedConn.phase())
@@ -129,6 +134,8 @@ func TestHandleInvokeMessageSkipsAckDuringClosing(t *testing.T) {
 	r.NoError(preparedConn.markActive("test"))
 	r.NoError(preparedConn.beginClose("test"))
 
+	// Closing rejects new ownership claims, so queued pre-ACK work should skip
+	// without invoking the user function.
 	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		EnvId:          "env-id",
@@ -227,6 +234,8 @@ func TestHandleInvokeMessageAttemptsReplyDuringClosingForAckedWork(t *testing.T)
 		t.Fatal("server did not receive worker request ack")
 	}
 
+	// After ACK, the request remains owned during local shutdown. Closing
+	// should still allow the reply write while the worker pool drains.
 	r.NoError(preparedConn.beginClose("test"))
 	close(release)
 
@@ -324,6 +333,8 @@ func TestHandleInvokeMessageBuffersClosingReplyWriteFailure(t *testing.T) {
 		t.Fatal("server did not receive worker request ack")
 	}
 
+	// Closing allows the reply attempt; forcing the transport closed proves a
+	// failed closing write buffers the response without retiring here.
 	r.NoError(preparedConn.beginClose("test"))
 	_ = clientConn.CloseNow()
 	close(release)
