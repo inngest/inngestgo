@@ -17,7 +17,6 @@ func TestConnectionLifecycleNewHandshakingActive(t *testing.T) {
 	r.NoError(conn.transition(connPhaseHandshaking, "dialed"))
 	r.NoError(conn.markActive("ready"))
 	r.Equal(connPhaseActive, conn.phase())
-	r.False(conn.isRetired())
 }
 
 func TestConnectionLifecycleRetireDisablesWritesAndNotifiesFlush(t *testing.T) {
@@ -30,7 +29,6 @@ func TestConnectionLifecycleRetireDisablesWritesAndNotifiesFlush(t *testing.T) {
 
 	r.True(conn.retire("read failed"))
 	r.Equal(connPhaseRetired, conn.phase())
-	r.True(conn.isRetired())
 
 	select {
 	case <-flushNotify:
@@ -54,7 +52,6 @@ func TestConnectionLifecycleDrainAndCloseTransitions(t *testing.T) {
 	r.Equal(connPhaseRetired, conn.phase())
 	r.True(conn.closeNow("done"))
 	r.Equal(connPhaseClosed, conn.phase())
-	r.True(conn.isRetired())
 	r.False(conn.closeNow("again"))
 }
 
@@ -81,7 +78,6 @@ func TestConnectionLifecycleActiveToClosedAppliesRetireEffects(t *testing.T) {
 
 	r.True(conn.closeNow("transport closed"))
 	r.Equal(connPhaseClosed, conn.phase())
-	r.True(conn.isRetired())
 
 	select {
 	case <-flushNotify:

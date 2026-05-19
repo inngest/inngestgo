@@ -275,7 +275,7 @@ func TestHandleInvokeMessageBuffersReplyWriteFailureWithoutRetiringConnection(t 
 		t.Fatal("timed out waiting for invoke")
 	}
 
-	r.False(preparedConn.isRetired())
+	r.Equal(connPhaseActive, preparedConn.phase())
 
 	h.messageBuffer.lock.Lock()
 	defer h.messageBuffer.lock.Unlock()

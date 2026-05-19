@@ -47,7 +47,7 @@ func TestWriteRequestAckCanceledContextRetiresBeforeInvoke(t *testing.T) {
 	// writes from the same websocket.
 	r.Error(err)
 	r.Contains(err.Error(), "could not write message to websocket")
-	r.True(conn.isRetired())
+	r.Equal(connPhaseRetired, conn.phase())
 	r.Contains(logOutput.String(), "could not write message to websocket")
 }
 

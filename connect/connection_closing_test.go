@@ -98,7 +98,6 @@ func TestHandleConnectionGracefulShutdownEntersClosingBeforeRetireAndClose(t *te
 	}
 
 	r.Equal(connPhaseClosed, preparedConn.phase())
-	r.True(preparedConn.isRetired())
 
 	select {
 	case <-serverDone:
@@ -346,7 +345,7 @@ func TestHandleInvokeMessageBuffersClosingReplyWriteFailure(t *testing.T) {
 		t.Fatal("timed out waiting for invoke")
 	}
 
-	r.False(preparedConn.isRetired())
+	r.Equal(connPhaseClosing, preparedConn.phase())
 
 	h.messageBuffer.lock.Lock()
 	defer h.messageBuffer.lock.Unlock()
