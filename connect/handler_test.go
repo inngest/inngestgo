@@ -330,6 +330,7 @@ func TestConnectNonReconnectableCloseReasonStopsManager(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for Connect to return")
 	}
+	r.Equal(ConnectionStateClosed, h.State())
 
 	select {
 	case <-started:
