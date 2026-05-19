@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -89,6 +90,88 @@ func TestManagerStateReconnectableFailureReturnsActiveAfterReconnect(t *testing.
 	r.Eventually(func() bool {
 		return h.State() == ConnectionStateActive
 	}, time.Second, time.Millisecond)
+
+	cancelConnect()
+	r.NoError(h.Close())
+}
+
+func TestManagerStateInitialRetryStaysConnectingUntilEstablished(t *testing.T) {
+	r := require.New(t)
+
+	var logOutput bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logOutput, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+
+	events := make(chan string, 4)
+	releaseSecondConnect := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() {
+		close(releaseSecondConnect)
+	})
+
+	h := &connectHandler{
+		opts:                   Opts{IsDev: true},
+		logger:                 logger,
+		notifyConnectDoneChan:  make(chan connectReport),
+		notifyConnectedChan:    make(chan struct{}),
+		initiateConnectionChan: make(chan struct{}, 1),
+		notifyFlushChan:        make(chan struct{}, 1),
+		state:                  ConnectionStateConnecting,
+		messageBuffer:          newMessageBuffer(newWorkerApiClient("", nil), logger),
+		reconnectBackoff: func(int) time.Duration {
+			return 0
+		},
+	}
+	var startCalls atomic.Int32
+	h.startConnection = func(context.Context, connectionEstablishData, ...connectOpt) {
+		call := startCalls.Add(1)
+		events <- fmt.Sprintf("start-%d", call)
+
+		if call == 1 {
+			h.notifyConnectDoneChan <- connectReport{
+				reconnect: true,
+				err:       newReconnectErr(errors.New("startup read loop failed")),
+			}
+			return
+		}
+
+		<-releaseSecondConnect
+		h.notifyConnectedChan <- struct{}{}
+	}
+	h.workerCtx, h.cancelWorkerCtx = context.WithCancel(context.Background())
+	defer h.cancelWorkerCtx()
+
+	connectCtx, cancelConnect := context.WithCancel(context.Background())
+	defer cancelConnect()
+
+	connectErr := make(chan error, 1)
+	go func() {
+		_, err := h.Connect(connectCtx)
+		connectErr <- err
+	}()
+
+	r.Equal("start-1", <-events)
+	r.Equal("start-2", <-events)
+
+	// Before the first successful websocket, retrying is still startup.
+	// Public state should remain CONNECTING without logging an invalid
+	// CONNECTING -> RECONNECTING transition.
+	r.Equal(ConnectionStateConnecting, h.State())
+	r.NotContains(logOutput.String(), "invalid worker connection state transition")
+	r.NotContains(logOutput.String(), "to=RECONNECTING")
+
+	releaseOnce.Do(func() {
+		close(releaseSecondConnect)
+	})
+
+	select {
+	case err := <-connectErr:
+		r.NoError(err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for initial reconnect")
+	}
+	r.Equal(ConnectionStateActive, h.State())
 
 	cancelConnect()
 	r.NoError(h.Close())

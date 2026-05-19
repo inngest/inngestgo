@@ -354,7 +354,12 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 					}
 				}
 
-				h.setState(ConnectionStateReconnecting, "connection ended with reconnect", "err", msg.err, "attempt", attempts)
+				// Until the first successful websocket, retrying is still
+				// startup; RECONNECTING is reserved for restoring an
+				// established worker connection.
+				if !isInitialConnection {
+					h.setState(ConnectionStateReconnecting, "connection ended with reconnect", "err", msg.err, "attempt", attempts)
+				}
 
 				// Attempt to flush messages before reconnecting.
 				h.flushBufferedMessages("before reconnect")
