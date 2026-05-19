@@ -1,7 +1,7 @@
 #+TITLE: Connect Lifecycle Controller
 #+AUTHOR: Darwin D. Wu
 #+DATE: 2026-05-08
-#+STATUS: Active
+#+STATUS: Done
 #+STARTUP: showall
 
 * Overview
