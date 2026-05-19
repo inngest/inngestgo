@@ -610,57 +610,57 @@ Purpose: make write eligibility state-driven rather than scattered
 
 *** Implementation checklist
 
-- [ ] Add write permission helpers:
-  - [ ] =canWriteHeartbeat()=
-  - [ ] =canWriteRequestAck()=
-  - [ ] =canWriteReply()=
-  - [ ] =canWriteExtendLease()=
-  - [ ] optional generic =canWrite(kind connectproto.GatewayMessageType)=
-- [ ] Define write policy by phase:
-  - [ ] =New=: no writes;
-  - [ ] =Handshaking=: handshake writes only;
-  - [ ] =Active=: heartbeat, ACK, reply, extend lease, pause;
-  - [ ] =Draining=: already-ACKed replies only, attempted first and buffered
+- [X] Add write permission helpers:
+  - [X] =canWriteHeartbeat()=
+  - [X] =canWriteRequestAck()=
+  - [X] =canWriteReply()=
+  - [X] =canWriteExtendLease()=
+  - [X] optional generic =canWrite(kind connectproto.GatewayMessageType)=
+- [X] Define write policy by phase:
+  - [X] =New=: no writes;
+  - [X] =Handshaking=: handshake writes only;
+  - [X] =Active=: heartbeat, ACK, reply, extend lease, pause;
+  - [X] =Draining=: already-ACKed replies only, attempted first and buffered
     on failure; no heartbeat;
-  - [ ] =Closing=: pause and already-ACKed replies only;
-  - [ ] =Retired=: no protocol writes;
-  - [ ] =Closed=: no protocol writes.
-- [ ] Replace direct =preparedConn.isRetired()= checks in request ACK, reply,
+  - [X] =Closing=: pause and already-ACKed replies only;
+  - [X] =Retired=: no protocol writes;
+  - [X] =Closed=: no protocol writes.
+- [X] Replace direct =preparedConn.isRetired()= checks in request ACK, reply,
   heartbeat, and lease extension paths.
-- [ ] Return explicit no-write outcomes instead of attempting stale websocket
+- [X] Return explicit no-write outcomes instead of attempting stale websocket
   writes.
-- [ ] On hard ACK transport failure, transition the generation to =Retired=
+- [X] On hard ACK transport failure, transition the generation to =Retired=
   or =Closed= before returning the request error.
-- [ ] Keep websocket write failures after invocation as buffer-and-return-nil;
+- [X] Keep websocket write failures after invocation as buffer-and-return-nil;
   decide separately whether hard reply transport failures should retire the
   generation.
 
 *** Test checklist
 
-- [ ] Request ACK is not attempted outside allowed phases.
-- [ ] ACK write failure does not invoke the function.
-- [ ] ACK write failure retires the generation so later queued requests skip
+- [X] Request ACK is not attempted outside allowed phases.
+- [X] ACK write failure does not invoke the function.
+- [X] ACK write failure retires the generation so later queued requests skip
   before ACK.
-- [ ] Non-writable pre-ACK phases and ACK transport failures produce distinct
+- [X] Non-writable pre-ACK phases and ACK transport failures produce distinct
   log messages.
-- [ ] Reply write is not attempted after =Retired=.
-- [ ] Heartbeat write is not attempted after =Retired=.
-- [ ] Lease extension write is not attempted after =Retired=.
-- [ ] Websocket write failure after invocation buffers reply and returns no
+- [X] Reply write is not attempted after =Retired=.
+- [X] Heartbeat write is not attempted after =Retired=.
+- [X] Lease extension write is not attempted after =Retired=.
+- [X] Websocket write failure after invocation buffers reply and returns no
   request failure.
-- [ ] Reply write-failure retirement behavior is documented by test, whichever
+- [X] Reply write-failure retirement behavior is documented by test, whichever
   policy is chosen.
 
 *** Validation checklist
 
-- [ ] =go test ./connect -count=1=
-- [ ] Logs clearly distinguish "not writable due to phase" from websocket
+- [X] =go test ./connect -count=1=
+- [X] Logs clearly distinguish "not writable due to phase" from websocket
   transport write failure.
 
 *** Exit criteria
 
-- [ ] All protocol writes consult lifecycle state first.
-- [ ] No ACK, reply, heartbeat, or lease extension writes occur after
+- [X] All protocol writes consult lifecycle state first.
+- [X] No ACK, reply, heartbeat, or lease extension writes occur after
   =Retired=.
 
 ** Phase 3: Model gateway drain explicitly

@@ -133,3 +133,11 @@ func newLifecycleTestConnection(flushNotify chan struct{}) *connection {
 	conn.initLifecycle(slog.New(slog.DiscardHandler), flushNotify)
 	return conn
 }
+
+func activateTestConnection(t *testing.T, conn *connection) {
+	t.Helper()
+
+	conn.initLifecycle(slog.New(slog.DiscardHandler), nil)
+	require.NoError(t, conn.transition(connPhaseHandshaking, "test"))
+	require.NoError(t, conn.markActive("test"))
+}
