@@ -209,6 +209,107 @@ func TestHandleConnectionGatewayClosingRetiresAndClosesAfterReplacementTimeout(t
 	}
 }
 
+func TestHandleConnectionGatewayClosingLateReplacementNotificationDoesNotBlock(t *testing.T) {
+	r := require.New(t)
+
+	originalTimeout := gatewayDrainReplacementTimeout
+	gatewayDrainReplacementTimeout = 25 * time.Millisecond
+	t.Cleanup(func() {
+		gatewayDrainReplacementTimeout = originalTimeout
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
+			InsecureSkipVerify: true,
+		})
+		r.NoError(err)
+		defer func() { _ = conn.CloseNow() }()
+
+		r.NoError(wsproto.Write(context.Background(), conn, &connectproto.ConnectMessage{
+			Kind: connectproto.GatewayMessageType_GATEWAY_CLOSING,
+		}))
+
+		for {
+			var msg connectproto.ConnectMessage
+			if err := wsReadProto(req.Context(), conn, &msg); err != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	clientConn, _, err := websocket.Dial(ctx, wsURL, nil)
+	r.NoError(err)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	logger := slog.New(slog.DiscardHandler)
+	replacementStarted := make(chan struct{})
+	releaseReplacement := make(chan struct{})
+	replacementFinished := make(chan struct{})
+	h := &connectHandler{
+		logger:        logger,
+		messageBuffer: newMessageBuffer(newWorkerApiClient("", nil), logger),
+		workerPool: &workerPool{
+			inProgressLeases:     map[string]string{},
+			inProgressLeasesLock: sync.Mutex{},
+		},
+	}
+	h.startConnection = func(_ context.Context, _ connectionEstablishData, opts ...connectOpt) {
+		defer close(replacementFinished)
+
+		o := connectOpts{}
+		for _, opt := range opts {
+			opt(&o)
+		}
+
+		close(replacementStarted)
+		<-releaseReplacement
+
+		if o.notifyConnectedChan != nil {
+			o.notifyConnectedChan <- struct{}{}
+			close(o.notifyConnectedChan)
+		}
+	}
+
+	preparedConn := &connection{
+		ws:                clientConn,
+		gatewayGroupName:  "old-gateway",
+		connectionId:      "old-connection",
+		heartbeatInterval: time.Hour,
+	}
+	activateTestConnection(t, preparedConn)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- h.handleConnection(ctx, connectionEstablishData{}, preparedConn)
+	}()
+
+	select {
+	case <-replacementStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for replacement connection attempt")
+	}
+
+	select {
+	case err := <-done:
+		r.ErrorIs(err, errGatewayDraining)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for replacement timeout")
+	}
+
+	close(releaseReplacement)
+
+	select {
+	case <-replacementFinished:
+	case <-time.After(time.Second):
+		t.Fatal("late replacement notification blocked")
+	}
+}
+
 func TestHandleInvokeMessageAttemptsReplyDuringDrainForAckedWork(t *testing.T) {
 	r := require.New(t)
 

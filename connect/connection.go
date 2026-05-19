@@ -366,7 +366,7 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 			// a different gateway before retiring and closing the old transport
 			// so already-ACKed work has a bounded window to reply on the socket
 			// that still owns it.
-			notifyConnectedChan := make(chan struct{})
+			notifyConnectedChan := make(chan struct{}, 1)
 			go h.startConnectionFunc()(context.Background(), data, withNotifyConnectedChan(notifyConnectedChan), withExcludeGateways(preparedConn.gatewayGroupName))
 
 			select {
