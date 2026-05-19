@@ -15,6 +15,7 @@ import (
 	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestConnectionWritePolicyByPhase(t *testing.T) {
@@ -30,8 +31,8 @@ func TestConnectionWritePolicyByPhase(t *testing.T) {
 		{name: "new", phase: connPhaseNew},
 		{name: "handshaking", phase: connPhaseHandshaking},
 		{name: "active", phase: connPhaseActive, heartbeat: true, requestAck: true, reply: true, extendLease: true, pause: true},
-		{name: "draining", phase: connPhaseDraining, reply: true},
-		{name: "closing", phase: connPhaseClosing, reply: true, pause: true},
+		{name: "draining", phase: connPhaseDraining, reply: true, extendLease: true},
+		{name: "closing", phase: connPhaseClosing, reply: true, extendLease: true, pause: true},
 		{name: "retired", phase: connPhaseRetired},
 		{name: "closed", phase: connPhaseClosed},
 	}
@@ -427,6 +428,125 @@ func TestLeaseExtensionWriteIsSkippedWhenPhaseDisallowsExtendLease(t *testing.T)
 		r.NoError(err)
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for invoke")
+	}
+}
+
+func TestLeaseExtensionContinuesForOwnedWorkDuringDrainOrClose(t *testing.T) {
+	tests := []struct {
+		name       string
+		transition func(*connection) error
+	}{
+		{
+			name: "draining",
+			transition: func(conn *connection) error {
+				return conn.beginDrain("test")
+			},
+		},
+		{
+			name: "closing",
+			transition: func(conn *connection) error {
+				return conn.beginClose("test")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := require.New(t)
+
+			received := make(chan connectproto.ConnectMessage, 4)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
+					InsecureSkipVerify: true,
+				})
+				r.NoError(err)
+				defer func() { _ = conn.CloseNow() }()
+
+				for {
+					var msg connectproto.ConnectMessage
+					if err := wsReadProto(req.Context(), conn, &msg); err != nil {
+						return
+					}
+					received <- msg
+				}
+			}))
+			defer server.Close()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+			clientConn, _, err := websocket.Dial(ctx, wsURL, nil)
+			r.NoError(err)
+			defer func() { _ = clientConn.CloseNow() }()
+
+			release := make(chan struct{})
+			invoker := &blockingTestInvoker{
+				release: release,
+			}
+			logger := slog.New(slog.DiscardHandler)
+			h := &connectHandler{
+				logger: logger,
+				invokers: map[string]FunctionInvoker{
+					"test-app": invoker,
+				},
+				workerPool: &workerPool{
+					inProgressLeases:     map[string]string{},
+					inProgressLeasesLock: sync.Mutex{},
+				},
+			}
+			preparedConn := newLifecycleTestConnection(nil)
+			preparedConn.ws = clientConn
+			preparedConn.extendLeaseInterval = 10 * time.Millisecond
+			r.NoError(preparedConn.transition(connPhaseHandshaking, "test"))
+			r.NoError(preparedConn.markActive("test"))
+
+			msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+				RequestId:      "request-id",
+				AccountId:      "account-id",
+				EnvId:          "env-id",
+				AppId:          "app-id",
+				AppName:        "test-app",
+				FunctionSlug:   "test-fn",
+				RequestPayload: mustJSON(t, sdkrequest.Request{}),
+				LeaseId:        "lease-id",
+			})
+
+			done := make(chan error, 1)
+			go func() {
+				_, err := h.connectInvoke(ctx, preparedConn, msg)
+				done <- err
+			}()
+
+			select {
+			case msg := <-received:
+				r.Equal(connectproto.GatewayMessageType_WORKER_REQUEST_ACK, msg.Kind)
+			case <-time.After(time.Second):
+				t.Fatal("server did not receive worker request ack")
+			}
+
+			r.NoError(tt.transition(preparedConn))
+
+			select {
+			case msg := <-received:
+				r.Equal(connectproto.GatewayMessageType_WORKER_REQUEST_EXTEND_LEASE, msg.Kind)
+
+				var payload connectproto.WorkerRequestExtendLeaseData
+				r.NoError(proto.Unmarshal(msg.Payload, &payload))
+				r.Equal("request-id", payload.RequestId)
+				r.Equal("lease-id", payload.LeaseId)
+			case <-time.After(time.Second):
+				t.Fatal("server did not receive worker request lease extension")
+			}
+
+			close(release)
+			select {
+			case err := <-done:
+				r.NoError(err)
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for invoke")
+			}
+		})
 	}
 }
 

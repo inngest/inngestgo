@@ -22,11 +22,12 @@ const (
 	// the websocket.
 	connPhaseActive
 	// connPhaseDraining is gateway-initiated replacement. New request ACKs and
-	// heartbeats stop, but already-ACKed work may still try to reply before the
-	// generation is retired.
+	// heartbeats stop, but already-ACKed work keeps its lease and may still try
+	// to reply before the generation is retired.
 	connPhaseDraining
 	// connPhaseClosing is local worker shutdown. It permits the worker pause
-	// message and already-ACKed replies while the worker pool drains.
+	// message, already-ACKed lease extensions, and replies while the worker pool
+	// drains.
 	connPhaseClosing
 	// connPhaseRetired is the hard no-write boundary. Queued pre-ACK work skips
 	// and already-ACKed work buffers replies instead of using this websocket.

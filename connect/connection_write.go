@@ -45,13 +45,22 @@ func (c *connection) canWrite(kind connectproto.GatewayMessageType) bool {
 		}
 	case connPhaseDraining:
 		// Gateway drain means this generation is being replaced. It must not
-		// ACK new work, but an already-ACKed function can still finish and reply.
-		return kind == connectproto.GatewayMessageType_WORKER_REPLY
-	case connPhaseClosing:
-		// Local close tells the gateway to pause new work while allowing replies
-		// for requests already owned by this worker.
+		// ACK new work, but already-ACKed work is still owned here. Keep
+		// extending leases while that work finishes so it is not retried
+		// elsewhere before the original worker replies.
 		switch kind {
 		case connectproto.GatewayMessageType_WORKER_REPLY,
+			connectproto.GatewayMessageType_WORKER_REQUEST_EXTEND_LEASE:
+			return true
+		default:
+			return false
+		}
+	case connPhaseClosing:
+		// Local close tells the gateway to pause new work while allowing replies
+		// and lease extensions for requests already owned by this worker.
+		switch kind {
+		case connectproto.GatewayMessageType_WORKER_REPLY,
+			connectproto.GatewayMessageType_WORKER_REQUEST_EXTEND_LEASE,
 			connectproto.GatewayMessageType_WORKER_PAUSE:
 			return true
 		default:

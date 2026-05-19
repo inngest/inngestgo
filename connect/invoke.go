@@ -202,6 +202,8 @@ func (h *connectHandler) connectInvoke(ctx context.Context, preparedConn *connec
 				return
 			}
 			if !preparedConn.canWriteExtendLease() {
+				// ACKed work remains owned through Draining and Closing, so this
+				// only stops at the hard no-write boundary: Retired or Closed.
 				cancelExtendLeaseCtx()
 				return
 			}
