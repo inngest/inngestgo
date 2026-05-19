@@ -714,38 +714,38 @@ Purpose: make worker-initiated graceful shutdown distinct from gateway drain.
 
 *** Implementation checklist
 
-- [ ] Add =Closing= as a first-class websocket generation state.
-- [ ] Move graceful shutdown behavior through =beginClose=.
-- [ ] Send =WORKER_PAUSE= when entering =Closing=.
-- [ ] Stop new request ACKs in =Closing=.
-- [ ] Allow already-ACKed in-flight work to finish in =Closing=.
-- [ ] Attempt =WORKER_REPLY= for already-ACKed in-flight work while
+- [X] Add =Closing= as a first-class websocket generation state.
+- [X] Move graceful shutdown behavior through =beginClose=.
+- [X] Send =WORKER_PAUSE= when entering =Closing=.
+- [X] Stop new request ACKs in =Closing=.
+- [X] Allow already-ACKed in-flight work to finish in =Closing=.
+- [X] Attempt =WORKER_REPLY= for already-ACKed in-flight work while
   =Closing=.
-- [ ] Buffer reply if the closing websocket write fails.
-- [ ] Move from =Closing= to =Retired= after worker-pool completion.
-- [ ] Close the transport through lifecycle close helpers.
-- [ ] Add comments near graceful shutdown handling clarifying that =Closing= is
+- [X] Buffer reply if the closing websocket write fails.
+- [X] Move from =Closing= to =Retired= after worker-pool completion.
+- [X] Close the transport through lifecycle close helpers.
+- [X] Add comments near graceful shutdown handling clarifying that =Closing= is
   local worker shutdown, not gateway-initiated replacement.
 
 *** Test checklist
 
-- [ ] Graceful shutdown moves active generation to =Closing= before
+- [X] Graceful shutdown moves active generation to =Closing= before
   =Retired=.
-- [ ] Entering =Closing= sends =WORKER_PAUSE=.
-- [ ] Queued pre-ACK work does not start in =Closing=.
-- [ ] ACKed in-flight work can finish in =Closing=.
-- [ ] ACKed in-flight reply attempts websocket first and buffers on failure.
-- [ ] Generation moves to =Retired= and =Closed= after worker-pool completion.
+- [X] Entering =Closing= sends =WORKER_PAUSE=.
+- [X] Queued pre-ACK work does not start in =Closing=.
+- [X] ACKed in-flight work can finish in =Closing=.
+- [X] ACKed in-flight reply attempts websocket first and buffers on failure.
+- [X] Generation moves to =Retired= and =Closed= after worker-pool completion.
 
 *** Validation checklist
 
-- [ ] =go test ./connect -count=1=
-- [ ] Tests distinguish =Draining= and =Closing= behavior.
+- [X] =go test ./connect -count=1=
+- [X] Tests distinguish =Draining= and =Closing= behavior.
 
 *** Exit criteria
 
-- [ ] Gateway drain and graceful shutdown have separate phases and comments.
-- [ ] Shutdown side effects are correlated with entering =Closing=.
+- [X] Gateway drain and graceful shutdown have separate phases and comments.
+- [X] Shutdown side effects are correlated with entering =Closing=.
 
 ** Phase 4: Clarify manager transitions
 
