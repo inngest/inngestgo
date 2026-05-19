@@ -1,24 +1,7 @@
 package connect
 
 func (h *connectHandler) setState(state ConnectionState, reason string, attrs ...any) {
-	h.stateLock.Lock()
-	previous := h.state
-	if previous != state && !validConnectionStateTransition(previous, state) {
-		h.stateLock.Unlock()
-
-		// Manager state is user-visible, so invalid transitions are logged and
-		// ignored instead of silently reshaping what State() reports.
-		logAttrs := []any{
-			"from", previous,
-			"to", state,
-			"reason", reason,
-		}
-		logAttrs = append(logAttrs, attrs...)
-		h.logger.Warn("invalid worker connection state transition", logAttrs...)
-		return
-	}
-	h.state = state
-	h.stateLock.Unlock()
+	previous, valid := h.setStateLocked(state)
 
 	logAttrs := []any{
 		"from", previous,
@@ -26,7 +9,28 @@ func (h *connectHandler) setState(state ConnectionState, reason string, attrs ..
 		"reason", reason,
 	}
 	logAttrs = append(logAttrs, attrs...)
+
+	if !valid {
+		h.logger.Warn("invalid worker connection state transition", logAttrs...)
+		return
+	}
+
 	h.logger.Debug("worker connection state transition", logAttrs...)
+}
+
+func (h *connectHandler) setStateLocked(state ConnectionState) (ConnectionState, bool) {
+	h.stateLock.Lock()
+	defer h.stateLock.Unlock()
+
+	previous := h.state
+	if previous != state && !validConnectionStateTransition(previous, state) {
+		// Manager state is user-visible, so invalid transitions are logged and
+		// ignored instead of silently reshaping what State() reports.
+		return previous, false
+	}
+
+	h.state = state
+	return previous, true
 }
 
 // validConnectionStateTransition validates only the user-visible manager
