@@ -2,6 +2,7 @@ package connect
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/inngest/inngest/pkg/connect/wsproto"
@@ -14,6 +15,13 @@ func (h *connectHandler) writeRequestAck(ctx context.Context, preparedConn *conn
 	// do not invoke; the gateway/executor can retry or reroute the request.
 	if !preparedConn.canWriteRequestAck() {
 		return errConnectionRetired
+	}
+
+	if err := ctx.Err(); err != nil {
+		writeErr := fmt.Errorf("could not write message to websocket: %w", err)
+		preparedConn.retire("request ack write failed", "err", writeErr)
+		l.Error("error sending request ack", "error", writeErr, "phase", preparedConn.phase())
+		return publicerr.Wrap(writeErr, 400, "failed to ack worker request")
 	}
 
 	if err := wsproto.Write(ctx, preparedConn.ws, &connectproto.ConnectMessage{
