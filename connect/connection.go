@@ -455,6 +455,9 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 	return nil
 }
 
+// startConnectionFunc returns the connection starter used by paths that need
+// to create a replacement generation. Production uses h.connect directly; tests
+// can set h.startConnection to control replacement timing without a real dial.
 func (h *connectHandler) startConnectionFunc() func(context.Context, connectionEstablishData, ...connectOpt) {
 	if h.startConnection != nil {
 		return h.startConnection
