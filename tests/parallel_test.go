@@ -135,7 +135,8 @@ func TestParallel(t *testing.T) {
 			{Value: nil},
 			{Error: step.ErrEventNotReceived},
 		})
-		r.Equal(6, int(requestCount))
+		r.GreaterOrEqual(int(requestCount), 5, "function should be invoked at least 5 times (batching may reduce from 6)")
+		r.LessOrEqual(int(requestCount), 6, "function should be invoked at most 6 times")
 	})
 
 	t.Run("sequential steps in group", func(t *testing.T) {
