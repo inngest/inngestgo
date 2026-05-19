@@ -454,7 +454,7 @@ func TestLeaseExtensionContinuesForOwnedWorkDuringDrainOrClose(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			r := require.New(t)
 
-			received := make(chan connectproto.ConnectMessage, 4)
+			received := make(chan *connectproto.ConnectMessage, 4)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
 					InsecureSkipVerify: true,
@@ -467,7 +467,7 @@ func TestLeaseExtensionContinuesForOwnedWorkDuringDrainOrClose(t *testing.T) {
 					if err := wsReadProto(req.Context(), conn, &msg); err != nil {
 						return
 					}
-					received <- msg
+					received <- &msg
 				}
 			}))
 			defer server.Close()
