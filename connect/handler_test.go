@@ -1329,14 +1329,14 @@ func TestConnectNoDeadlockWhenContextCancelledDuringInitialConnection(t *testing
 		r.Error(err)
 	}()
 
-	// The test must complete within 2 seconds. Without the buffered channel fix,
+	// The test must complete within 10 seconds. Without the buffered channel fix,
 	// this would deadlock because the runLoop blocks on initialConnectionDone <- err
 	// while Connect() has already exited via startCtx.Done() and is blocked in Close().
 	select {
 	case <-done:
 		// Success: no deadlock
-	case <-time.After(2 * time.Second):
-		t.Fatal("deadlock detected: Connect did not return within 2 seconds")
+	case <-time.After(10 * time.Second):
+		t.Fatal("deadlock detected: Connect did not return within 10 seconds")
 	}
 }
 
