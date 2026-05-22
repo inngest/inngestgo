@@ -53,6 +53,60 @@ func TestConnectionWritePolicyByPhase(t *testing.T) {
 	}
 }
 
+func TestGatewayHeartbeatTimeoutUsesMissedHeartbeatTolerance(t *testing.T) {
+	r := require.New(t)
+	interval := 250 * time.Millisecond
+
+	r.Equal(3, defaultMissedGatewayHeartbeatTolerance)
+	r.Equal(4*interval, gatewayHeartbeatTimeout(interval, defaultMissedGatewayHeartbeatTolerance))
+	r.Equal(interval, gatewayHeartbeatTimeout(interval, 0))
+	r.Equal(6*interval, gatewayHeartbeatTimeout(interval, 5))
+}
+
+func TestMissedGatewayHeartbeatTolerance(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    *int
+		expected int
+	}{
+		{
+			name:     "default",
+			expected: defaultMissedGatewayHeartbeatTolerance,
+		},
+		{
+			name:     "zero",
+			value:    intPtr(0),
+			expected: 0,
+		},
+		{
+			name:     "custom",
+			value:    intPtr(5),
+			expected: 5,
+		},
+		{
+			name:     "negative uses default",
+			value:    intPtr(-1),
+			expected: defaultMissedGatewayHeartbeatTolerance,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &connectHandler{
+				opts: Opts{
+					MissedGatewayHeartbeatTolerance: tt.value,
+				},
+			}
+
+			require.Equal(t, tt.expected, h.missedGatewayHeartbeatTolerance())
+		})
+	}
+}
+
+func intPtr(i int) *int {
+	return &i
+}
+
 func TestHandleInvokeMessageSkipsAckWhenPhaseDisallowsAck(t *testing.T) {
 	r := require.New(t)
 	var logOutput bytes.Buffer
