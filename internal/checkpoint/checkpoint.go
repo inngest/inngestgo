@@ -95,20 +95,18 @@ type checkpointer struct {
 func (c *checkpointer) WithStep(ctx context.Context, step opcode.Step, cb Callback) {
 	c.lock.Lock()
 	c.buffer = append(c.buffer, step)
+	shouldCheckpoint := c.opts.Config.BatchSteps <= 0 || len(c.buffer) >= c.opts.Config.BatchSteps
 	c.lock.Unlock()
 
-	if len(c.buffer) >= c.opts.Config.BatchSteps {
+	if shouldCheckpoint {
 		// In this case, we've exceeded the total number of steps we can batch.
 		c.checkpoint(ctx, cb)
 		return
 	}
 
-	if c.opts.Config.BatchInterval > 0 && c.t.Load() == 0 {
-		// Store the current time in milliseconds atomically.  Note that if this is
-		// called simultaneously from two threads after c.t.Load() atomically returns
-		// zero, we can assume that this is happening within the same ~millisecond or so,
-		// and we don't want to pay the penalty of locks for this.
-		c.t.Store(time.Now().UnixMilli())
+	if c.opts.Config.BatchInterval > 0 && c.t.CompareAndSwap(0, time.Now().UnixMilli()) {
+		// Only one timer should be active for the current batch.  The timestamp is
+		// reset after a successful checkpoint.
 
 		// Start a goroutine to checkpoint in the background.
 		go func() {
