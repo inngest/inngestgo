@@ -234,21 +234,19 @@ func (r *requestCtxManager) Err() error {
 }
 
 func (r *requestCtxManager) AppendOp(ctx context.Context, op GeneratorOpcode) {
-	r.l.Lock()
-	defer r.l.Unlock()
-
-	if r.cancel == nil {
-		r.cancel = func() {} // normalization.
-	}
-
 	// Always add the current parallelism mode to the opcode we're appending.
 	op.SetParallelMode(ParallelMode(ctx))
 
+	r.l.Lock()
+	if r.cancel == nil {
+		r.cancel = func() {} // normalization.
+	}
 	if r.ops == nil {
 		r.ops = []GeneratorOpcode{op}
 	} else {
 		r.ops = append(r.ops, op)
 	}
+	r.l.Unlock()
 
 	// If we're planning multiple steps, append and continue on without any hijacking
 	// in every case.  Without this, we won't continue to plan the next set of parallel
@@ -293,6 +291,9 @@ func (r *requestCtxManager) AppendOp(ctx context.Context, op GeneratorOpcode) {
 
 		r.checkpointer.WithStep(ctx, op, func(done []opcode.Step, err error) {
 			if err == nil {
+				r.l.Lock()
+				defer r.l.Unlock()
+
 				// Remove each step that's checkpointed from our buffer.  The manager's buffer
 				// is used as the response data, and given these steps have already been checkpointed
 				// we no longer need to send them in the SDK response.
@@ -311,7 +312,10 @@ func (r *requestCtxManager) AppendOp(ctx context.Context, op GeneratorOpcode) {
 }
 
 func (r *requestCtxManager) Ops() []GeneratorOpcode {
-	return r.ops
+	r.l.RLock()
+	defer r.l.RUnlock()
+
+	return slices.Clone(r.ops)
 }
 
 func (r *requestCtxManager) CallContext() middleware.CallContext {
