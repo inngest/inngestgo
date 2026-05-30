@@ -104,10 +104,9 @@ func (c *checkpointer) WithStep(ctx context.Context, step opcode.Step, cb Callba
 		return
 	}
 
+	// `c.t == 0`` means no timer is active for this batch. CompareAndSwap
+	// atomically starts one.
 	if c.opts.Config.BatchInterval > 0 && c.t.CompareAndSwap(0, time.Now().UnixMilli()) {
-		// Only one timer should be active for the current batch.  The timestamp is
-		// reset after a successful checkpoint.
-
 		// Start a goroutine to checkpoint in the background.
 		go func() {
 			select {
