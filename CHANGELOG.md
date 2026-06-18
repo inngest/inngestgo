@@ -1,75 +1,54 @@
-# inngestgo
+## [v0.15.3] - 2026-06-18
 
-## 0.15.1
+### 🐛 Bug Fixes
 
-### Patch Changes
+- Update github.com/inngest/inngest to v1.19.3 (#238)
+## [v0.15.2] - 2026-06-17
 
-- ca9db1b: Add checkpointing to function syncs
+### 🚀 Features
 
-## 0.15.0
+- *(connect)* Configure heartbeat tolerance (#234)
 
-### Minor Changes
+### 🐛 Bug Fixes
 
-- a8c3db8: Add checkpointing
+- Add nil guard to Trigger.MarshalJSON to prevent panic (#212)
+- Ignore stale connect lease acks (#216)
+- *(connect)* Stale Connect websocket writes (#220)
+- *(connect)* Retire generation on ACK failure (#226)
+- *(connect)* Model drain and closing lifecycles (#231)
+- Mark event parse errors no-retry (#230)
+- *(connect)* Harden websocket lifecycle boundaries (#233)
+- Use range assertion for requestCount (#232)
+- Buffer initialConnectionDone and notifyConnectDoneChan to prevent deadlock (#221)
+- Assert we lock ops when checkpointing (#236)
 
-## 0.14.4
+### 💼 Other
 
-### Patch Changes
+- Improve SDK logging (#217)
+- Fix reporting synchronous durable endpoints runs (#219)
 
-- 2bc16f0: Protect connectHandler.state behind RWMutex
+### 🚜 Refactor
 
-## 0.14.3
+- *(connect)* Add websocket generation lifecycle (#228)
+- *(connect)* Gate writes by lifecycle phase (#229)
 
-### Patch Changes
+### ⚙️ Miscellaneous Tasks
 
-- a2747b8: - [SYS-370] Adding Worker Concurrency - Go SDK
+- *(release)* Adopt git-cliff release flow (#223)
+- *(middleware)* Export middleware package (#225)
+## [v0.14.1] - 2025-10-27
 
-## 0.14.2
+### 🚀 Features
 
-### Patch Changes
+- Step failed opcode (#183)
+## [v0.8.0] - 2025-03-06
 
-- e9c5f74: Fix serve URL overrides
+### 💼 Other
 
-## 0.14.1
+- Convert timeout duration types to strings for (#74)
+## [v0.5.0] - 2023-11-02
 
-### Patch Changes
+### 💼 Other
 
-- b9dbde9: Add support for the `StepFailed` opcode, which denotes a permanent, non-retriable failure.
-
-## 0.14.0
-
-### Minor Changes
-
-- 097ebf2: Add support for steps in HTTP endpoints
-
-## 0.13.1
-
-### Patch Changes
-
-- f122af6: Add parallel mode option. Fix parallel step reporting when not targeted
-- 6c3b145: Fix SDK failing to reconnect when gateways are rotated
-
-## 0.13.0
-
-### Minor Changes
-
-- f54d7a8: Add step.WaitForSignal
-- 4869295: Rename function options from Fn${Option} to Config${Option}
-- f54d7a8: Add step.WaitForSignal
-
-### Patch Changes
-
-- 36a3186: Add support for cancel mode in function singletons
-
-## 0.12.0
-
-### Minor Changes
-
-- 4cf0281: Add support for function singletons
-- 9d45eaf: Connect: Reliability improvements
-- 7aec433: Update function configuration types to always use inngestgo.Fn imports
-
-### Patch Changes
-
-- 9373b31: Clean up request leases properly
-- c68c629: Change LoggerFromContext to not return an error
+- Add batch config for function opts (#10)
+## [v0.1.1] - 2021-05-11
