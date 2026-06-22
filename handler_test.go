@@ -922,8 +922,7 @@ func TestInBandSync(t *testing.T) {
 	)
 	r.NoError(err)
 	h := newHandler(c, handlerOpts{
-		AllowInBandSync: toPtr(true),
-		Env:             toPtr("my-env"),
+		Env: toPtr("my-env"),
 	})
 	h.Register(fn)
 	server := httptest.NewServer(h)
@@ -934,8 +933,7 @@ func TestInBandSync(t *testing.T) {
 	})
 
 	t.Run("success", func(t *testing.T) {
-		// SDK responds with sync data when receiving a valid in-band sync
-		// request
+		// SDK responds with sync data when receiving a signed sync request.
 
 		r := require.New(t)
 		ctx := context.Background()
@@ -948,7 +946,6 @@ func TestInBandSync(t *testing.T) {
 		)
 		r.NoError(err)
 		req.Header.Set("x-inngest-signature", sig)
-		req.Header.Set("x-inngest-sync-kind", "in_band")
 		resp, err := http.DefaultClient.Do(req)
 		r.NoError(err)
 		r.Equal(http.StatusOK, resp.StatusCode)
@@ -1027,7 +1024,6 @@ func TestInBandSync(t *testing.T) {
 		)
 		r.NoError(err)
 		req.Header.Set("x-inngest-signature", sig)
-		req.Header.Set("x-inngest-sync-kind", "in_band")
 		resp, err := http.DefaultClient.Do(req)
 		r.NoError(err)
 		r.Equal(http.StatusUnauthorized, resp.StatusCode)
@@ -1043,42 +1039,15 @@ func TestInBandSync(t *testing.T) {
 		}, respBody)
 	})
 
-	t.Run("missing signature", func(t *testing.T) {
-		// SDK responds with an error when receiving an in-band sync request
-		// with a missing signature
+	t.Run("unsigned request", func(t *testing.T) {
+		// SDK attempts an out-of-band sync when the request is unsigned.
 
 		r := require.New(t)
-
-		req, err := http.NewRequest(
-			http.MethodPut,
-			server.URL,
-			bytes.NewReader(reqBodyByt),
-		)
-		r.NoError(err)
-		req.Header.Set("x-inngest-sync-kind", "in_band")
-		resp, err := http.DefaultClient.Do(req)
-		r.NoError(err)
-		r.Equal(http.StatusUnauthorized, resp.StatusCode)
-		r.Equal(resp.Header.Get("x-inngest-sync-kind"), "")
-
-		var respBody map[string]any
-		err = json.NewDecoder(resp.Body).Decode(&respBody)
-		r.NoError(err)
-
-		r.Equal(map[string]any{
-			"code":    syscode.CodeHTTPMissingHeader,
-			"message": "missing X-Inngest-Signature header",
-		}, respBody)
-	})
-
-	t.Run("missing sync kind header", func(t *testing.T) {
-		// SDK attempts an out-of-band sync when the sync kind header is missing
-
-		r := require.New(t)
-		ctx := context.Background()
 
 		// Create a simple Go HTTP mockCloud that responds with hello world
+		var called int32
 		mockCloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&called, 1)
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"ok":true,"modified":true}`))
 		}))
@@ -1101,18 +1070,17 @@ func TestInBandSync(t *testing.T) {
 		server := httptest.NewServer(h)
 		defer server.Close()
 
-		sig, _ := Sign(ctx, time.Now(), []byte(testKey), reqBodyByt)
 		req, err := http.NewRequest(
 			http.MethodPut,
 			server.URL,
 			bytes.NewReader(reqBodyByt),
 		)
 		r.NoError(err)
-		req.Header.Set("x-inngest-signature", sig)
 		resp, err := http.DefaultClient.Do(req)
 		r.NoError(err)
 		r.Equal(http.StatusOK, resp.StatusCode)
 		r.Equal("out_of_band", resp.Header.Get("x-inngest-sync-kind"))
+		r.EqualValues(1, atomic.LoadInt32(&called))
 
 		respByt, err := io.ReadAll(resp.Body)
 		r.NoError(err)
@@ -1134,7 +1102,6 @@ func TestInBandSync(t *testing.T) {
 		)
 		r.NoError(err)
 		req.Header.Set("x-inngest-signature", sig)
-		req.Header.Set("x-inngest-sync-kind", "in_band")
 		resp, err := http.DefaultClient.Do(req)
 		r.NoError(err)
 		r.Equal(http.StatusOK, resp.StatusCode)

@@ -108,10 +108,6 @@ type ClientOpts struct {
 	// differs from true streaming in that we don't support server-sent events.
 	UseStreaming bool
 
-	// AllowInBandSync allows in-band syncs to occur. If nil, in-band syncs are
-	// disallowed.
-	AllowInBandSync *bool
-
 	// Dev is whether to use the Dev Server.
 	Dev *bool
 
@@ -171,7 +167,6 @@ func clientOptsToHandlerOpts(opts ClientOpts) handlerOpts {
 		MaxBodySize:        opts.MaxBodySize,
 		URL:                opts.URL,
 		UseStreaming:       opts.UseStreaming,
-		AllowInBandSync:    opts.AllowInBandSync,
 		Dev:                opts.Dev,
 	}
 }

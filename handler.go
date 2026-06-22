@@ -13,7 +13,6 @@ import (
 	"os"
 	"reflect"
 	"runtime/debug"
-	"strings"
 	"sync"
 	"time"
 
@@ -50,10 +49,6 @@ var (
 		TrustProbe: types.TrustProbeV1,
 		Connect:    types.ConnectV1,
 	}
-)
-
-const (
-	envKeyAllowInBandSync = "INNGEST_ALLOW_IN_BAND_SYNC"
 )
 
 type handlerOpts struct {
@@ -110,10 +105,6 @@ type handlerOpts struct {
 	// UseStreaming enables streaming - continued writes to the HTTP writer.  This
 	// differs from true streaming in that we don't support server-sent events.
 	UseStreaming bool
-
-	// AllowInBandSync allows in-band syncs to occur. If nil, in-band syncs are
-	// disallowed.
-	AllowInBandSync *bool
 
 	Dev *bool
 }
@@ -223,19 +214,6 @@ func (h handlerOpts) GetRegisterURL() string {
 		return "https://www.inngest.com/fn/register"
 	}
 	return *h.RegisterURL
-}
-
-func (h handlerOpts) IsInBandSyncAllowed() bool {
-	if h.AllowInBandSync != nil {
-		return *h.AllowInBandSync
-	}
-
-	// TODO: Default to true once in-band syncing is stable
-	if isTrue(os.Getenv(envKeyAllowInBandSync)) {
-		return true
-	}
-
-	return false
 }
 
 func (h handlerOpts) isDev() bool {
@@ -415,7 +393,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 	var syncKind string
 	var err error
-	if r.Header.Get(HeaderKeySyncKind) == SyncKindInBand && h.IsInBandSyncAllowed() {
+	// Signed registration requests carry the in-band sync payload. Validate the
+	// signature inside inBandSync after reading the body.
+	if r.Header.Get(HeaderKeySignature) != "" {
 		syncKind = SyncKindInBand
 		err = h.inBandSync(w, r)
 	} else {
@@ -466,16 +446,14 @@ func (h *handler) inBandSync(
 		_ = r.Body.Close()
 	}()
 
-	var sig string
-	if !h.isDev() {
-		if sig = r.Header.Get(HeaderKeySignature); sig == "" {
-			return publicerr.Error{
-				Err: syscode.Error{
-					Code:    syscode.CodeHTTPMissingHeader,
-					Message: fmt.Sprintf("missing %s header", HeaderKeySignature),
-				},
-				Status: 401,
-			}
+	sig := r.Header.Get(HeaderKeySignature)
+	if sig == "" {
+		return publicerr.Error{
+			Err: syscode.Error{
+				Code:    syscode.CodeHTTPMissingHeader,
+				Message: fmt.Sprintf("missing %s header", HeaderKeySignature),
+			},
+			Status: 401,
 		}
 	}
 
@@ -497,7 +475,7 @@ func (h *handler) inBandSync(
 		h.GetSigningKey(),
 		h.GetSigningKeyFallback(),
 		reqByt,
-		h.isDev(),
+		false,
 	)
 	if err != nil {
 		return publicerr.Error{
@@ -1497,12 +1475,4 @@ func updateInput(
 	}
 
 	return nil
-}
-
-func isTrue(val string) bool {
-	val = strings.ToLower(val)
-	if val == "true" || val == "1" {
-		return true
-	}
-	return false
 }
