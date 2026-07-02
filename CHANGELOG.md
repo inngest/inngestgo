@@ -1,8 +1,17 @@
+## [v0.15.4] - 2026-07-02
+
+### ⚙️ Miscellaneous Tasks
+
+- Change 0-major semver logic (#239)
 ## [v0.15.3] - 2026-06-18
 
 ### 🐛 Bug Fixes
 
 - Update github.com/inngest/inngest to v1.19.3 (#238)
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* V0.15.3 (#224)
 ## [v0.15.2] - 2026-06-17
 
 ### 🚀 Features
