@@ -108,6 +108,11 @@ type ClientOpts struct {
 	// differs from true streaming in that we don't support server-sent events.
 	UseStreaming bool
 
+	// EnableUnauthedSync allows unsigned out-of-band sync requests in cloud mode.
+	// If nil, this defaults to INNGEST_ENABLE_UNAUTHED_SYNC. Dev mode always
+	// allows unsigned sync requests because the Dev Server does not sign them.
+	EnableUnauthedSync *bool
+
 	// Dev is whether to use the Dev Server.
 	Dev *bool
 
@@ -167,6 +172,7 @@ func clientOptsToHandlerOpts(opts ClientOpts) handlerOpts {
 		MaxBodySize:        opts.MaxBodySize,
 		URL:                opts.URL,
 		UseStreaming:       opts.UseStreaming,
+		EnableUnauthedSync: opts.EnableUnauthedSync,
 		Dev:                opts.Dev,
 	}
 }
@@ -227,6 +233,10 @@ type ServeOpts struct {
 	// It's used to specify the path were the functions are hosted on sync.
 	// e.g. /api/inngest
 	Path *string
+
+	// EnableUnauthedSync allows unsigned out-of-band sync requests in cloud mode.
+	// If nil, this defaults to the client option or INNGEST_ENABLE_UNAUTHED_SYNC.
+	EnableUnauthedSync *bool
 }
 
 func (a apiClient) Serve() http.Handler {
@@ -236,6 +246,10 @@ func (a apiClient) Serve() http.Handler {
 func (a apiClient) ServeWithOpts(opts ServeOpts) http.Handler {
 	a.h.ServeOrigin = opts.Origin
 	a.h.ServePath = opts.Path
+	a.h.EnableUnauthedSync = a.ClientOpts.EnableUnauthedSync
+	if opts.EnableUnauthedSync != nil {
+		a.h.EnableUnauthedSync = opts.EnableUnauthedSync
+	}
 	return a.h
 }
 

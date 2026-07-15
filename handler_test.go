@@ -1143,12 +1143,103 @@ func TestInBandSync(t *testing.T) {
 		assertNoAuthDetails(t, resp, respBody)
 	})
 
-	t.Run("unsigned request", func(t *testing.T) {
-		// SDK attempts an out-of-band sync when the request is unsigned.
+	t.Run("unsigned request denied by default", func(t *testing.T) {
+		// SDK rejects unsigned out-of-band syncs in cloud mode by default.
 
 		r := require.New(t)
 
-		// Create a simple Go HTTP mockCloud that responds with hello world
+		var called int32
+		mockCloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&called, 1)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true,"modified":true}`))
+		}))
+		defer mockCloud.Close()
+
+		h := newHandler(c, handlerOpts{
+			Env:         toPtr("my-env"),
+			RegisterURL: &mockCloud.URL,
+		})
+		h.Register(fn)
+		server := httptest.NewServer(h)
+		defer server.Close()
+
+		req, err := http.NewRequest(
+			http.MethodPut,
+			server.URL,
+			bytes.NewReader(reqBodyByt),
+		)
+		r.NoError(err)
+		resp, err := http.DefaultClient.Do(req)
+		r.NoError(err)
+		r.Equal(http.StatusUnauthorized, resp.StatusCode)
+		r.Equal("", resp.Header.Get("x-inngest-sync-kind"))
+		r.EqualValues(0, atomic.LoadInt32(&called))
+
+		var respBody map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&respBody)
+		r.NoError(err)
+		r.Equal(map[string]any{
+			"message": "Unauthorized",
+		}, respBody)
+		assertNoAuthDetails(t, resp, respBody)
+	})
+
+	t.Run("unsigned request with option", func(t *testing.T) {
+		// SDK attempts an out-of-band sync when unsigned syncs are enabled.
+
+		r := require.New(t)
+
+		var called int32
+		mockCloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&called, 1)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true,"modified":true}`))
+		}))
+		defer mockCloud.Close()
+
+		client, err := NewClient(ClientOpts{
+			AppID:              "test-in-band-sync-opt-in",
+			EnableUnauthedSync: toPtr(true),
+			Env:                toPtr("my-env"),
+			RegisterURL:        &mockCloud.URL,
+		})
+		r.NoError(err)
+		_, err = CreateFunction(
+			client,
+			FunctionOpts{ID: "my-fn"},
+			EventTrigger("my-event", nil),
+			func(ctx context.Context, input Input[any]) (any, error) {
+				return nil, nil
+			},
+		)
+		r.NoError(err)
+		server := httptest.NewServer(client.Serve())
+		defer server.Close()
+
+		req, err := http.NewRequest(
+			http.MethodPut,
+			server.URL,
+			bytes.NewReader(reqBodyByt),
+		)
+		r.NoError(err)
+		resp, err := http.DefaultClient.Do(req)
+		r.NoError(err)
+		r.Equal(http.StatusOK, resp.StatusCode)
+		r.Equal("out_of_band", resp.Header.Get("x-inngest-sync-kind"))
+		r.EqualValues(1, atomic.LoadInt32(&called))
+
+		respByt, err := io.ReadAll(resp.Body)
+		r.NoError(err)
+		r.Equal("", string(respByt))
+	})
+
+	t.Run("unsigned request with env opt-in", func(t *testing.T) {
+		// SDK attempts an out-of-band sync when the environment opts in.
+
+		t.Setenv("INNGEST_ENABLE_UNAUTHED_SYNC", "true")
+		r := require.New(t)
+
 		var called int32
 		mockCloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			atomic.AddInt32(&called, 1)
@@ -1185,10 +1276,6 @@ func TestInBandSync(t *testing.T) {
 		r.Equal(http.StatusOK, resp.StatusCode)
 		r.Equal("out_of_band", resp.Header.Get("x-inngest-sync-kind"))
 		r.EqualValues(1, atomic.LoadInt32(&called))
-
-		respByt, err := io.ReadAll(resp.Body)
-		r.NoError(err)
-		r.Equal("", string(respByt))
 	})
 
 	t.Run("override URL with env vars", func(t *testing.T) {
