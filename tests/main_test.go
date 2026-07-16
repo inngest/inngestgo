@@ -47,7 +47,7 @@ func startDevServer() (func() error, error) {
 	cmd := exec.Command(
 		"bash",
 		"-c",
-		"npx --yes inngest-cli@latest dev --no-discovery --no-poll",
+		"npx --ignore-scripts=false --yes inngest-cli@latest dev --no-discovery --no-poll",
 	)
 
 	// Run in a new process group so we can kill the process and its children
