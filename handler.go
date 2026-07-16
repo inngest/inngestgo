@@ -13,6 +13,7 @@ import (
 	"os"
 	"reflect"
 	"runtime/debug"
+	"strconv"
 	"sync"
 	"time"
 
@@ -105,6 +106,11 @@ type handlerOpts struct {
 	// UseStreaming enables streaming - continued writes to the HTTP writer.  This
 	// differs from true streaming in that we don't support server-sent events.
 	UseStreaming bool
+
+	// EnableUnauthedSync allows unsigned sync requests in cloud mode.  Dev mode
+	// always allows unsigned sync requests because the Dev Server does not sign
+	// them.
+	EnableUnauthedSync *bool
 
 	Dev *bool
 }
@@ -222,6 +228,17 @@ func (h handlerOpts) isDev() bool {
 	}
 
 	return env.IsDev()
+}
+
+func (h handlerOpts) isUnauthedSyncEnabled() bool {
+	if h.isDev() {
+		return true
+	}
+	if h.EnableUnauthedSync != nil {
+		return *h.EnableUnauthedSync
+	}
+	enabled, _ := strconv.ParseBool(os.Getenv("INNGEST_ENABLE_UNAUTHED_SYNC"))
+	return enabled
 }
 
 // newHandler returns a new Handler for serving Inngest functions.
@@ -434,7 +451,11 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) error {
 		err = h.inBandSync(w, r)
 	} else {
 		syncKind = SyncKindOutOfBand
-		err = h.outOfBandSync(w, r)
+		if !h.isUnauthedSyncEnabled() {
+			err = errUnauthorized
+		} else {
+			err = h.outOfBandSync(w, r)
+		}
 	}
 
 	if err != nil {

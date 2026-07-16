@@ -19,6 +19,7 @@ func Test_INNGEST_BASE_URL(t *testing.T) {
 		t.Run(c, func(t *testing.T) {
 			if c == "cloud" {
 				t.Setenv("INNGEST_SIGNING_KEY", "deadbeef")
+				t.Setenv("INNGEST_ENABLE_UNAUTHED_SYNC", "true")
 			} else {
 				t.Setenv("INNGEST_DEV", "1")
 			}
