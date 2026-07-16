@@ -1199,10 +1199,9 @@ func TestInBandSync(t *testing.T) {
 		defer mockCloud.Close()
 
 		client, err := NewClient(ClientOpts{
-			AppID:              "test-in-band-sync-opt-in",
-			EnableUnauthedSync: toPtr(true),
-			Env:                toPtr("my-env"),
-			RegisterURL:        &mockCloud.URL,
+			AppID:       "test-in-band-sync-opt-in",
+			Env:         toPtr("my-env"),
+			RegisterURL: &mockCloud.URL,
 		})
 		r.NoError(err)
 		_, err = CreateFunction(
@@ -1214,7 +1213,9 @@ func TestInBandSync(t *testing.T) {
 			},
 		)
 		r.NoError(err)
-		server := httptest.NewServer(client.Serve())
+		server := httptest.NewServer(client.ServeWithOpts(ServeOpts{
+			EnableUnauthedSync: toPtr(true),
+		}))
 		defer server.Close()
 
 		req, err := http.NewRequest(
