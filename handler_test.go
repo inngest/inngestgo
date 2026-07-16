@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -17,7 +18,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/gowebpki/jcs"
 	"github.com/inngest/inngest/pkg/enums"
-	"github.com/inngest/inngest/pkg/syscode"
 	ifn "github.com/inngest/inngestgo/internal/fn"
 	"github.com/inngest/inngestgo/internal/logger"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
@@ -92,6 +92,31 @@ func TestInvokeRequestIDsAccessibleInInput(t *testing.T) {
 	r.Equal(http.StatusOK, rr.Code)
 	r.Equal(requestID, gotCtx.RequestID)
 	r.Equal(jobID, gotCtx.JobID)
+}
+
+func TestUnsupportedMethodResponse(t *testing.T) {
+	setEnvVars(t)
+
+	r := require.New(t)
+	c, err := NewClient(ClientOpts{
+		AppID: "unsupported-method",
+		Dev:   BoolPtr(false),
+	})
+	r.NoError(err)
+
+	server := httptest.NewServer(c.Serve())
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPatch, server.URL, nil)
+	r.NoError(err)
+	resp, err := http.DefaultClient.Do(req)
+	r.NoError(err)
+	r.Equal(http.StatusMethodNotAllowed, resp.StatusCode)
+	assertOnlySDKHandledInngestHeader(t, resp)
+
+	body, err := io.ReadAll(resp.Body)
+	r.NoError(err)
+	r.Empty(body)
 }
 
 type EventA = GenericEvent[EventAData]
@@ -648,7 +673,7 @@ func TestInspection(t *testing.T) {
 		r := require.New(t)
 		c, err := NewClient(ClientOpts{
 			AppID: "inspection",
-			Dev:   BoolPtr(false),
+			Dev:   BoolPtr(true),
 		})
 		r.NoError(err)
 		_, err = CreateFunction(
@@ -687,7 +712,7 @@ func TestInspection(t *testing.T) {
 				"has_event_key":            true,
 				"has_signing_key":          true,
 				"has_signing_key_fallback": true,
-				"mode":                     "cloud",
+				"mode":                     "dev",
 				"schema_version":           "2024-05-24",
 			}, respBody)
 		})
@@ -716,7 +741,7 @@ func TestInspection(t *testing.T) {
 			signingKeyFallbackHash, err := hashedSigningKey([]byte(testKeyFallback))
 			r.NoError(err)
 			r.Equal(map[string]any{
-				"api_origin":               "https://api.inngest.com",
+				"api_origin":               "http://127.0.0.1:8288",
 				"app_id":                   "inspection",
 				"authentication_succeeded": true,
 				"capabilities": map[string]any{
@@ -725,14 +750,14 @@ func TestInspection(t *testing.T) {
 					"connect":      "v1",
 				},
 				"env":                       nil,
-				"event_api_origin":          "https://inn.gs",
+				"event_api_origin":          "http://127.0.0.1:8288",
 				"event_key_hash":            "6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090",
 				"framework":                 "",
 				"function_count":            float64(1),
 				"has_event_key":             true,
 				"has_signing_key":           true,
 				"has_signing_key_fallback":  true,
-				"mode":                      "cloud",
+				"mode":                      "dev",
 				"schema_version":            "2024-05-24",
 				"sdk_language":              "go",
 				"sdk_version":               SDKVersion,
@@ -744,8 +769,8 @@ func TestInspection(t *testing.T) {
 		})
 
 		t.Run("invalid signature", func(t *testing.T) {
-			// When the request has an invalid signature, respond with the insecure
-			// inspection body
+			// Dev mode skips signature validation, so any signature returns the
+			// authenticated inspection body.
 
 			r := require.New(t)
 
@@ -763,15 +788,11 @@ func TestInspection(t *testing.T) {
 			err = json.NewDecoder(resp.Body).Decode(&respBody)
 			r.NoError(err)
 
-			r.Equal(map[string]any{
-				"authentication_succeeded": false,
-				"function_count":           float64(1),
-				"has_event_key":            true,
-				"has_signing_key":          true,
-				"has_signing_key_fallback": true,
-				"mode":                     "cloud",
-				"schema_version":           "2024-05-24",
-			}, respBody)
+			r.Equal(true, respBody["authentication_succeeded"])
+			r.Equal("http://127.0.0.1:8288", respBody["api_origin"])
+			r.Equal("http://127.0.0.1:8288", respBody["event_api_origin"])
+			r.Equal("dev", respBody["mode"])
+			r.Contains(respBody, "signing_key_hash")
 		})
 	})
 
@@ -795,8 +816,8 @@ func TestInspection(t *testing.T) {
 		defer server.Close()
 
 		t.Run("no signature", func(t *testing.T) {
-			// When the request has no signature, respond with the insecure
-			// inspection body
+			// When a cloud request has no signature, respond with a minimal
+			// unauthorized body.
 
 			r := require.New(t)
 
@@ -804,22 +825,17 @@ func TestInspection(t *testing.T) {
 			req, err := http.NewRequest(http.MethodGet, server.URL, bytes.NewReader(reqBody))
 			r.NoError(err)
 			resp, err := http.DefaultClient.Do(req)
-			r.Equal(http.StatusOK, resp.StatusCode)
 			r.NoError(err)
+			r.Equal(http.StatusUnauthorized, resp.StatusCode)
 
 			var respBody map[string]any
 			err = json.NewDecoder(resp.Body).Decode(&respBody)
 			r.NoError(err)
 
 			r.Equal(map[string]any{
-				"authentication_succeeded": nil,
-				"function_count":           float64(1),
-				"has_event_key":            true,
-				"has_signing_key":          true,
-				"has_signing_key_fallback": true,
-				"mode":                     "cloud",
-				"schema_version":           "2024-05-24",
+				"message": "Unauthorized",
 			}, respBody)
+			assertNoAuthDetails(t, resp, respBody)
 		})
 
 		t.Run("valid signature", func(t *testing.T) {
@@ -874,8 +890,8 @@ func TestInspection(t *testing.T) {
 		})
 
 		t.Run("invalid signature", func(t *testing.T) {
-			// When the request has an invalid signature, respond with the insecure
-			// inspection body
+			// When a cloud request has an invalid signature, respond with a
+			// minimal unauthorized body.
 
 			r := require.New(t)
 
@@ -886,24 +902,112 @@ func TestInspection(t *testing.T) {
 			r.NoError(err)
 			req.Header.Set("X-Inngest-Signature", sig)
 			resp, err := http.DefaultClient.Do(req)
-			r.Equal(http.StatusOK, resp.StatusCode)
 			r.NoError(err)
+			r.Equal(http.StatusUnauthorized, resp.StatusCode)
 
 			var respBody map[string]any
 			err = json.NewDecoder(resp.Body).Decode(&respBody)
 			r.NoError(err)
 
 			r.Equal(map[string]any{
-				"authentication_succeeded": false,
-				"function_count":           float64(1),
-				"has_event_key":            true,
-				"has_signing_key":          true,
-				"has_signing_key_fallback": true,
-				"mode":                     "cloud",
-				"schema_version":           "2024-05-24",
+				"message": "Unauthorized",
 			}, respBody)
+			assertNoAuthDetails(t, resp, respBody)
 		})
 	})
+}
+
+func TestCloudInvokeUnauthorizedResponse(t *testing.T) {
+	setEnvVars(t)
+
+	r := require.New(t)
+	c, err := NewClient(ClientOpts{
+		AppID: "invoke-unauthorized",
+		Dev:   BoolPtr(false),
+	})
+	r.NoError(err)
+	fn, err := CreateFunction(
+		c,
+		FunctionOpts{ID: "my-fn"},
+		EventTrigger("test/event.a", nil),
+		func(ctx context.Context, input Input[any]) (any, error) {
+			return nil, nil
+		},
+	)
+	r.NoError(err)
+
+	server := httptest.NewServer(c.Serve())
+	defer server.Close()
+
+	body := marshalRequest(t, createRequest(t, Event{Name: "test/event.a"}))
+	req, err := http.NewRequest(
+		http.MethodPost,
+		fmt.Sprintf("%s?fnId=%s", server.URL, fn.FullyQualifiedID()),
+		bytes.NewReader(body),
+	)
+	r.NoError(err)
+
+	resp, err := http.DefaultClient.Do(req)
+	r.NoError(err)
+	r.Equal(http.StatusUnauthorized, resp.StatusCode)
+
+	var respBody map[string]any
+	err = json.NewDecoder(resp.Body).Decode(&respBody)
+	r.NoError(err)
+	r.Equal(map[string]any{
+		"message": "Unauthorized",
+	}, respBody)
+	assertNoAuthDetails(t, resp, respBody)
+}
+
+func assertNoAuthDetails(t *testing.T, resp *http.Response, body map[string]any) {
+	t.Helper()
+
+	assertOnlySDKHandledInngestHeader(t, resp)
+
+	r := require.New(t)
+	for _, key := range []string{
+		"api_origin",
+		"app_id",
+		"authentication_succeeded",
+		"capabilities",
+		"env",
+		"event_api_origin",
+		"event_key_hash",
+		"framework",
+		"function_count",
+		"has_event_key",
+		"has_signing_key",
+		"has_signing_key_fallback",
+		"mode",
+		"schema_version",
+		"sdk_language",
+		"sdk_version",
+		"serve_origin",
+		"serve_path",
+		"signing_key_fallback_hash",
+		"signing_key_hash",
+	} {
+		r.NotContains(body, key)
+	}
+}
+
+func assertOnlySDKHandledInngestHeader(t *testing.T, resp *http.Response) {
+	t.Helper()
+
+	r := require.New(t)
+	r.Empty(resp.Header.Get(HeaderKeyReqVersion))
+	r.Empty(resp.Header.Get(HeaderKeySDK))
+	r.Empty(resp.Header.Get(HeaderKeyUserAgent))
+	r.Equal("true", resp.Header.Get(HeaderKeySDKHandled))
+	var inngestHeaders []string
+	for key := range resp.Header {
+		key = strings.ToLower(key)
+		if strings.HasPrefix(key, "x-inngest-") {
+			inngestHeaders = append(inngestHeaders, key)
+		}
+	}
+	r.ElementsMatch([]string{strings.ToLower(HeaderKeySDKHandled)}, inngestHeaders)
 }
 
 func TestInBandSync(t *testing.T) {
@@ -1009,8 +1113,8 @@ func TestInBandSync(t *testing.T) {
 	})
 
 	t.Run("invalid signature", func(t *testing.T) {
-		// SDK responds with an error when receiving an in-band sync request
-		// with an invalid signature
+		// SDK responds with a minimal unauthorized body when receiving an
+		// in-band sync request with an invalid signature.
 
 		r := require.New(t)
 		ctx := context.Background()
@@ -1034,9 +1138,9 @@ func TestInBandSync(t *testing.T) {
 		r.NoError(err)
 
 		r.Equal(map[string]any{
-			"code":    syscode.CodeSigVerificationFailed,
-			"message": "error validating signature",
+			"message": "Unauthorized",
 		}, respBody)
+		assertNoAuthDetails(t, resp, respBody)
 	})
 
 	t.Run("unsigned request", func(t *testing.T) {

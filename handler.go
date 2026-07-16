@@ -325,6 +325,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if probe == "trust" {
 			err := h.trust(r.Context(), w, r)
 			if err != nil {
+				if errors.Is(err, errUnauthorized) {
+					writeUnauthorizedResponse(w)
+					return
+				}
+
 				var perr publicerr.Error
 				if !errors.As(err, &perr) {
 					perr = publicerr.Error{
@@ -353,7 +358,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			} else if errors.Is(err, errBadRequest) {
 				status = http.StatusBadRequest
 			} else if errors.Is(err, errUnauthorized) {
-				status = http.StatusUnauthorized
+				writeUnauthorizedResponse(w)
+				return
 			}
 			w.WriteHeader(status)
 			w.Header().Set("content-type", "application/json")
@@ -365,6 +371,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		if err := h.register(w, r); err != nil {
 			h.Logger.Error("error registering functions", "error", err.Error())
+			if errors.Is(err, errUnauthorized) {
+				writeUnauthorizedResponse(w)
+				return
+			}
 
 			code := syscode.CodeUnknown
 			status := http.StatusInternalServerError
@@ -384,7 +394,31 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		return
+	default:
+		writeMethodNotAllowedResponse(w)
+		return
 	}
+}
+
+func writeUnauthorizedResponse(w http.ResponseWriter) {
+	w.Header().Del(HeaderKeyReqVersion)
+	w.Header().Del(HeaderKeySDK)
+	w.Header().Del(HeaderKeyUserAgent)
+	w.Header().Set(HeaderKeyContentType, "application/json")
+	w.Header().Set(HeaderKeySDKHandled, "true")
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"message": "Unauthorized",
+	})
+}
+
+func writeMethodNotAllowedResponse(w http.ResponseWriter) {
+	w.Header().Del(HeaderKeyContentType)
+	w.Header().Del(HeaderKeyReqVersion)
+	w.Header().Del(HeaderKeySDK)
+	w.Header().Del(HeaderKeyUserAgent)
+	w.Header().Set(HeaderKeySDKHandled, "true")
+	w.WriteHeader(http.StatusMethodNotAllowed)
 }
 
 // register self-registers the handler's functions with Inngest.  This upserts
@@ -448,13 +482,7 @@ func (h *handler) inBandSync(
 
 	sig := r.Header.Get(HeaderKeySignature)
 	if sig == "" {
-		return publicerr.Error{
-			Err: syscode.Error{
-				Code:    syscode.CodeHTTPMissingHeader,
-				Message: fmt.Sprintf("missing %s header", HeaderKeySignature),
-			},
-			Status: 401,
-		}
+		return errUnauthorized
 	}
 
 	max := h.MaxBodySize
@@ -478,22 +506,10 @@ func (h *handler) inBandSync(
 		false,
 	)
 	if err != nil {
-		return publicerr.Error{
-			Err: syscode.Error{
-				Code:    syscode.CodeSigVerificationFailed,
-				Message: "error validating signature",
-			},
-			Status: 401,
-		}
+		return errUnauthorized
 	}
 	if !valid {
-		return publicerr.Error{
-			Err: syscode.Error{
-				Code:    syscode.CodeSigVerificationFailed,
-				Message: "invalid signature",
-			},
-			Status: 401,
-		}
+		return errUnauthorized
 	}
 
 	var reqBody inBandSynchronizeRequest
@@ -1088,6 +1104,10 @@ func (h *handler) inspect(w http.ResponseWriter, r *http.Request) error {
 			return json.NewEncoder(w).Encode(inspection)
 		}
 	}
+	if !h.isDev() {
+		writeUnauthorizedResponse(w)
+		return nil
+	}
 
 	var authenticationSucceeded *bool
 	if sig != "" {
@@ -1121,10 +1141,7 @@ func (h *handler) trust(
 	w.Header().Add("Content-Type", "application/json")
 	sig := r.Header.Get(HeaderKeySignature)
 	if sig == "" {
-		return publicerr.Error{
-			Message: fmt.Sprintf("missing %s header", HeaderKeySignature),
-			Status:  401,
-		}
+		return errUnauthorized
 	}
 
 	max := h.MaxBodySize
@@ -1149,16 +1166,10 @@ func (h *handler) trust(
 		h.isDev(),
 	)
 	if err != nil {
-		return publicerr.Error{
-			Message: fmt.Sprintf("error validating signature: %s", err),
-			Status:  401,
-		}
+		return errUnauthorized
 	}
 	if !valid {
-		return publicerr.Error{
-			Message: "invalid signature",
-			Status:  401,
-		}
+		return errUnauthorized
 	}
 
 	byt, err = json.Marshal(trustProbeResponse{})
