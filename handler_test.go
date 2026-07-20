@@ -94,6 +94,60 @@ func TestInvokeRequestIDsAccessibleInInput(t *testing.T) {
 	r.Equal(jobID, gotCtx.JobID)
 }
 
+func TestInvokeRejectsEmptySigningKeyInCloudMode(t *testing.T) {
+	r := require.New(t)
+	ctx := context.Background()
+
+	c, err := NewClient(ClientOpts{
+		AppID: "empty-signing-key",
+		Dev:   Ptr(false),
+	})
+	r.NoError(err)
+
+	entered := false
+	_, err = CreateFunction(
+		c,
+		FunctionOpts{ID: "fn"},
+		EventTrigger("test/empty.signing.key", nil),
+		func(ctx context.Context, input Input[map[string]any]) (any, error) {
+			entered = true
+			return map[string]bool{"ok": true}, nil
+		},
+	)
+	r.NoError(err)
+
+	body, err := json.Marshal(sdkrequest.Request{
+		Event: []byte(`{"name":"test/empty.signing.key","data":{}}`),
+		Steps: map[string]json.RawMessage{},
+		CallCtx: sdkrequest.CallCtx{
+			FunctionID: uuid.New(),
+			RunID:      "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+		},
+	})
+	r.NoError(err)
+
+	sig, err := Sign(ctx, time.Now(), nil, body)
+	r.NoError(err)
+
+	req := httptest.NewRequest(http.MethodPost, "/?fnId=fn", bytes.NewReader(body))
+	req.Header.Set(HeaderKeySignature, sig)
+	rr := httptest.NewRecorder()
+
+	c.Serve().ServeHTTP(rr, req)
+
+	r.Equal(http.StatusUnauthorized, rr.Code)
+	resp := rr.Result()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	assertOnlySDKHandledInngestHeader(t, resp)
+
+	// Sleep long enough to allow the SDK to enter the Inngest function (it
+	// won't).
+	time.Sleep(10 * time.Millisecond)
+	r.False(entered)
+}
+
 func TestUnsupportedMethodResponse(t *testing.T) {
 	setEnvVars(t)
 
