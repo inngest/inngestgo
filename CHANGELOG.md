@@ -1,8 +1,31 @@
+## [v0.16.0] - 2026-07-20
+
+### 🚀 Features
+
+- [**breaking**] Always enable authenticated syncs (#242)
+- [**breaking**] Strip details in unauthed response (#243)
+- [**breaking**] Disable unauthed syncs by default (#244)
+
+### 🐛 Bug Fixes
+
+- Signing key not required in cloud mode (#245)
+
+### ⚙️ Miscellaneous Tasks
+
+- Change 0-major semver logic (#239)
+
+### 🛡️ Security
+
+- Bump golang.org/x/net from 0.52.0 to 0.55.0 (#241)
 ## [v0.15.3] - 2026-06-18
 
 ### 🐛 Bug Fixes
 
 - Update github.com/inngest/inngest to v1.19.3 (#238)
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* V0.15.3 (#224)
 ## [v0.15.2] - 2026-06-17
 
 ### 🚀 Features
