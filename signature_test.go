@@ -63,6 +63,14 @@ func TestValidateRequestSignature(t *testing.T) {
 			require.False(t, ok)
 			require.ErrorContains(t, err, "invalid signature")
 		})
+		t.Run("without configured keys it fails even if signed with an empty key", func(t *testing.T) {
+			at := time.Now()
+			sig, _ := Sign(ctx, at, nil, testBody)
+
+			ok, _, err := ValidateRequestSignature(ctx, sig, "", "", testBody, isDev)
+			require.False(t, ok)
+			require.ErrorIs(t, err, ErrMissingSigningKey)
+		})
 	})
 
 	t.Run("with the same key and within a reasonable time it succeeds", func(t *testing.T) {
@@ -71,6 +79,23 @@ func TestValidateRequestSignature(t *testing.T) {
 
 		ok, _, err := ValidateRequestSignature(ctx, sig, testKey, "", testBody, isDev)
 		require.True(t, ok)
+		require.NoError(t, err)
+	})
+
+	t.Run("with only the fallback key configured it succeeds with the fallback", func(t *testing.T) {
+		at := time.Now().Add(-5 * time.Second)
+		sig, _ := Sign(ctx, at, []byte(testKeyFallback), testBody)
+
+		ok, key, err := ValidateRequestSignature(ctx, sig, "", testKeyFallback, testBody, isDev)
+		require.True(t, ok)
+		require.Equal(t, testKeyFallback, key)
+		require.NoError(t, err)
+	})
+
+	t.Run("in dev mode it succeeds without configured keys", func(t *testing.T) {
+		ok, key, err := ValidateRequestSignature(ctx, "invalid", "", "", testBody, true)
+		require.True(t, ok)
+		require.Empty(t, key)
 		require.NoError(t, err)
 	})
 
