@@ -796,6 +796,50 @@ func TestHandleWorkerRequestExtendLeaseAck(t *testing.T) {
 	}
 }
 
+func TestHandleWorkerRequestExtendLeaseNackKeepsExecutionInProgress(t *testing.T) {
+	r := require.New(t)
+	wp := &workerPool{
+		inProgressLeases: map[string]string{
+			"request-id": "old-lease-id",
+		},
+	}
+	wp.inProgress.Add(1)
+
+	h := &connectHandler{workerPool: wp}
+	payload, err := proto.Marshal(
+		&connectproto.WorkerRequestExtendLeaseAckData{
+			RequestId: "request-id",
+		},
+	)
+	r.NoError(err)
+	r.NoError(h.handleWorkerRequestExtendLeaseAck(
+		&connectproto.ConnectMessage{
+			Kind:    connectproto.GatewayMessageType_WORKER_REQUEST_EXTEND_LEASE_ACK,
+			Payload: payload,
+		},
+	))
+	r.NotContains(wp.inProgressLeases, "request-id")
+
+	waitDone := make(chan struct{})
+	go func() {
+		wp.Wait()
+		close(waitDone)
+	}()
+
+	select {
+	case <-waitDone:
+		t.Fatal("lease nack incorrectly removed the live execution")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	wp.Done()
+	select {
+	case <-waitDone:
+	case <-time.After(time.Second):
+		t.Fatal("worker pool did not drain after execution completed")
+	}
+}
+
 func TestHandleMessageReplyAckClearsPendingAck(t *testing.T) {
 	r := require.New(t)
 
