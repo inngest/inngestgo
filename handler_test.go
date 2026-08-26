@@ -148,6 +148,105 @@ func TestInvokeRejectsEmptySigningKeyInCloudMode(t *testing.T) {
 	r.False(entered)
 }
 
+func TestServeHydratesUseAPIRequest(t *testing.T) {
+	r := require.New(t)
+	event := EventA{
+		Name: "test/use-api",
+		Data: EventAData{Foo: "first"},
+	}
+	secondEvent := EventA{
+		Name: "test/use-api",
+		Data: EventAData{Foo: "second"},
+	}
+
+	expectedAuth, err := hashSigningKeyForAuth(testKey)
+	r.NoError(err)
+
+	var (
+		actionMu   sync.RWMutex
+		actionID   string
+		actionData json.RawMessage
+		apiCalls   atomic.Int32
+	)
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		assert.Equal(t, "Bearer "+expectedAuth, req.Header.Get(HeaderKeyAuthorization))
+		apiCalls.Add(1)
+
+		switch req.URL.Path {
+		case "/v0/runs/run-id/batch":
+			r.NoError(json.NewEncoder(w).Encode([]EventA{event, secondEvent}))
+		case "/v0/runs/run-id/actions":
+			actionMu.RLock()
+			defer actionMu.RUnlock()
+			r.NotEmpty(actionID)
+			r.NoError(json.NewEncoder(w).Encode(map[string]json.RawMessage{actionID: actionData}))
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	defer apiServer.Close()
+
+	dev := false
+	c, err := NewClient(ClientOpts{
+		AppID:              "use-api",
+		APIBaseURL:         &apiServer.URL,
+		HTTPClient:         apiServer.Client(),
+		SigningKey:         Ptr(testKey),
+		SigningKeyFallback: Ptr(testKeyFallback),
+		Dev:                &dev,
+	})
+	r.NoError(err)
+
+	var functionCalls, stepCalls atomic.Int32
+	fn, err := CreateFunction(
+		c,
+		FunctionOpts{ID: "fn"},
+		EventTrigger(event.Name, nil),
+		func(ctx context.Context, input Input[EventAData]) (any, error) {
+			call := functionCalls.Add(1)
+			if call == 2 {
+				r.Len(input.Events, 2)
+				r.Equal("second", input.Events[1].Data.Foo)
+			}
+
+			return step.Run(ctx, "memoized", func(ctx context.Context) (map[string]bool, error) {
+				stepCalls.Add(1)
+				return map[string]bool{"ok": true}, nil
+			})
+		},
+	)
+	r.NoError(err)
+
+	sdkServer := httptest.NewServer(c.Serve())
+	defer sdkServer.Close()
+	invokeURL := sdkServer.URL + "?fnId=" + url.QueryEscape(fn.FullyQualifiedID())
+
+	firstResp := handlerPost(t, invokeURL, createRequest(t, event))
+	defer func() { _ = firstResp.Body.Close() }()
+	r.Equal(http.StatusPartialContent, firstResp.StatusCode)
+	var ops []sdkrequest.GeneratorOpcode
+	r.NoError(json.NewDecoder(firstResp.Body).Decode(&ops))
+	r.Len(ops, 1)
+
+	actionMu.Lock()
+	actionID = ops[0].ID
+	actionData = ops[0].Data
+	actionMu.Unlock()
+
+	request := createRequest(t, event)
+	request.UseAPI = true
+	secondResp := handlerPost(t, invokeURL, request)
+	defer func() { _ = secondResp.Body.Close() }()
+	r.Equal(http.StatusOK, secondResp.StatusCode)
+
+	var result map[string]bool
+	r.NoError(json.NewDecoder(secondResp.Body).Decode(&result))
+	r.Equal(map[string]bool{"ok": true}, result)
+	r.EqualValues(2, functionCalls.Load())
+	r.EqualValues(1, stepCalls.Load())
+	r.EqualValues(2, apiCalls.Load())
+}
+
 func TestUnsupportedMethodResponse(t *testing.T) {
 	setEnvVars(t)
 

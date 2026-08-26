@@ -20,6 +20,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/inngest/inngest/pkg/connect/wsproto"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -456,6 +457,110 @@ func TestConnectInvokeUsesProtoRequestAndJobIDs(t *testing.T) {
 	r.Equal(requestID, resp.RequestId)
 	r.Equal(requestID, invoker.request.CallCtx.RequestID)
 	r.Equal(jobID, invoker.request.CallCtx.JobID)
+
+	r.NoError(<-errCh)
+	r.Equal(connectproto.GatewayMessageType_WORKER_REQUEST_ACK, (<-ackCh).Kind)
+}
+
+func TestConnectInvokeHydratesUseAPIRequest(t *testing.T) {
+	r := require.New(t)
+	var apiCalls atomic.Int32
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		assert.Equal(t, "Bearer primary", req.Header.Get("Authorization"))
+		apiCalls.Add(1)
+
+		switch req.URL.Path {
+		case "/v0/runs/run-id/batch":
+			_, _ = w.Write([]byte(`[{"name":"one"},{"name":"two"}]`))
+		case "/v0/runs/run-id/actions":
+			_, _ = w.Write([]byte(`{"step-id":{"value":true}}`))
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	defer apiServer.Close()
+
+	accepted := make(chan *websocket.Conn, 1)
+	done := make(chan struct{})
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
+			InsecureSkipVerify: true,
+		})
+		r.NoError(err)
+		accepted <- conn
+		<-done
+		_ = conn.CloseNow()
+	}))
+	defer wsServer.Close()
+	defer close(done)
+
+	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+	clientConn, _, err := websocket.Dial(context.Background(), wsURL, nil)
+	r.NoError(err)
+	defer func() { _ = clientConn.CloseNow() }()
+	serverConn := <-accepted
+
+	ackCh := make(chan connectproto.ConnectMessage, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		var ack connectproto.ConnectMessage
+		errCh <- wsproto.Read(context.Background(), serverConn, &ack)
+		ackCh <- ack
+	}()
+
+	requestPayload, err := json.Marshal(sdkrequest.Request{
+		Event:  []byte(`{"name":"one"}`),
+		UseAPI: true,
+		CallCtx: sdkrequest.CallCtx{
+			RunID: "run-id",
+		},
+	})
+	r.NoError(err)
+	msgPayload, err := proto.Marshal(&connectproto.GatewayExecutorRequestData{
+		RequestId:      "request-id",
+		AppName:        "app",
+		FunctionSlug:   "fn",
+		RequestPayload: requestPayload,
+		LeaseId:        "lease-id",
+	})
+	r.NoError(err)
+
+	invoker := &captureInvoker{}
+	apiClient := newWorkerApiClient(apiServer.URL, nil)
+	h := &connectHandler{
+		opts: Opts{
+			APIBaseURL:               apiServer.URL,
+			HashedSigningKey:         []byte("primary"),
+			HashedSigningKeyFallback: []byte("fallback"),
+			SDKLanguage:              "go",
+			SDKVersion:               "test",
+		},
+		logger:    slog.New(slog.DiscardHandler),
+		apiClient: apiClient,
+		invokers: map[string]FunctionInvoker{
+			"app": invoker,
+		},
+		workerPool: &workerPool{
+			inProgressLeases:     map[string]string{},
+			inProgressLeasesLock: sync.Mutex{},
+		},
+	}
+	preparedConn := &connection{
+		ws:                  clientConn,
+		extendLeaseInterval: time.Hour,
+	}
+	activateTestConnection(t, preparedConn)
+
+	resp, err := h.connectInvoke(context.Background(), preparedConn, &connectproto.ConnectMessage{
+		Payload: msgPayload,
+	})
+	r.NoError(err)
+	r.Equal(connectproto.SDKResponseStatus_DONE, resp.Status)
+	r.EqualValues(2, apiCalls.Load())
+	r.Len(invoker.request.Events, 2)
+	assert.JSONEq(t, `{"name":"two"}`, string(invoker.request.Events[1]))
+	r.Contains(invoker.request.Steps, "step-id")
+	assert.JSONEq(t, `{"value":true}`, string(invoker.request.Steps["step-id"]))
 
 	r.NoError(<-errCh)
 	r.Equal(connectproto.GatewayMessageType_WORKER_REQUEST_ACK, (<-ackCh).Kind)
