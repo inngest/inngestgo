@@ -56,6 +56,9 @@ type OptionalSetupOpts struct {
 	// SigningKeyFallback is the optional signing key fallback. If empty, this defaults
 	// to os.Getenv("INNGEST_SIGNING_KEY_FALLBACK").
 	SigningKeyFallback string
+	// Env is the branch environment to use. If nil, this defaults to
+	// os.Getenv("INNGEST_ENV").
+	Env *string
 	// BaseURL is the URL of the Inngest API.  If empty, this:
 	//
 	//   1. Checks to see if INNGEST_DEV is set, indicating dev mode.  If set, we
@@ -80,6 +83,13 @@ func (o SetupOpts) signingKeyFallback() string {
 		return os.Getenv("INNGEST_SIGNING_KEY_FALLBACK")
 	}
 	return o.Optional.SigningKeyFallback
+}
+
+func (o SetupOpts) environment() string {
+	if o.Optional.Env == nil {
+		return os.Getenv("INNGEST_ENV")
+	}
+	return *o.Optional.Env
 }
 
 func (o SetupOpts) baseURL() string {
@@ -116,7 +126,9 @@ func Setup(opts SetupOpts) *provider {
 		logger:   logger.Default(),
 	}
 
-	p.api = NewAPIClient(p.opts.baseURL(), p.opts.signingKey(), p.opts.signingKeyFallback())
+	apiClient := NewAPIClient(p.opts.baseURL(), p.opts.signingKey(), p.opts.signingKeyFallback())
+	apiClient.environment = p.opts.environment()
+	p.api = apiClient
 
 	return p
 }

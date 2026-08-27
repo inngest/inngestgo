@@ -158,6 +158,7 @@ func NewManager(opts Opts) InvocationManager {
 			RunID:              opts.Request.CallCtx.RunID,
 			FnID:               opts.Request.CallCtx.FunctionID,
 			QueueItemRef:       opts.Request.CallCtx.QueueItemRef,
+			Environment:        opts.Request.CallCtx.Env,
 			SigningKey:         opts.SigningKey,
 			SigningKeyFallback: opts.SigningKeyFallback,
 			Config:             checkpointConfig,
