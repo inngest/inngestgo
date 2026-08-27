@@ -15,6 +15,7 @@ type Client struct {
 	primaryKey  string
 	fallbackKey string
 	apiBaseURL  string
+	environment string
 	httpClient  *http.Client
 	useFallback *atomic.Bool
 }
@@ -54,6 +55,9 @@ func (c *Client) do(ctx context.Context, req AsyncRequest) error {
 
 	hr.Header.Set("Content-Type", "application/json")
 	hr.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.getCurrentSigningKey()))
+	if c.environment != "" {
+		hr.Header.Set("X-Inngest-Env", c.environment)
+	}
 
 	resp, err := c.httpClient.Do(hr)
 	if err != nil {

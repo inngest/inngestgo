@@ -123,6 +123,7 @@ type APIClient struct {
 	baseURL     string
 	primaryKey  string
 	fallbackKey string
+	environment string
 	httpClient  *http.Client
 	// useFallback tracks whether to use the fallback key (1) or primary key (0)
 	useFallback *atomic.Bool
@@ -253,6 +254,9 @@ func (c *APIClient) doSingle(ctx context.Context, method, path string, payload a
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.getCurrentSigningKey())
+	if c.environment != "" {
+		req.Header.Set("X-Inngest-Env", c.environment)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

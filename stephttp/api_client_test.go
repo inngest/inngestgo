@@ -104,6 +104,33 @@ func TestAPIClient_RetryLogic(t *testing.T) {
 	}
 }
 
+func TestAPIClient_EnvironmentHeader(t *testing.T) {
+	var receivedEnvHeader string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedEnvHeader = r.Header.Get("X-Inngest-Env")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data": {}}`))
+	}))
+	defer server.Close()
+
+	client := NewAPIClient(server.URL, "test-key", "")
+	client.environment = "preview"
+
+	_, err := client.do(context.Background(), http.MethodGet, "/test", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "preview", receivedEnvHeader)
+}
+
+func TestSetupOpts_Environment(t *testing.T) {
+	t.Setenv("INNGEST_ENV", "from-env")
+	explicit := "explicit"
+
+	assert.Equal(t, "from-env", (SetupOpts{}).environment())
+	assert.Equal(t, "explicit", (SetupOpts{
+		Optional: OptionalSetupOpts{Env: &explicit},
+	}).environment())
+}
+
 func TestAPIClient_RetryFailure(t *testing.T) {
 	var callCount atomic.Int32
 

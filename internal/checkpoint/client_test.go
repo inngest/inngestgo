@@ -17,8 +17,10 @@ import (
 
 func TestClient_Checkpoint_Success(t *testing.T) {
 	var receivedAuthHeader string
+	var receivedEnvHeader string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedAuthHeader = r.Header.Get("Authorization")
+		receivedEnvHeader = r.Header.Get("X-Inngest-Env")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"success":true}`))
 	}))
@@ -28,6 +30,7 @@ func TestClient_Checkpoint_Success(t *testing.T) {
 	t.Setenv("INNGEST_DEV", server.URL)
 
 	client := NewClient(server.URL, "primary-key", "fallback-key")
+	client.environment = "preview"
 	client.httpClient = server.Client()
 
 	req := AsyncRequest{
@@ -46,6 +49,7 @@ func TestClient_Checkpoint_Success(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "Bearer primary-key", receivedAuthHeader)
+	assert.Equal(t, "preview", receivedEnvHeader)
 	assert.False(t, client.useFallback.Load())
 }
 

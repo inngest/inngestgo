@@ -70,6 +70,9 @@ func PublishWithURL(ctx context.Context, apiUrl, channel, topic string, data []b
 	}
 
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", mgr.SigningKey()))
+	if environment := mgr.Request().CallCtx.Env; environment != "" {
+		req.Header.Set("X-Inngest-Env", environment)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
