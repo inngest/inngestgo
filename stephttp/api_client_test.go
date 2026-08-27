@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inngest/inngestgo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -106,8 +107,10 @@ func TestAPIClient_RetryLogic(t *testing.T) {
 
 func TestAPIClient_EnvironmentHeader(t *testing.T) {
 	var receivedEnvHeader string
+	var receivedSDKHeader string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedEnvHeader = r.Header.Get("X-Inngest-Env")
+		receivedSDKHeader = r.Header.Get("X-Inngest-SDK")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"data": {}}`))
 	}))
@@ -119,6 +122,7 @@ func TestAPIClient_EnvironmentHeader(t *testing.T) {
 	_, err := client.do(context.Background(), http.MethodGet, "/test", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "preview", receivedEnvHeader)
+	assert.Equal(t, inngestgo.HeaderValueSDK, receivedSDKHeader)
 }
 
 func TestSetupOpts_Environment(t *testing.T) {

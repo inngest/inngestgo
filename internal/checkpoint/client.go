@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"sync/atomic"
 	"time"
+
+	"github.com/inngest/inngestgo/pkg/version"
 )
 
 type Client struct {
@@ -55,6 +57,7 @@ func (c *Client) do(ctx context.Context, req AsyncRequest) error {
 
 	hr.Header.Set("Content-Type", "application/json")
 	hr.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.getCurrentSigningKey()))
+	hr.Header.Set("X-Inngest-SDK", fmt.Sprintf("go:v%s", version.SDKVersion))
 	if c.environment != "" {
 		hr.Header.Set("X-Inngest-Env", c.environment)
 	}

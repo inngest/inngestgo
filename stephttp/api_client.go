@@ -254,6 +254,7 @@ func (c *APIClient) doSingle(ctx context.Context, method, path string, payload a
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.getCurrentSigningKey())
+	req.Header.Set(inngestgo.HeaderKeySDK, inngestgo.HeaderValueSDK)
 	if c.environment != "" {
 		req.Header.Set("X-Inngest-Env", c.environment)
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngestgo/internal/opcode"
+	"github.com/inngest/inngestgo/pkg/version"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,9 +19,11 @@ import (
 func TestClient_Checkpoint_Success(t *testing.T) {
 	var receivedAuthHeader string
 	var receivedEnvHeader string
+	var receivedSDKHeader string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedAuthHeader = r.Header.Get("Authorization")
 		receivedEnvHeader = r.Header.Get("X-Inngest-Env")
+		receivedSDKHeader = r.Header.Get("X-Inngest-SDK")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"success":true}`))
 	}))
@@ -50,6 +53,7 @@ func TestClient_Checkpoint_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Bearer primary-key", receivedAuthHeader)
 	assert.Equal(t, "preview", receivedEnvHeader)
+	assert.Equal(t, "go:v"+version.SDKVersion, receivedSDKHeader)
 	assert.False(t, client.useFallback.Load())
 }
 
