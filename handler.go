@@ -807,12 +807,24 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	request.CallCtx.RequestID = r.Header.Get(HeaderKeyRequestID)
 	request.CallCtx.JobID = r.Header.Get(HeaderKeyJobID)
 
-	if request.UseAPI {
-		// TODO: implement this
-		// retrieve data from API
-		// request.Steps =
-		// request.Events =
-		_ = 0 // no-op to avoid linter error
+	if request.UsesAPI() {
+		authToken, err := hashSigningKeyForAuth(h.GetSigningKey())
+		if err != nil {
+			return fmt.Errorf("error hashing signing key for API request: %w", err)
+		}
+		authTokenFallback, err := hashSigningKeyForAuth(h.GetSigningKeyFallback())
+		if err != nil {
+			return fmt.Errorf("error hashing fallback signing key for API request: %w", err)
+		}
+
+		if err := sdkrequest.LoadFromAPI(r.Context(), request, sdkrequest.LoadFromAPIOpts{
+			APIBaseURL:        h.GetAPIBaseURL(),
+			AuthToken:         authToken,
+			AuthTokenFallback: authTokenFallback,
+			HTTPClient:        cImpl.HTTPClient,
+		}); err != nil {
+			return fmt.Errorf("error loading function state from API: %w", err)
+		}
 	}
 
 	h.l.RLock()
@@ -985,6 +997,18 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 
 	// Return the function response.
 	return json.NewEncoder(w).Encode(resp)
+}
+
+func hashSigningKeyForAuth(signingKey string) (string, error) {
+	if signingKey == "" {
+		return "", nil
+	}
+
+	hashed, err := hashedSigningKey([]byte(signingKey))
+	if err != nil {
+		return "", err
+	}
+	return string(hashed), nil
 }
 
 type insecureInspection struct {
