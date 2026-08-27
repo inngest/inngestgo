@@ -205,7 +205,7 @@ func (h *connectHandler) connectInvoke(ctx context.Context, preparedConn *connec
 		resp any
 		ops  []sdkrequest.GeneratorOpcode
 	)
-	if request.UseAPI {
+	if request.UsesAPI() {
 		loadOpts := sdkrequest.LoadFromAPIOpts{
 			APIBaseURL:        h.opts.APIBaseURL,
 			AuthToken:         string(h.opts.HashedSigningKey),

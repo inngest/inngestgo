@@ -24,7 +24,7 @@ type LoadFromAPIOpts struct {
 // LoadFromAPI hydrates the event batch and memoized step state for requests
 // with use_api enabled.
 func LoadFromAPI(ctx context.Context, request *Request, opts LoadFromAPIOpts) error {
-	if !request.UseAPI {
+	if !request.UsesAPI() {
 		return nil
 	}
 	if request.CallCtx.RunID == "" {

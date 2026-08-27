@@ -509,10 +509,10 @@ func TestConnectInvokeHydratesUseAPIRequest(t *testing.T) {
 	}()
 
 	requestPayload, err := json.Marshal(sdkrequest.Request{
-		Event:  []byte(`{"name":"one"}`),
-		UseAPI: true,
+		Event: []byte(`{"name":"one"}`),
 		CallCtx: sdkrequest.CallCtx{
-			RunID: "run-id",
+			RunID:  "run-id",
+			UseAPI: true,
 		},
 	})
 	r.NoError(err)

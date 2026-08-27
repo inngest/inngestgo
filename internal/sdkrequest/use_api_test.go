@@ -12,6 +12,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestRequestUsesAPI(t *testing.T) {
+	tests := []struct {
+		name    string
+		request Request
+		want    bool
+	}{
+		{name: "disabled", request: Request{}, want: false},
+		{name: "deprecated top-level field", request: Request{UseAPI: true}, want: true},
+		{name: "context field", request: Request{CallCtx: CallCtx{UseAPI: true}}, want: true},
+		{name: "both fields", request: Request{UseAPI: true, CallCtx: CallCtx{UseAPI: true}}, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.request.UsesAPI())
+		})
+	}
+}
+
 func TestLoadFromAPI(t *testing.T) {
 	t.Run("hydrates events and steps", func(t *testing.T) {
 		var paths sync.Map

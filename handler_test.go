@@ -234,7 +234,7 @@ func TestServeHydratesUseAPIRequest(t *testing.T) {
 	actionMu.Unlock()
 
 	request := createRequest(t, event)
-	request.UseAPI = true
+	request.CallCtx.UseAPI = true
 	secondResp := handlerPost(t, invokeURL, request)
 	defer func() { _ = secondResp.Body.Close() }()
 	r.Equal(http.StatusOK, secondResp.StatusCode)

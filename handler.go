@@ -807,7 +807,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 	request.CallCtx.RequestID = r.Header.Get(HeaderKeyRequestID)
 	request.CallCtx.JobID = r.Header.Get(HeaderKeyJobID)
 
-	if request.UseAPI {
+	if request.UsesAPI() {
 		authToken, err := hashSigningKeyForAuth(h.GetSigningKey())
 		if err != nil {
 			return fmt.Errorf("error hashing signing key for API request: %w", err)
