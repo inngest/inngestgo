@@ -1,3 +1,13 @@
+## [v0.16.1] - 2026-08-28
+
+### 🐛 Bug Fixes
+
+- Send environment on signing-key API requests (#252)
+- Hydrate API-backed invocation state (#251)
+
+### ⚙️ Miscellaneous Tasks
+
+- *(connect)* Adding tests for lease nack (#248)
 ## [v0.16.0] - 2026-07-20
 
 ### 🚀 Features
@@ -13,6 +23,7 @@
 ### ⚙️ Miscellaneous Tasks
 
 - Change 0-major semver logic (#239)
+- *(release)* V0.16.0 (#240)
 
 ### 🛡️ Security
 
