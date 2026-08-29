@@ -50,8 +50,8 @@ jobs:
           tag_name="$(printf '%s\n' "${PR_TITLE}" | sed -E 's/^chore\(release\): (v[0-9]+\.[0-9]+\.[0-9]+)$/\1/')"
           version="${tag_name#v}"
 
-          if ! grep -Eq "^## \\[?${version}\\]? - " CHANGELOG.md; then
-            echo "Merged release commit does not contain changelog entry for ${version}"
+          if ! grep -Eq "^## \\[?${tag_name}\\]? - " CHANGELOG.md; then
+            echo "Merged release commit does not contain changelog entry for ${tag_name}"
             exit 1
           fi
 
