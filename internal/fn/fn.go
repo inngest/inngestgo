@@ -189,6 +189,18 @@ type StepConcurrency struct {
 // Concurrency is an alias for StepConcurrency for backward compatibility.
 type Concurrency = StepConcurrency
 
+// ThrottleScope controls how broadly a throttle key is shared.
+type ThrottleScope string
+
+const (
+	// ThrottleScopeFn limits throttle capacity to the current function.
+	ThrottleScopeFn ThrottleScope = "fn"
+	// ThrottleScopeEnv shares throttle capacity across functions in the current environment.
+	ThrottleScopeEnv ThrottleScope = "env"
+	// ThrottleScopeAccount shares throttle capacity across functions in the current account.
+	ThrottleScopeAccount ThrottleScope = "account"
+)
+
 // Cancel represents a cancellation signal for a function.  When specified, this
 // will set up pauses which automatically cancel the function based off of matching
 // events and expressions.
@@ -273,6 +285,9 @@ type Throttle struct {
 	// ID in an event you can use the following key: "event.user.id".  This ensures
 	// that we throttle functions for each user independently.
 	Key *string `json:"key,omitempty"`
+	// Scope controls whether the throttle applies to the function, environment, or account.
+	// Defaults to the current function when unset.
+	Scope ThrottleScope `json:"scope,omitempty"`
 }
 
 // MarshalJSON marshals Throttle to the expected JSON format.  Note that time.Duration
