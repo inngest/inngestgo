@@ -1,3 +1,8 @@
+## [v0.16.2] - 2026-09-05
+
+### ⚙️ Miscellaneous Tasks
+
+- Fix changelog validation (#246)
 ## [v0.16.1] - 2026-08-28
 
 ### 🐛 Bug Fixes
@@ -8,6 +13,7 @@
 ### ⚙️ Miscellaneous Tasks
 
 - *(connect)* Adding tests for lease nack (#248)
+- *(release)* V0.16.1 (#249)
 ## [v0.16.0] - 2026-07-20
 
 ### 🚀 Features
