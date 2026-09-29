@@ -304,7 +304,8 @@ func (a apiClient) SendMany(ctx context.Context, e []any) (ids []string, err err
 		respErr error
 	)
 	for attempt := 0; attempt < retryAttempts; attempt++ {
-		req, err := http.NewRequest(
+		req, err := http.NewRequestWithContext(
+			ctx,
 			http.MethodPost,
 			fmt.Sprintf("%s/e/%s", a.eventAPIBaseURL(), a.GetEventKey()),
 			bytes.NewBuffer(byt),
@@ -327,7 +328,13 @@ func (a apiClient) SendMany(ctx context.Context, e []any) (ids []string, err err
 			break
 		}
 
-		if respErr != nil && resp != nil && resp.Body != nil {
+		// Stop retrying when the caller's context is done or when no attempts
+		// remain.  The last response is handled below.
+		if ctx.Err() != nil || attempt == retryAttempts-1 {
+			break
+		}
+
+		if respErr == nil {
 			// Close since we're gonna retry and we don't want to leak resources.
 			_ = resp.Body.Close()
 		}
@@ -338,7 +345,20 @@ func (a apiClient) SendMany(ctx context.Context, e []any) (ids []string, err err
 		// Exponential backoff with jitter.
 		delay := retryBaseDelay*time.Duration(math.Pow(2, float64(attempt))) + jitter
 
-		time.Sleep(delay)
+		timer := time.NewTimer(delay)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		}
+	}
+
+	if err := ctx.Err(); err != nil && (respErr != nil || resp.StatusCode >= 500) {
+		if respErr == nil {
+			_ = resp.Body.Close()
+		}
+		return nil, err
 	}
 
 	if respErr != nil {

@@ -2,8 +2,14 @@ package inngestgo
 
 import (
 	"context"
+	"errors"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -82,4 +88,114 @@ func TestNewClientKeepsProvidedLogger(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Same(t, provided, c.Options().Logger)
+}
+
+// trackingTransport records every response body that it returns and whether
+// the caller closed it.
+type trackingTransport struct {
+	base   http.RoundTripper
+	opened atomic.Int32
+	closed atomic.Int32
+}
+
+type trackedBody struct {
+	io.ReadCloser
+	closed *atomic.Int32
+}
+
+func (b trackedBody) Close() error {
+	b.closed.Add(1)
+	return b.ReadCloser.Close()
+}
+
+func (t *trackingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(r)
+	if err != nil {
+		return resp, err
+	}
+	t.opened.Add(1)
+	resp.Body = trackedBody{ReadCloser: resp.Body, closed: &t.closed}
+	return resp, nil
+}
+
+func newSendTestClient(t *testing.T, url string, hc *http.Client) Client {
+	t.Helper()
+	c, err := NewClient(ClientOpts{
+		AppID:           "test",
+		EventKey:        StrPtr("key"),
+		EventAPIBaseURL: StrPtr(url),
+		HTTPClient:      hc,
+		Logger:          slog.New(slog.DiscardHandler),
+	})
+	require.NoError(t, err)
+	return c
+}
+
+func TestSendStopsWhenContextIsCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		cancel()
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := newSendTestClient(t, srv.URL, srv.Client())
+
+	start := time.Now()
+	_, err := c.Send(ctx, Event{Name: "test/event", Data: map[string]any{}})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, context.Canceled), "got %v", err)
+	assert.EqualValues(t, 1, hits.Load())
+	assert.Less(t, time.Since(start), retryBaseDelay*3)
+}
+
+func TestSendAbortsInFlightRequestWhenContextIsDone(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	c := newSendTestClient(t, srv.URL, srv.Client())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.Send(ctx, Event{Name: "test/event", Data: map[string]any{}})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, context.DeadlineExceeded), "got %v", err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("Send did not return after the context deadline")
+	}
+}
+
+func TestSendClosesResponseBodiesBetweenRetries(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("bad gateway"))
+	}))
+	defer srv.Close()
+
+	tt := &trackingTransport{base: http.DefaultTransport}
+	c := newSendTestClient(t, srv.URL, &http.Client{Transport: tt})
+
+	_, err := c.Send(context.Background(), Event{Name: "test/event", Data: map[string]any{}})
+	require.Error(t, err)
+	assert.EqualValues(t, retryAttempts, tt.opened.Load())
+	assert.Equal(t, tt.opened.Load(), tt.closed.Load(), "every response body must be closed")
 }
