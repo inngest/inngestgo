@@ -90,7 +90,15 @@ func (o *requestOwner) handle(ctx context.Context) error {
 	// Add a getter, allowing us to fetch config to update values (eg. in UpdateOmitResponseBody)
 	ctx = o.withConfigGetter(ctx)
 
-	if o.getExistingRun(ctx) {
+	resumed, err := o.getExistingRun(ctx)
+	if err != nil {
+		// Inngest sent this request to resume a run.  a 500 makes the executor send
+		// it again.  without this, the request runs the handler as a new run and
+		// repeats every step after the last saved one.
+		http.Error(o.w, "error loading run state", http.StatusInternalServerError)
+		return err
+	}
+	if resumed {
 		// In this case, we're re-entering an existing run, which means we're now
 		// running async and are responding to an Inngest's executor call.
 		//
@@ -232,16 +240,19 @@ func (o *requestOwner) handleAsyncConversion(ctx context.Context, token string) 
 	return nil
 }
 
-func (o *requestOwner) getExistingRun(ctx context.Context) bool {
+// getExistingRun loads the saved steps when Inngest sends the request to resume
+// a run.  it returns false for a request that starts a new run, and an error
+// when the request resumes a run whose steps cannot be loaded.
+func (o *requestOwner) getExistingRun(ctx context.Context) (bool, error) {
 	// Validate signature and extract run information
 	if !validateResumeRequestSignature(ctx, o.r, o.provider.opts.signingKey(), o.provider.opts.signingKeyFallback()) {
-		return false
+		return false, nil
 	}
 
 	// Extract headers after validation passes
 	runID, err := ulid.Parse(o.r.Header.Get(headerRunID))
 	if err != nil {
-		return false
+		return false, nil
 	}
 
 	o.run.RunID = runID
@@ -250,7 +261,7 @@ func (o *requestOwner) getExistingRun(ctx context.Context) bool {
 	// XXX: Use V2 API when created.
 	steps, err := o.provider.api.GetSteps(ctx, o.run.RunID)
 	if err != nil {
-		return false
+		return false, fmt.Errorf("error loading steps for run %s: %w", o.run.RunID, err)
 	}
 
 	// This is now always async.
@@ -259,7 +270,7 @@ func (o *requestOwner) getExistingRun(ctx context.Context) bool {
 
 	// XXX: When using the V2 API, we should update o.run with the new run context.
 
-	return true
+	return true, nil
 }
 
 // call initializes the hijacking control flow, then executes the API-based Inngest function.

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/inngest/inngest/pkg/enums"
+	"github.com/inngest/inngestgo"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/step"
 	"github.com/oklog/ulid/v2"
@@ -24,6 +25,8 @@ type blockingAPI struct {
 	release chan struct{}
 	// inputs receives the run data of each call when it is not nil.
 	inputs chan NewAPIRunData
+	// getStepsErr is the error that GetSteps returns.
+	getStepsErr error
 }
 
 func (b *blockingAPI) CheckpointNewRun(ctx context.Context, runID ulid.ULID, input NewAPIRunData, steps ...sdkrequest.GeneratorOpcode) (*CheckpointRun, error) {
@@ -44,7 +47,10 @@ func (b *blockingAPI) CheckpointResponse(ctx context.Context, run CheckpointRun,
 }
 
 func (b *blockingAPI) GetSteps(ctx context.Context, runID ulid.ULID) (map[string]json.RawMessage, error) {
-	return nil, nil
+	if b.getStepsErr != nil {
+		return nil, b.getStepsErr
+	}
+	return map[string]json.RawMessage{}, nil
 }
 
 func TestFinishedRunCheckpointsInBackground(t *testing.T) {
@@ -286,6 +292,74 @@ func TestHandlerPanicRecordsError(t *testing.T) {
 			require.Equal(t, tt.expectedStatus, result.Status)
 			require.Equal(t, tt.expectedBody, result.Body)
 			require.Contains(t, result.Error, "function panicked: kaboom")
+		})
+	}
+}
+
+func TestResumeRequiresSavedSteps(t *testing.T) {
+	const signingKey = "signkey-test-12345678"
+
+	tests := []struct {
+		name           string
+		getStepsErr    error
+		expectedStatus int
+		expectHandler  bool
+	}{
+		{
+			name:           "steps load",
+			expectedStatus: http.StatusPartialContent,
+			expectHandler:  true,
+		},
+		{
+			name:           "steps fail to load",
+			getStepsErr:    fmt.Errorf("api unavailable"),
+			expectedStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("INNGEST_DEV", "")
+
+			api := &blockingAPI{
+				called:      make(chan []sdkrequest.GeneratorOpcode, 1),
+				release:     make(chan struct{}),
+				getStepsErr: tt.getStepsErr,
+			}
+			t.Cleanup(func() { close(api.release) })
+
+			p := Setup(SetupOpts{
+				Optional: OptionalSetupOpts{SigningKey: signingKey},
+			})
+			p.api = api
+
+			handlerCalled := false
+			handler := p.ServeHTTP(func(w http.ResponseWriter, r *http.Request) {
+				handlerCalled = true
+				_, _ = step.Run(r.Context(), "a", func(ctx context.Context) (int, error) {
+					return 1, nil
+				})
+				_, _ = w.Write([]byte("ok"))
+			})
+
+			runID := ulid.Make().String()
+			sig, err := inngestgo.Sign(context.Background(), time.Now(), []byte(signingKey), []byte(runID))
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodPost, "/test", nil)
+			req.Header.Set(headerRunID, runID)
+			req.Header.Set(headerSignature, sig)
+
+			rec := httptest.NewRecorder()
+			handler(rec, req)
+
+			require.Equal(t, tt.expectedStatus, rec.Code)
+			require.Equal(t, tt.expectHandler, handlerCalled)
+
+			// a resume never creates a new run.  a new run checkpoints in a tracked
+			// goroutine that blocks on release, so it shows up in both checks.
+			require.Zero(t, p.inflight.Load())
+			require.Empty(t, api.called)
 		})
 	}
 }
