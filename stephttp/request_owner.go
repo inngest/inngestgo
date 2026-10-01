@@ -116,6 +116,13 @@ func (o *requestOwner) handle(ctx context.Context) error {
 	// Here, we're always creating a net-new run.  Firstly, we must hit the API endpoint
 	// to begin the logic and check for any function config.  This will continue to execute
 	// step.run calls until either an error, an async step, or the fn finishes.
+	//
+	// a new run gets one attempt, so a step error is final and step.Run returns it
+	// to the handler.  without this, a step error that the handler catches still
+	// makes the run async, and the async response is written after the handler's
+	// own response.
+	maxAttempts := 1
+	o.mgr.Request().CallCtx.MaxAttempts = &maxAttempts
 	result := o.call(ctx)
 
 	// After calling the API, check if we have nil function config;  if so, `stephttp.FnConfig`
