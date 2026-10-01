@@ -144,7 +144,7 @@ func (o *requestOwner) handle(ctx context.Context) error {
 	// an empty body whenever the handler reads the request body.  the handler can
 	// read the body before its first step, so this starts before the run does.
 	if !o.config.OmitRequestBody {
-		o.body = newBodyRecorder(o.r.Body)
+		o.body = newBodyRecorder(o.r.Body, o.config.MaxRequestBodySize)
 		o.r.Body = o.body
 	}
 
@@ -156,7 +156,16 @@ func (o *requestOwner) handle(ctx context.Context) error {
 
 	if opcode.HasAsyncOps(o.mgr.Ops(), o.run.Attempt, 0) {
 		// Always checkpoint first, then handle the async conversion.
-		token := o.handleFirstCheckpoint(ctx)
+		token, err := o.handleFirstCheckpoint(ctx)
+		if err != nil {
+			// the run does not exist in Inngest, so nothing continues it.  without
+			// this, the async response sends the client to a run that never
+			// finishes.
+			if !o.w.wroteHeader && !o.w.hijacked {
+				http.Error(o.w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			}
+			return err
+		}
 		return o.handleAsyncConversion(ctx, token)
 	}
 
@@ -208,6 +217,7 @@ func (o *requestOwner) handleAsyncConversion(ctx context.Context, token string) 
 
 	switch v := o.config.AsyncResponse.(type) {
 	case AsyncResponseToken:
+		o.w.Header().Set("Content-Type", "application/json")
 		return json.NewEncoder(o.w).Encode(asyncResponseToken{
 			RunID: o.run.RunID,
 			Token: token,
@@ -232,8 +242,7 @@ func (o *requestOwner) handleAsyncConversion(ctx context.Context, token string) 
 // tracking reports whether this request has a run.  a new request gets a run
 // when its first step runs, or at the start when the config sets
 // TrackAllRequests.  a request from Inngest always resumes a run.  a request
-// without a run sends no run headers, keeps no copy of the response, and makes
-// no call to the Inngest API.
+// without a run sends no run headers and makes no call to the Inngest API.
 func (o *requestOwner) tracking() bool {
 	if !o.tracked {
 		o.tracked = o.resumed || o.config.TrackAllRequests || len(o.mgr.Ops()) > 0
@@ -376,15 +385,14 @@ func (o *requestOwner) result() APIResult {
 // This is a blocking operation;  handleFinalCheckpointAsync runs it in the background.
 //
 // This returns an optional token used when redirecting to async outputs.
-func (o *requestOwner) handleFirstCheckpoint(ctx context.Context) string {
+func (o *requestOwner) handleFirstCheckpoint(ctx context.Context) (string, error) {
 	resp, err := o.provider.api.CheckpointNewRun(ctx, o.run.RunID, o.newRunData(), o.mgr.Ops()...)
 	if err != nil {
-		o.provider.logger.Error("error creating new api-based inngest run", "error", err, "run_id", o.run.RunID)
-		return ""
+		return "", fmt.Errorf("error creating new api-based inngest run %s: %w", o.run.RunID, err)
 	}
 
 	o.run = *resp
-	return resp.Token
+	return resp.Token, nil
 }
 
 // handleFinalCheckpointAsync creates a new run and checkpoints every op of a
@@ -423,14 +431,16 @@ func (o *requestOwner) newRunData() NewAPIRunData {
 		} else if requestBody, err = o.body.readAll(); err != nil {
 			o.provider.logger.Error("error reading request body creating new run", "error", err)
 		}
+		if o.body.truncated {
+			o.provider.logger.Warn("api request body is larger than MaxRequestBodySize and was truncated in the run",
+				"run_id", o.run.RunID,
+				"max_request_body_size", o.config.MaxRequestBodySize,
+			)
+		}
 
 		// TODO: End to end encryption, if enabled.
 	}
 
-	// Create new API-based run in a goroutine.  This can always happen in the background whilst
-	// the API is executing.
-	//
-	// Note that it is important that this finishes before we begin to checkpoint step data.
 	scheme := httputil.GetScheme(o.r)
 
 	return NewAPIRunData{

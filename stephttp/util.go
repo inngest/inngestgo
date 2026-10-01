@@ -3,6 +3,7 @@ package stephttp
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -182,13 +183,18 @@ type bodyRecorder struct {
 	body   io.ReadCloser
 	buf    bytes.Buffer
 	closed bool
+	// max is the most bytes that buf holds.  zero has no limit.  without a
+	// limit, a large upload stays in memory twice and goes to the Inngest API.
+	max int
+	// truncated is true when buf stopped at max.
+	truncated bool
 }
 
-func newBodyRecorder(body io.ReadCloser) *bodyRecorder {
+func newBodyRecorder(body io.ReadCloser, limit int) *bodyRecorder {
 	if body == nil {
 		body = http.NoBody
 	}
-	return &bodyRecorder{body: body}
+	return &bodyRecorder{body: body, max: limit}
 }
 
 func (b *bodyRecorder) Read(p []byte) (int, error) {
@@ -196,8 +202,19 @@ func (b *bodyRecorder) Read(p []byte) (int, error) {
 		return 0, http.ErrBodyReadAfterClose
 	}
 	n, err := b.body.Read(p)
-	b.buf.Write(p[:n])
+	b.copy(p[:n])
 	return n, err
+}
+
+// copy adds data to buf until buf holds max bytes.
+func (b *bodyRecorder) copy(data []byte) {
+	if b.max > 0 {
+		if remaining := b.max - b.buf.Len(); len(data) > remaining {
+			data = data[:max(remaining, 0)]
+			b.truncated = true
+		}
+	}
+	b.buf.Write(data)
 }
 
 // Close stops the handler from reading more of the body.  it leaves the
@@ -208,11 +225,25 @@ func (b *bodyRecorder) Close() error {
 	return nil
 }
 
-// readAll reads the part of the body that the handler did not read and returns
-// the full body.  call it before the handler returns, because the HTTP server
-// closes the underlying body after that.
+// readAll reads the part of the body that the handler did not read, up to max,
+// and returns the stored body.  it reads one byte past max to find out whether
+// the body is longer, and reads nothing more.  call it before the handler
+// returns, because the HTTP server closes the underlying body after that.
 func (b *bodyRecorder) readAll() ([]byte, error) {
-	_, err := io.Copy(&b.buf, b.body)
+	if b.max <= 0 {
+		_, err := io.Copy(&b.buf, b.body)
+		return b.buf.Bytes(), err
+	}
+	if b.truncated {
+		return b.buf.Bytes(), nil
+	}
+
+	var rest bytes.Buffer
+	_, err := io.CopyN(&rest, b.body, int64(b.max-b.buf.Len()+1))
+	if errors.Is(err, io.EOF) {
+		err = nil
+	}
+	b.copy(rest.Bytes())
 	return b.buf.Bytes(), err
 }
 

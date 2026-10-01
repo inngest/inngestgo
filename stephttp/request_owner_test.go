@@ -27,6 +27,8 @@ type blockingAPI struct {
 	inputs chan NewAPIRunData
 	// getStepsErr is the error that GetSteps returns.
 	getStepsErr error
+	// newRunErr is the error that CheckpointNewRun returns.
+	newRunErr error
 }
 
 func (b *blockingAPI) CheckpointNewRun(ctx context.Context, runID ulid.ULID, input NewAPIRunData, steps ...sdkrequest.GeneratorOpcode) (*CheckpointRun, error) {
@@ -35,6 +37,9 @@ func (b *blockingAPI) CheckpointNewRun(ctx context.Context, runID ulid.ULID, inp
 	}
 	b.called <- steps
 	<-b.release
+	if b.newRunErr != nil {
+		return nil, b.newRunErr
+	}
 	return &CheckpointRun{RunID: runID}, nil
 }
 
@@ -168,12 +173,18 @@ func TestNewRunStoresRequestBody(t *testing.T) {
 		// read is how many bytes the handler reads.  -1 reads the whole body.
 		read     int
 		omit     bool
+		limit    int
 		expected string
 	}{
 		{name: "handler reads the whole body", read: -1, expected: body},
 		{name: "handler reads no body", read: 0, expected: body},
 		{name: "handler reads part of the body", read: 5, expected: body},
 		{name: "config omits the body", read: -1, omit: true, expected: ""},
+		{name: "limit with the whole body read", read: -1, limit: 5, expected: body[:5]},
+		{name: "limit with no body read", read: 0, limit: 5, expected: body[:5]},
+		{name: "limit with less than the limit read", read: 3, limit: 5, expected: body[:5]},
+		{name: "limit with more than the limit read", read: 10, limit: 5, expected: body[:5]},
+		{name: "limit equal to the body size", read: 0, limit: len(body), expected: body},
 	}
 
 	for _, tt := range tests {
@@ -189,7 +200,7 @@ func TestNewRunStoresRequestBody(t *testing.T) {
 			p.api = api
 
 			var handlerRead string
-			opts := FnOpts{TrackAllRequests: true, OmitRequestBody: tt.omit}
+			opts := FnOpts{TrackAllRequests: true, OmitRequestBody: tt.omit, MaxRequestBodySize: tt.limit}
 			handler := p.HandleFunc(opts, func(w http.ResponseWriter, r *http.Request) {
 				var byt []byte
 				switch tt.read {
@@ -495,6 +506,7 @@ func TestAsyncResponseDefaults(t *testing.T) {
 
 			require.Equal(t, tt.expectedStatus, rec.Code)
 			if tt.expectedStatus == http.StatusOK {
+				require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 				var token asyncResponseToken
 				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &token))
 				require.NotEqual(t, ulid.ULID{}, token.RunID)
@@ -684,11 +696,50 @@ func TestStoredResponseBodyLimit(t *testing.T) {
 	}
 }
 
-func TestResolveConfigMaxResponseBodySize(t *testing.T) {
+func TestResolveConfigBodySizes(t *testing.T) {
 	p := Setup(SetupOpts{})
 	r := httptest.NewRequest(http.MethodGet, "/test", nil)
 
+	require.Equal(t, DefaultMaxRequestBodySize, p.resolveConfig(FnOpts{}, r).MaxRequestBodySize)
+	require.Equal(t, 10, p.resolveConfig(FnOpts{MaxRequestBodySize: 10}, r).MaxRequestBodySize)
 	require.Equal(t, DefaultMaxResponseBodySize, p.resolveConfig(FnOpts{}, r).MaxResponseBodySize)
 	require.Equal(t, DefaultMaxResponseBodySize, p.resolveConfig(FnOpts{MaxResponseBodySize: -1}, r).MaxResponseBodySize)
 	require.Equal(t, 10, p.resolveConfig(FnOpts{MaxResponseBodySize: 10}, r).MaxResponseBodySize)
+}
+
+func TestAsyncStartFailureFailsRequest(t *testing.T) {
+	tests := []struct {
+		name          string
+		asyncResponse AsyncResponse
+	}{
+		{name: "redirect response", asyncResponse: AsyncResponseRedirect{}},
+		{name: "token response", asyncResponse: AsyncResponseToken{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:    make(chan []sdkrequest.GeneratorOpcode, 1),
+				release:   make(chan struct{}),
+				newRunErr: fmt.Errorf("api unavailable"),
+			}
+			close(api.release)
+
+			p := Setup(SetupOpts{})
+			p.api = api
+
+			handler := p.HandleFunc(FnOpts{AsyncResponse: tt.asyncResponse}, func(w http.ResponseWriter, r *http.Request) {
+				step.Sleep(r.Context(), "wait", time.Second)
+				_, _ = w.Write([]byte("done"))
+			})
+
+			rec := httptest.NewRecorder()
+			handler(rec, httptest.NewRequest(http.MethodGet, "/test", nil))
+
+			require.Equal(t, http.StatusInternalServerError, rec.Code)
+			require.Equal(t, "Internal Server Error\n", rec.Body.String())
+			require.Empty(t, rec.Header().Get("Location"))
+			require.Len(t, api.called, 1)
+		})
+	}
 }

@@ -160,6 +160,9 @@ func (p *provider) resolveConfig(opts FnOpts, r *http.Request) FnOpts {
 	if opts.AsyncResponse == nil {
 		opts.AsyncResponse = AsyncResponseRedirect{}
 	}
+	if opts.MaxRequestBodySize <= 0 {
+		opts.MaxRequestBodySize = DefaultMaxRequestBodySize
+	}
 	if opts.MaxResponseBodySize <= 0 {
 		opts.MaxResponseBodySize = DefaultMaxResponseBodySize
 	}
