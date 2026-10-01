@@ -1,3 +1,8 @@
+## [v0.16.3] - 2026-10-01
+
+### 🚀 Features
+
+- *(stephttp)* Re-introduce middleware in a nicer way (#262)
 ## [v0.16.2] - 2026-10-01
 
 ### 🚀 Features
@@ -14,6 +19,7 @@
 ### ⚙️ Miscellaneous Tasks
 
 - Fix changelog validation (#246)
+- *(release)* V0.16.2 (#253)
 ## [v0.16.1] - 2026-08-28
 
 ### 🐛 Bug Fixes
