@@ -384,10 +384,12 @@ func (a apiClient) SendMany(ctx context.Context, e []any) (ids []string, err err
 
 	var respBody eventAPIResponse
 	decodeErr := json.NewDecoder(resp.Body).Decode(&respBody)
+	// a cancel during the body read breaks the decode for any status.  without
+	// this check an error status hides the cancel from errors.Is.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
 		if decodeErr != nil {
 			return nil, fmt.Errorf("error decoding event response: %w", decodeErr)
 		}

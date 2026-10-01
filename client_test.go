@@ -173,7 +173,7 @@ func TestSendStopsWhenContextIsCanceled(t *testing.T) {
 }
 
 func TestSendReturnsContextErrorWhenResponseReadIsCanceled(t *testing.T) {
-	for _, status := range []int{http.StatusOK, http.StatusCreated} {
+	for _, status := range []int{http.StatusOK, http.StatusCreated, http.StatusBadRequest} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
