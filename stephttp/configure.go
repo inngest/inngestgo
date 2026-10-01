@@ -13,11 +13,19 @@ type AsyncResponse interface {
 }
 
 // FnOpts allows you to define function configuration options for your API-based
-// Inngest function.
+// Inngest function.  Pass it to Provider.Handle or Provider.HandleFunc.
 type FnOpts struct {
-	// ID represents the function ID.  You should always set this, and must
-	// set this when the URL contains values or identifiers, eg /users/123.
+	// ID represents the function ID.  If empty, this is the http.ServeMux pattern
+	// that routed the request, eg. "POST /users/{id}".  Set this when the handler
+	// is not routed by an http.ServeMux and the URL contains values or identifiers,
+	// eg /users/123.  Otherwise each value creates a separate function.
 	ID string
+
+	// TrackAllRequests creates a run for every request, even when the handler
+	// runs no steps.
+	//
+	// By default, only requests that run steps create runs.
+	TrackAllRequests bool
 
 	// Retries indicates the number of retries in each step.  By default,
 	// for API-based synchronous functions this is zero.
@@ -40,7 +48,9 @@ type FnOpts struct {
 	// AsyncResponse determines how we respond to a user when an API hits an
 	// async step (eg. step.sleep, step.waitForEvent) or if a step errors.
 	//
-	// Mot of the time, AsyncResponseRedirect allows for seamless handling of
+	// If nil, this uses the provider's DefaultAsyncResponse.
+	//
+	// Most of the time, AsyncResponseRedirect allows for seamless handling of
 	// step errors and sleeping steps.
 	//
 	// For more information, see the Inngest docs.
@@ -51,30 +61,15 @@ type FnOpts struct {
 	AsyncResponse AsyncResponse
 }
 
-func Configure(ctx context.Context, opts FnOpts) {
-	if _, ok := ctx.Value(fnConfigCtx).(FnOpts); ok {
-		// Here, we should ideally warn, if we have a logger available.
-		return
-	}
-
-	if set, ok := ctx.Value(fnSetterCtx).(func(FnOpts)); ok {
-		set(opts)
-	}
-}
-
 // UpdateOmitResponseBody sets whether the response body will be tracked in logs and traces.
 // You can call this at any time before sending the API response and this will be respected.
+// It does nothing in a handler that Provider.Handle or Provider.HandleFunc does not wrap.
 func UpdateOmitResponseBody(ctx context.Context, to bool) {
-	cfg := configFromContext(ctx)
-	cfg.OmitResponseBody = to
-	Configure(ctx, cfg)
-}
-
-func configFromContext(ctx context.Context) FnOpts {
-	if get, ok := ctx.Value(fnGetterCtx).(func() FnOpts); ok {
-		return get()
+	if update, ok := ctx.Value(fnUpdateCtx).(func(func(*FnOpts))); ok {
+		update(func(opts *FnOpts) {
+			opts.OmitResponseBody = to
+		})
 	}
-	return FnOpts{}
 }
 
 // AsyncResponseRedirect redirects the user to a URL which will block until the async
@@ -122,9 +117,7 @@ type asyncResponseToken struct {
 type fnConfigKeyType string
 
 const (
-	fnConfigCtx = fnConfigKeyType("inngest-fn-opts")
-	fnSetterCtx = fnConfigKeyType("inngest-fn-setter")
-	fnGetterCtx = fnConfigKeyType("inngest-fn-getter")
+	fnUpdateCtx = fnConfigKeyType("inngest-fn-update")
 )
 
 type servableRestFn struct {

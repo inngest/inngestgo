@@ -60,12 +60,11 @@ func TestFinishedRunCheckpointsInBackground(t *testing.T) {
 	}
 
 	p := Setup(SetupOpts{
-		Domain:   "test.example.com",
-		Optional: OptionalSetupOpts{TrackAllEndpoints: true},
+		Domain: "test.example.com",
 	})
 	p.api = api
 
-	handler := p.ServeHTTP(func(w http.ResponseWriter, r *http.Request) {
+	handler := p.HandleFunc(FnOpts{TrackAllRequests: true}, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
 
@@ -132,7 +131,7 @@ func TestHandledStepErrorFinishesRun(t *testing.T) {
 			})
 			p.api = api
 
-			handler := p.ServeHTTP(func(w http.ResponseWriter, r *http.Request) {
+			handler := p.HandleFunc(FnOpts{}, func(w http.ResponseWriter, r *http.Request) {
 				_, err := step.Run(r.Context(), "a", func(ctx context.Context) (int, error) {
 					return 0, fmt.Errorf("boom")
 				})
@@ -186,15 +185,12 @@ func TestNewRunStoresRequestBody(t *testing.T) {
 			}
 			close(api.release)
 
-			p := Setup(SetupOpts{
-				Optional: OptionalSetupOpts{TrackAllEndpoints: true},
-			})
+			p := Setup(SetupOpts{})
 			p.api = api
 
 			var handlerRead string
-			handler := p.ServeHTTP(func(w http.ResponseWriter, r *http.Request) {
-				Configure(r.Context(), FnOpts{OmitRequestBody: tt.omit})
-
+			opts := FnOpts{TrackAllRequests: true, OmitRequestBody: tt.omit}
+			handler := p.HandleFunc(opts, func(w http.ResponseWriter, r *http.Request) {
 				var byt []byte
 				switch tt.read {
 				case -1:
@@ -259,12 +255,10 @@ func TestHandlerPanicRecordsError(t *testing.T) {
 			}
 			close(api.release)
 
-			p := Setup(SetupOpts{
-				Optional: OptionalSetupOpts{TrackAllEndpoints: true},
-			})
+			p := Setup(SetupOpts{})
 			p.api = api
 
-			handler := p.ServeHTTP(func(w http.ResponseWriter, r *http.Request) {
+			handler := p.HandleFunc(FnOpts{TrackAllRequests: true}, func(w http.ResponseWriter, r *http.Request) {
 				if tt.write != 0 {
 					w.WriteHeader(tt.write)
 					_, _ = w.Write([]byte("created"))
@@ -334,7 +328,7 @@ func TestResumeRequiresSavedSteps(t *testing.T) {
 			p.api = api
 
 			handlerCalled := false
-			handler := p.ServeHTTP(func(w http.ResponseWriter, r *http.Request) {
+			handler := p.HandleFunc(FnOpts{}, func(w http.ResponseWriter, r *http.Request) {
 				handlerCalled = true
 				_, _ = step.Run(r.Context(), "a", func(ctx context.Context) (int, error) {
 					return 1, nil
@@ -360,6 +354,148 @@ func TestResumeRequiresSavedSteps(t *testing.T) {
 			// goroutine that blocks on release, so it shows up in both checks.
 			require.Zero(t, p.inflight.Load())
 			require.Empty(t, api.called)
+		})
+	}
+}
+
+func TestFunctionIDDefaultsToRoutePattern(t *testing.T) {
+	tests := []struct {
+		name string
+		id   string
+		// pattern is the http.ServeMux pattern.  empty calls the handler without
+		// a ServeMux.
+		pattern  string
+		method   string
+		path     string
+		expected string
+	}{
+		{
+			name:     "config ID wins",
+			id:       "create-user",
+			pattern:  "POST /users/{id}",
+			method:   http.MethodPost,
+			path:     "/users/123",
+			expected: "create-user",
+		},
+		{
+			name:     "pattern with a method",
+			pattern:  "POST /users/{id}",
+			method:   http.MethodPost,
+			path:     "/users/123",
+			expected: "POST /users/{id}",
+		},
+		{
+			name:     "pattern without a method",
+			pattern:  "/users/{id}",
+			method:   http.MethodGet,
+			path:     "/users/123",
+			expected: "GET /users/{id}",
+		},
+		{
+			name:     "no ServeMux",
+			method:   http.MethodGet,
+			path:     "/users/123",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+				release: make(chan struct{}),
+				inputs:  make(chan NewAPIRunData, 1),
+			}
+			close(api.release)
+
+			p := Setup(SetupOpts{})
+			p.api = api
+
+			var handler http.Handler = p.HandleFunc(FnOpts{ID: tt.id, TrackAllRequests: true}, func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte("ok"))
+			})
+			if tt.pattern != "" {
+				mux := http.NewServeMux()
+				mux.Handle(tt.pattern, handler)
+				handler = mux
+			}
+
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(tt.method, tt.path, nil))
+			require.Equal(t, http.StatusOK, rec.Code)
+
+			select {
+			case input := <-api.inputs:
+				require.Equal(t, tt.expected, input.Fn)
+			case <-time.After(5 * time.Second):
+				t.Fatal("checkpoint was not sent")
+			}
+		})
+	}
+}
+
+func TestAsyncResponseDefaults(t *testing.T) {
+	tests := []struct {
+		name            string
+		providerDefault AsyncResponse
+		route           AsyncResponse
+		// omitResponse calls UpdateOmitResponseBody before the async step.
+		omitResponse   bool
+		expectedStatus int
+	}{
+		{
+			name:           "redirect without any config",
+			expectedStatus: http.StatusSeeOther,
+		},
+		{
+			name:            "provider default",
+			providerDefault: AsyncResponseToken{},
+			expectedStatus:  http.StatusOK,
+		},
+		{
+			name:            "provider default after UpdateOmitResponseBody",
+			providerDefault: AsyncResponseToken{},
+			omitResponse:    true,
+			expectedStatus:  http.StatusOK,
+		},
+		{
+			name:            "route config wins",
+			providerDefault: AsyncResponseToken{},
+			route:           AsyncResponseRedirect{},
+			expectedStatus:  http.StatusSeeOther,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+				release: make(chan struct{}),
+			}
+			close(api.release)
+
+			p := Setup(SetupOpts{
+				Optional: OptionalSetupOpts{DefaultAsyncResponse: tt.providerDefault},
+			})
+			p.api = api
+
+			handler := p.HandleFunc(FnOpts{AsyncResponse: tt.route}, func(w http.ResponseWriter, r *http.Request) {
+				if tt.omitResponse {
+					UpdateOmitResponseBody(r.Context(), true)
+				}
+				step.Sleep(r.Context(), "wait", time.Second)
+				_, _ = w.Write([]byte("done"))
+			})
+
+			rec := httptest.NewRecorder()
+			handler(rec, httptest.NewRequest(http.MethodGet, "/test", nil))
+
+			require.Equal(t, tt.expectedStatus, rec.Code)
+			if tt.expectedStatus == http.StatusOK {
+				var token asyncResponseToken
+				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &token))
+				require.NotEqual(t, ulid.ULID{}, token.RunID)
+			}
 		})
 	}
 }

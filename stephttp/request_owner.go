@@ -19,7 +19,9 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-func processRequest(p *provider, r *http.Request, w http.ResponseWriter, next http.HandlerFunc) error {
+func processRequest(p *provider, opts FnOpts, r *http.Request, w http.ResponseWriter, next http.HandlerFunc) error {
+	cfg := p.resolveConfig(opts, r)
+
 	owner := &requestOwner{
 		r:        r,
 		w:        newResponseWriter(w),
@@ -31,8 +33,10 @@ func processRequest(p *provider, r *http.Request, w http.ResponseWriter, next ht
 			APIBaseURL: env.APIServerURL(nil),
 		}),
 
+		config:    &cfg,
 		startTime: time.Now(),
 	}
+	owner.mgr.SetFn(servableRestFn{cfg})
 
 	owner.run = CheckpointRun{
 		RunID: ulid.MustNew(
@@ -65,7 +69,7 @@ type requestOwner struct {
 
 	// # Run-specific options
 
-	// config represents function-specific config.
+	// config represents function-specific config.  It is never nil.
 	config *FnOpts
 	// startTime tracks the start time of the API request. We must track this
 	// as early as possible.
@@ -84,11 +88,8 @@ func (o *requestOwner) handle(ctx context.Context) error {
 
 	// Always add the manager to context.
 	ctx = sdkrequest.SetManager(ctx, o.mgr)
-	// and add a setter which is invoked to update the function config via
-	// ctx during an API call (by calling stephttp.FnConfig)
-	ctx = o.withConfigSetter(ctx, o.mgr)
-	// Add a getter, allowing us to fetch config to update values (eg. in UpdateOmitResponseBody)
-	ctx = o.withConfigGetter(ctx)
+	// Add an updater, allowing the handler to change config via ctx (eg. in UpdateOmitResponseBody)
+	ctx = o.withConfigUpdater(ctx)
 
 	resumed, err := o.getExistingRun(ctx)
 	if err != nil {
@@ -141,15 +142,6 @@ func (o *requestOwner) handle(ctx context.Context) error {
 
 	result := o.call(ctx)
 
-	// After calling the API, check if we have nil function config;  if so, `stephttp.FnConfig`
-	// wasn't called.  In this case, use defaults.
-	if o.config == nil {
-		o.config = &FnOpts{
-			// Use the global provider default (which may be nil)
-			AsyncResponse: o.provider.opts.Optional.DefaultAsyncResponse,
-		}
-	}
-
 	// Note that at this point the request would typically have finished, therefore the
 	// context could be cancelled.  Stop this from breaking our API calls.
 	ctx = context.WithoutCancel(ctx)
@@ -166,9 +158,9 @@ func (o *requestOwner) handle(ctx context.Context) error {
 		o.w.Flush()
 	}
 
-	if len(o.mgr.Ops()) == 0 && !o.provider.opts.Optional.TrackAllEndpoints {
-		// If there are no steps and TrackAllEndpoints is disabled, we don't actually
-		// need to do anbything.
+	if len(o.mgr.Ops()) == 0 && !o.config.TrackAllRequests {
+		// If there are no steps and TrackAllRequests is disabled, we don't actually
+		// need to do anything.
 		return nil
 	}
 
@@ -202,19 +194,8 @@ func (o *requestOwner) handleAsyncConversion(ctx context.Context, token string) 
 		return nil
 	}
 
-	// Then handle the response to our user.
-	if o.config == nil {
-		o.config = &FnOpts{
-			// Use the global provider default (which may be nil)
-			AsyncResponse: o.provider.opts.Optional.DefaultAsyncResponse,
-		}
-	}
-
-	// Assign defaults if not set in provider config;  use redirect.
-	if o.config.AsyncResponse == nil {
-		o.config.AsyncResponse = AsyncResponseRedirect{}
-	}
-
+	// Then handle the response to our user.  resolveConfig always sets
+	// AsyncResponse.
 	var url string
 
 	switch v := o.config.AsyncResponse.(type) {
@@ -398,7 +379,7 @@ func (o *requestOwner) newRunData() NewAPIRunData {
 	)
 
 	// Only read the request body if the config specifies so.
-	if o.body != nil && (o.config == nil || !o.config.OmitRequestBody) {
+	if o.body != nil && !o.config.OmitRequestBody {
 		if o.w.hijacked {
 			requestBody = o.body.recorded()
 		} else if requestBody, err = o.body.readAll(); err != nil {
@@ -414,13 +395,6 @@ func (o *requestOwner) newRunData() NewAPIRunData {
 	// Note that it is important that this finishes before we begin to checkpoint step data.
 	scheme := httputil.GetScheme(o.r)
 
-	// fnID is the optional function slug to use.  If this is undefined, a slug will be generated
-	// using the URL and method directly in our API.
-	fnID := ""
-	if o.config != nil {
-		fnID = o.config.ID
-	}
-
 	return NewAPIRunData{
 		Domain:      scheme + "://" + o.r.Host,
 		Method:      o.r.Method,
@@ -429,7 +403,9 @@ func (o *requestOwner) newRunData() NewAPIRunData {
 		ContentType: o.r.Header.Get("Content-Type"),
 		QueryParams: o.r.URL.RawQuery,
 		Body:        requestBody,
-		Fn:          fnID,
+		// Fn is the optional function slug to use.  If this is empty, our API
+		// generates a slug using the URL and method.
+		Fn: o.config.ID,
 	}
 }
 
@@ -487,7 +463,7 @@ func (o *requestOwner) appendResult(ctx context.Context, res APIResult) error {
 		err          error
 	)
 
-	if o.config == nil || !o.config.OmitResponseBody {
+	if !o.config.OmitResponseBody {
 		responseBody, err = json.Marshal(res)
 		if err != nil {
 			return err
@@ -506,25 +482,10 @@ func (o *requestOwner) appendResult(ctx context.Context, res APIResult) error {
 	return nil
 }
 
-// withConfigSetter allows a caller to update the request's function config from a nested
+// withConfigUpdater allows a caller to update the request's function config from a nested
 // call via ctx.
-func (o *requestOwner) withConfigSetter(ctx context.Context, mgr sdkrequest.InvocationManager) context.Context {
-	return context.WithValue(ctx, fnSetterCtx, func(cfg FnOpts) {
-		o.setConfig(cfg, mgr)
+func (o *requestOwner) withConfigUpdater(ctx context.Context) context.Context {
+	return context.WithValue(ctx, fnUpdateCtx, func(update func(*FnOpts)) {
+		update(o.config)
 	})
-}
-
-func (o *requestOwner) withConfigGetter(ctx context.Context) context.Context {
-	return context.WithValue(ctx, fnGetterCtx, func() FnOpts {
-		if o.config == nil {
-			o.config = &FnOpts{}
-		}
-		return *o.config
-	})
-}
-
-func (o *requestOwner) setConfig(cfg FnOpts, mgr sdkrequest.InvocationManager) {
-	o.config = &cfg
-	// Set the servable function in our manager now that it exists.
-	mgr.SetFn(servableRestFn{cfg})
 }

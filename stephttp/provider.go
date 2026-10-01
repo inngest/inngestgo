@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -19,11 +20,12 @@ const (
 )
 
 type Provider interface {
-	// ServeHTTP is the middleware that allows the Inngest handler to work.
-	ServeHTTP(next http.HandlerFunc) http.HandlerFunc
+	// Handle wraps next as an Inngest API function that uses opts.  Only wrapped
+	// handlers create runs and accept resume requests from Inngest.
+	Handle(opts FnOpts, next http.Handler) http.Handler
 
-	// Middleware returns stdlib-style middleware to wrap other HTTP handlers
-	Middleware(next http.Handler) http.Handler
+	// HandleFunc is Handle for a handler function.
+	HandleFunc(opts FnOpts, next http.HandlerFunc) http.HandlerFunc
 
 	// Wait provides a mechanism to wait for all cehckpoints to finish before shutting down.
 	// Cancel the incoming context to quit polling for checkpoint progres.
@@ -40,12 +42,6 @@ type SetupOpts struct {
 }
 
 type OptionalSetupOpts struct {
-	// TrackAllEndpoints, if set to true, will track all requests to all API endpoints,
-	// even if they don't use steps.
-	//
-	// By default, only API endpoints that use steps will be tracked.
-	TrackAllEndpoints bool
-
 	// DefaultAsyncResponse defines the default async response type.  Each function
 	// can override the async repsonse type using function configuration.
 	DefaultAsyncResponse AsyncResponse
@@ -134,23 +130,52 @@ func Setup(opts SetupOpts) *provider {
 	return p
 }
 
-// Middleware returns an HTTP middleware handler that accepts an http.Handler and
-// returns an http.Handler.
-func (p *provider) Middleware(next http.Handler) http.Handler {
-	return p.ServeHTTP(next.ServeHTTP)
+// Handle wraps next as an Inngest API function that uses opts.  Only wrapped
+// handlers create runs and accept resume requests from Inngest.
+func (p *provider) Handle(opts FnOpts, next http.Handler) http.Handler {
+	return p.HandleFunc(opts, next.ServeHTTP)
 }
 
-// Handler wraps an HTTP HandlerFunc to provide Inngest step tooling directly inside of
-// your APIs.
-func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
+// HandleFunc is Handle for a handler function.
+func (p *provider) HandleFunc(opts FnOpts, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p.inflight.Add(1)
 		defer func() { p.inflight.Add(-1) }()
 
-		if err := processRequest(p, r, w, next); err != nil {
+		if err := processRequest(p, opts, r, w, next); err != nil {
 			p.logger.Error("error handling api request", "error", err)
 		}
 	}
+}
+
+// resolveConfig returns the config for one request to a wrapped handler.  each
+// request gets its own copy, because UpdateOmitResponseBody changes it.
+func (p *provider) resolveConfig(opts FnOpts, r *http.Request) FnOpts {
+	if opts.ID == "" {
+		opts.ID = defaultFunctionID(r)
+	}
+	if opts.AsyncResponse == nil {
+		opts.AsyncResponse = p.opts.Optional.DefaultAsyncResponse
+	}
+	if opts.AsyncResponse == nil {
+		opts.AsyncResponse = AsyncResponseRedirect{}
+	}
+	return opts
+}
+
+// defaultFunctionID returns the http.ServeMux pattern that routed r, with the
+// method added when the pattern has none.  for example, "POST /users/{id}".
+// it returns "" when no ServeMux routed r, and Inngest then builds the ID from
+// the method and the path.  without the pattern, each value in a path such as
+// /users/123 creates a separate function.
+func defaultFunctionID(r *http.Request) string {
+	if r.Pattern == "" {
+		return ""
+	}
+	if strings.Contains(r.Pattern, " ") {
+		return r.Pattern
+	}
+	return r.Method + " " + r.Pattern
 }
 
 // goTracked runs fn in a goroutine and counts it as in flight until fn returns.
