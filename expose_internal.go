@@ -32,6 +32,9 @@ type (
 	// concurrency limits.
 	ConfigThrottle = fn.Throttle
 
+	// ConfigThrottleScope controls how broadly throttle capacity is shared.
+	ConfigThrottleScope = fn.ThrottleScope
+
 	// ConfigRateLimit rate limits a function to a maximum number of runs over a given period.
 	// Any runs over the limit are ignored and are NOT enqueued for the future.
 	ConfigRateLimit = fn.RateLimit
@@ -95,6 +98,15 @@ type (
 	// - Ensuring that critical work is executed before other work in the queue.
 	// - Prioritizing certain jobs during onboarding to give the user a better first-run experience.
 	ConfigPriority = fn.Priority
+)
+
+const (
+	// ThrottleScopeFn limits throttle capacity to the current function.
+	ThrottleScopeFn = fn.ThrottleScopeFn
+	// ThrottleScopeEnv shares throttle capacity across functions in the current environment.
+	ThrottleScopeEnv = fn.ThrottleScopeEnv
+	// ThrottleScopeAccount shares throttle capacity across functions in the current account.
+	ThrottleScopeAccount = fn.ThrottleScopeAccount
 )
 
 type (
