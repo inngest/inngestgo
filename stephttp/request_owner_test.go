@@ -349,6 +349,9 @@ func TestResumeRequiresSavedSteps(t *testing.T) {
 
 			require.Equal(t, tt.expectedStatus, rec.Code)
 			require.Equal(t, tt.expectHandler, handlerCalled)
+			if tt.expectHandler {
+				require.Equal(t, runID, rec.Header().Get(headerRunID))
+			}
 
 			// a resume never creates a new run.  a new run checkpoints in a tracked
 			// goroutine that blocks on release, so it shows up in both checks.
@@ -496,6 +499,118 @@ func TestAsyncResponseDefaults(t *testing.T) {
 				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &token))
 				require.NotEqual(t, ulid.ULID{}, token.RunID)
 			}
+		})
+	}
+}
+
+func TestTrackingStartsAtFirstStep(t *testing.T) {
+	tests := []struct {
+		name string
+		opts FnOpts
+		// stepBeforeWrite runs a step before the handler writes.  stepAfterWrite
+		// runs a step after it.
+		stepBeforeWrite bool
+		stepAfterWrite  bool
+		expectRun       bool
+		expectHeader    bool
+		// expectedBody is the response body stored with the run.
+		expectedBody string
+	}{
+		{
+			name: "no steps",
+		},
+		{
+			name:         "no steps with TrackAllRequests",
+			opts:         FnOpts{TrackAllRequests: true},
+			expectRun:    true,
+			expectHeader: true,
+			expectedBody: "ok",
+		},
+		{
+			name:            "step before the response",
+			stepBeforeWrite: true,
+			expectRun:       true,
+			expectHeader:    true,
+			expectedBody:    "ok",
+		},
+		{
+			name:           "step after the response",
+			stepAfterWrite: true,
+			expectRun:      true,
+			expectedBody:   "",
+		},
+		{
+			name:            "step before the response with OmitResponseBody",
+			opts:            FnOpts{OmitResponseBody: true},
+			stepBeforeWrite: true,
+			expectRun:       true,
+			expectHeader:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+				release: make(chan struct{}),
+			}
+			close(api.release)
+
+			p := Setup(SetupOpts{})
+			p.api = api
+
+			runStep := func(r *http.Request) {
+				_, _ = step.Run(r.Context(), "a", func(ctx context.Context) (int, error) {
+					return 1, nil
+				})
+			}
+			handler := p.HandleFunc(tt.opts, func(w http.ResponseWriter, r *http.Request) {
+				if tt.stepBeforeWrite {
+					runStep(r)
+				}
+				_, _ = w.Write([]byte("ok"))
+				if tt.stepAfterWrite {
+					runStep(r)
+				}
+			})
+
+			rec := httptest.NewRecorder()
+			handler(rec, httptest.NewRequest(http.MethodGet, "/test", nil))
+			require.Equal(t, "ok", rec.Body.String())
+
+			if tt.expectHeader {
+				_, err := ulid.Parse(rec.Header().Get(headerRunID))
+				require.NoError(t, err)
+				require.NotEmpty(t, rec.Header().Get("X-Inngest-SDK"))
+			} else {
+				require.Empty(t, rec.Header().Get(headerRunID))
+				require.Empty(t, rec.Header().Get("X-Inngest-SDK"))
+			}
+
+			if !tt.expectRun {
+				// a new run checkpoints in a tracked goroutine that sends to called
+				// before it returns, so a run shows up in one of these checks.
+				require.Zero(t, p.inflight.Load())
+				require.Empty(t, api.called)
+				return
+			}
+
+			var steps []sdkrequest.GeneratorOpcode
+			select {
+			case steps = <-api.called:
+			case <-time.After(5 * time.Second):
+				t.Fatal("checkpoint was not sent")
+			}
+			complete := steps[len(steps)-1]
+			require.Equal(t, enums.OpcodeRunComplete, complete.Op)
+
+			if tt.opts.OmitResponseBody {
+				require.Empty(t, complete.Data)
+				return
+			}
+			var result APIResult
+			require.NoError(t, json.Unmarshal(complete.Data, &result))
+			require.Equal(t, tt.expectedBody, result.Body)
 		})
 	}
 }

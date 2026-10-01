@@ -30,6 +30,13 @@ type responseWriter struct {
 	// wroteHeader is true once the status line goes to the client.  after
 	// that, the status code cannot change.
 	wroteHeader bool
+
+	// onHeader runs once, just before the status line and headers go to the
+	// client.  it is the last point at which a header can be added.
+	onHeader func(http.Header)
+	// capture reports whether a write is copied into body.  nil copies every
+	// write.  a write that it skips is missing from the stored response.
+	capture func() bool
 }
 
 func newResponseWriter(w http.ResponseWriter) *responseWriter {
@@ -42,18 +49,29 @@ func newResponseWriter(w http.ResponseWriter) *responseWriter {
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
+	rw.beforeHeader()
 	rw.statusCode = code
-	rw.wroteHeader = true
 	rw.ResponseWriter.WriteHeader(code)
 }
 
 func (rw *responseWriter) Write(data []byte) (int, error) {
-	rw.wroteHeader = true
+	rw.beforeHeader()
 	// Don't capture response body after hijacking
-	if !rw.hijacked {
+	if !rw.hijacked && (rw.capture == nil || rw.capture()) {
 		rw.body.Write(data)
 	}
 	return rw.ResponseWriter.Write(data)
+}
+
+// beforeHeader marks the headers as sent and runs onHeader the first time.
+func (rw *responseWriter) beforeHeader() {
+	if rw.wroteHeader {
+		return
+	}
+	rw.wroteHeader = true
+	if rw.onHeader != nil {
+		rw.onHeader(rw.Header())
+	}
 }
 
 // Hijack implements http.Hijacker interface, passing through to the underlying writer if supported
@@ -71,7 +89,7 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 // Flush implements http.Flusher interface, passing through to the underlying writer if supported
 func (rw *responseWriter) Flush() {
-	rw.wroteHeader = true
+	rw.beforeHeader()
 	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()
 	}

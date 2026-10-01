@@ -37,6 +37,8 @@ func processRequest(p *provider, opts FnOpts, r *http.Request, w http.ResponseWr
 		startTime: time.Now(),
 	}
 	owner.mgr.SetFn(servableRestFn{cfg})
+	owner.w.onHeader = owner.setRunHeaders
+	owner.w.capture = owner.captureResponse
 
 	owner.run = CheckpointRun{
 		RunID: ulid.MustNew(
@@ -77,15 +79,15 @@ type requestOwner struct {
 	// run represents the IDs for the current sync run.
 	run CheckpointRun
 	// body records the request body for a new run.  It is nil when Inngest
-	// resumes an existing run.
+	// resumes an existing run, or when the config omits the request body.
 	body *bodyRecorder
+	// resumed is true when Inngest sent this request to resume a run.
+	resumed bool
+	// tracked is true once this request has a run.  See tracking.
+	tracked bool
 }
 
 func (o *requestOwner) handle(ctx context.Context) error {
-	// Always add the run ID to the header.
-	o.w.Header().Add("x-run-id", o.run.RunID.String())
-	o.w.Header().Add("X-Inngest-SDK", version.GetVersion())
-
 	// Always add the manager to context.
 	ctx = sdkrequest.SetManager(ctx, o.mgr)
 	// Add an updater, allowing the handler to change config via ctx (eg. in UpdateOmitResponseBody)
@@ -100,6 +102,8 @@ func (o *requestOwner) handle(ctx context.Context) error {
 		return err
 	}
 	if resumed {
+		o.resumed = true
+
 		// In this case, we're re-entering an existing run, which means we're now
 		// running async and are responding to an Inngest's executor call.
 		//
@@ -136,9 +140,12 @@ func (o *requestOwner) handle(ctx context.Context) error {
 	o.mgr.Request().CallCtx.MaxAttempts = &maxAttempts
 
 	// record the body as the handler reads it.  without this, the new run stores
-	// an empty body whenever the handler reads the request body.
-	o.body = newBodyRecorder(o.r.Body)
-	o.r.Body = o.body
+	// an empty body whenever the handler reads the request body.  the handler can
+	// read the body before its first step, so this starts before the run does.
+	if !o.config.OmitRequestBody {
+		o.body = newBodyRecorder(o.r.Body)
+		o.r.Body = o.body
+	}
 
 	result := o.call(ctx)
 
@@ -219,6 +226,36 @@ func (o *requestOwner) handleAsyncConversion(ctx context.Context, token string) 
 
 	http.Redirect(o.w, o.r, url, http.StatusSeeOther)
 	return nil
+}
+
+// tracking reports whether this request has a run.  a new request gets a run
+// when its first step runs, or at the start when the config sets
+// TrackAllRequests.  a request from Inngest always resumes a run.  a request
+// without a run sends no run headers, keeps no copy of the response, and makes
+// no call to the Inngest API.
+func (o *requestOwner) tracking() bool {
+	if !o.tracked {
+		o.tracked = o.resumed || o.config.TrackAllRequests || len(o.mgr.Ops()) > 0
+	}
+	return o.tracked
+}
+
+// setRunHeaders adds the run headers when the request has a run.  it runs just
+// before the headers go to the client, so a handler that writes before its
+// first step sends no run ID.
+func (o *requestOwner) setRunHeaders(h http.Header) {
+	if !o.tracking() {
+		return
+	}
+	h.Set(headerRunID, o.run.RunID.String())
+	h.Set("X-Inngest-SDK", version.GetVersion())
+}
+
+// captureResponse reports whether a response write is stored with the run.
+// writes that happen before the first step are not stored.  without this check,
+// every response on a wrapped route stays in memory until the handler returns.
+func (o *requestOwner) captureResponse() bool {
+	return !o.config.OmitResponseBody && o.tracking()
 }
 
 // getExistingRun loads the saved steps when Inngest sends the request to resume
