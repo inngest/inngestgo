@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,6 +34,11 @@ func Test_INNGEST_BASE_URL(t *testing.T) {
 			mockInngestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				counter++
 				w.WriteHeader(http.StatusOK)
+				// the client fails a send when the event API response body is
+				// not JSON.
+				if strings.HasPrefix(r.URL.Path, "/e/") {
+					_, _ = w.Write([]byte(`{"ids":["id"],"status":200}`))
+				}
 			}))
 			defer mockInngestServer.Close()
 
