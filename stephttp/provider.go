@@ -107,7 +107,8 @@ type provider struct {
 	mw     *middleware.MiddlewareManager
 	logger *slog.Logger
 
-	// inflight records the total number of in flight requests.
+	// inflight records the total number of in flight requests and background
+	// checkpoints.  Wait returns only when this is zero.
 	inflight *atomic.Int32
 }
 
@@ -150,6 +151,17 @@ func (p *provider) ServeHTTP(next http.HandlerFunc) http.HandlerFunc {
 			p.logger.Error("error handling api request", "error", err)
 		}
 	}
+}
+
+// goTracked runs fn in a goroutine and counts it as in flight until fn returns.
+// without this, Wait can return and the process can exit before a checkpoint
+// reaches the Inngest API, which loses the run.
+func (p *provider) goTracked(fn func()) {
+	p.inflight.Add(1)
+	go func() {
+		defer p.inflight.Add(-1)
+		fn()
+	}()
 }
 
 // Wait returns a channel that is sent when all in progress checkpoints finish.

@@ -1,0 +1,96 @@
+package stephttp
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/inngest/inngest/pkg/enums"
+	"github.com/inngest/inngestgo/internal/sdkrequest"
+	"github.com/oklog/ulid/v2"
+	"github.com/stretchr/testify/require"
+)
+
+// blockingAPI holds every CheckpointNewRun call until release is closed.
+type blockingAPI struct {
+	called  chan []sdkrequest.GeneratorOpcode
+	release chan struct{}
+}
+
+func (b *blockingAPI) CheckpointNewRun(ctx context.Context, runID ulid.ULID, input NewAPIRunData, steps ...sdkrequest.GeneratorOpcode) (*CheckpointRun, error) {
+	b.called <- steps
+	<-b.release
+	return &CheckpointRun{RunID: runID}, nil
+}
+
+func (b *blockingAPI) CheckpointSteps(ctx context.Context, run CheckpointRun, steps []sdkrequest.GeneratorOpcode) error {
+	return nil
+}
+
+func (b *blockingAPI) CheckpointResponse(ctx context.Context, run CheckpointRun, result APIResult) error {
+	return nil
+}
+
+func (b *blockingAPI) GetSteps(ctx context.Context, runID ulid.ULID) (map[string]json.RawMessage, error) {
+	return nil, nil
+}
+
+func TestFinishedRunCheckpointsInBackground(t *testing.T) {
+	api := &blockingAPI{
+		called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+		release: make(chan struct{}),
+	}
+
+	p := Setup(SetupOpts{
+		Domain:   "test.example.com",
+		Optional: OptionalSetupOpts{TrackAllEndpoints: true},
+	})
+	p.api = api
+
+	handler := p.ServeHTTP(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	rec := httptest.NewRecorder()
+	served := make(chan struct{})
+	go func() {
+		handler(rec, httptest.NewRequest(http.MethodGet, "/test", nil))
+		close(served)
+	}()
+
+	select {
+	case <-served:
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler waited for the checkpoint to finish")
+	}
+	require.Equal(t, "ok", rec.Body.String())
+
+	var steps []sdkrequest.GeneratorOpcode
+	select {
+	case steps = <-api.called:
+	case <-time.After(5 * time.Second):
+		t.Fatal("checkpoint was not sent")
+	}
+	require.Len(t, steps, 1)
+	require.Equal(t, enums.OpcodeRunComplete, steps[0].Op)
+
+	done := p.Wait(t.Context())
+
+	// Wait polls once a second, so 1.5 seconds covers at least one check.
+	select {
+	case <-done:
+		t.Fatal("Wait returned while a checkpoint was in flight")
+	case <-time.After(1500 * time.Millisecond):
+	}
+
+	close(api.release)
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Wait did not return after the checkpoint finished")
+	}
+}
