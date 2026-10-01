@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"runtime/debug"
@@ -73,6 +72,9 @@ type requestOwner struct {
 	startTime time.Time
 	// run represents the IDs for the current sync run.
 	run CheckpointRun
+	// body records the request body for a new run.  It is nil when Inngest
+	// resumes an existing run.
+	body *bodyRecorder
 }
 
 func (o *requestOwner) handle(ctx context.Context) error {
@@ -88,7 +90,15 @@ func (o *requestOwner) handle(ctx context.Context) error {
 	// Add a getter, allowing us to fetch config to update values (eg. in UpdateOmitResponseBody)
 	ctx = o.withConfigGetter(ctx)
 
-	if o.getExistingRun(ctx) {
+	resumed, err := o.getExistingRun(ctx)
+	if err != nil {
+		// Inngest sent this request to resume a run.  a 500 makes the executor send
+		// it again.  without this, the request runs the handler as a new run and
+		// repeats every step after the last saved one.
+		http.Error(o.w, "error loading run state", http.StatusInternalServerError)
+		return err
+	}
+	if resumed {
 		// In this case, we're re-entering an existing run, which means we're now
 		// running async and are responding to an Inngest's executor call.
 		//
@@ -116,6 +126,19 @@ func (o *requestOwner) handle(ctx context.Context) error {
 	// Here, we're always creating a net-new run.  Firstly, we must hit the API endpoint
 	// to begin the logic and check for any function config.  This will continue to execute
 	// step.run calls until either an error, an async step, or the fn finishes.
+	//
+	// a new run gets one attempt, so a step error is final and step.Run returns it
+	// to the handler.  without this, a step error that the handler catches still
+	// makes the run async, and the async response is written after the handler's
+	// own response.
+	maxAttempts := 1
+	o.mgr.Request().CallCtx.MaxAttempts = &maxAttempts
+
+	// record the body as the handler reads it.  without this, the new run stores
+	// an empty body whenever the handler reads the request body.
+	o.body = newBodyRecorder(o.r.Body)
+	o.r.Body = o.body
+
 	result := o.call(ctx)
 
 	// After calling the API, check if we have nil function config;  if so, `stephttp.FnConfig`
@@ -217,16 +240,19 @@ func (o *requestOwner) handleAsyncConversion(ctx context.Context, token string) 
 	return nil
 }
 
-func (o *requestOwner) getExistingRun(ctx context.Context) bool {
+// getExistingRun loads the saved steps when Inngest sends the request to resume
+// a run.  it returns false for a request that starts a new run, and an error
+// when the request resumes a run whose steps cannot be loaded.
+func (o *requestOwner) getExistingRun(ctx context.Context) (bool, error) {
 	// Validate signature and extract run information
 	if !validateResumeRequestSignature(ctx, o.r, o.provider.opts.signingKey(), o.provider.opts.signingKeyFallback()) {
-		return false
+		return false, nil
 	}
 
 	// Extract headers after validation passes
 	runID, err := ulid.Parse(o.r.Header.Get(headerRunID))
 	if err != nil {
-		return false
+		return false, nil
 	}
 
 	o.run.RunID = runID
@@ -235,7 +261,7 @@ func (o *requestOwner) getExistingRun(ctx context.Context) bool {
 	// XXX: Use V2 API when created.
 	steps, err := o.provider.api.GetSteps(ctx, o.run.RunID)
 	if err != nil {
-		return false
+		return false, fmt.Errorf("error loading steps for run %s: %w", o.run.RunID, err)
 	}
 
 	// This is now always async.
@@ -244,7 +270,7 @@ func (o *requestOwner) getExistingRun(ctx context.Context) bool {
 
 	// XXX: When using the V2 API, we should update o.run with the new run context.
 
-	return true
+	return true, nil
 }
 
 // call initializes the hijacking control flow, then executes the API-based Inngest function.
@@ -253,9 +279,7 @@ func (o *requestOwner) getExistingRun(ctx context.Context) bool {
 //
 // It is the callers responsibility to handle the generated opcodes added to the invocation
 // manager.
-func (o *requestOwner) call(ctx context.Context) APIResult {
-	var panicErr error
-
+func (o *requestOwner) call(ctx context.Context) (result APIResult) {
 	defer func() {
 		if r := recover(); r != nil {
 			callCtx := o.mgr.CallContext()
@@ -281,27 +305,41 @@ func (o *requestOwner) call(ctx context.Context) APIResult {
 			// checkpointing.
 
 			panicStack := string(debug.Stack())
-			panicErr = fmt.Errorf("function panicked: %v.  stack:\n%s", r, panicStack)
+			o.provider.logger.Error("api handler panicked",
+				"error", r,
+				"run_id", o.run.RunID,
+				"stack", panicStack,
+			)
 
 			o.provider.mw.AfterExecution(ctx, callCtx, nil, nil)
 			o.provider.mw.OnPanic(ctx, callCtx, r, panicStack)
+
+			// the panic is recovered here, so net/http does not abort the response.
+			// without this, a client gets 200 with an empty body from a handler that
+			// crashed.
+			if !o.w.wroteHeader && !o.w.hijacked {
+				http.Error(o.w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			}
+
+			result = o.result()
+			result.Error = fmt.Sprintf("function panicked: %v.  stack:\n%s", r, panicStack)
 		}
 	}()
 
 	// Execute the handler with step tooling available (o.w is already wrapped)
 	o.next(o.w, o.r.WithContext(ctx))
-	duration := time.Since(o.startTime)
+	return o.result()
+}
 
+// result returns the API result from the response that the handler wrote.
+func (o *requestOwner) result() APIResult {
 	result := APIResult{
 		Status:   o.w.statusCode,
 		Headers:  flattenHeaders(o.w.Header()),
 		Body:     o.w.body.String(),
-		Duration: duration,
+		Duration: time.Since(o.startTime),
 	}
 
-	if panicErr != nil {
-		result.Error = panicErr.Error()
-	}
 	if o.mgr.Err() != nil {
 		result.Error = o.mgr.Err().Error()
 	}
@@ -360,14 +398,11 @@ func (o *requestOwner) newRunData() NewAPIRunData {
 	)
 
 	// Only read the request body if the config specifies so.
-	if o.config == nil || !o.config.OmitRequestBody {
-		requestBody, err = readRequestBody(o.r)
-		if err != nil {
-			if errors.Is(err, http.ErrBodyReadAfterClose) {
-				o.provider.logger.Warn("attempted to read request body twice")
-			} else {
-				o.provider.logger.Error("error reading request body creating new run", "error", err)
-			}
+	if o.body != nil && (o.config == nil || !o.config.OmitRequestBody) {
+		if o.w.hijacked {
+			requestBody = o.body.recorded()
+		} else if requestBody, err = o.body.readAll(); err != nil {
+			o.provider.logger.Error("error reading request body creating new run", "error", err)
 		}
 
 		// TODO: End to end encryption, if enabled.

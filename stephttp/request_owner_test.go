@@ -3,13 +3,18 @@ package stephttp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/inngest/inngest/pkg/enums"
+	"github.com/inngest/inngestgo"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
+	"github.com/inngest/inngestgo/step"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/require"
 )
@@ -18,9 +23,16 @@ import (
 type blockingAPI struct {
 	called  chan []sdkrequest.GeneratorOpcode
 	release chan struct{}
+	// inputs receives the run data of each call when it is not nil.
+	inputs chan NewAPIRunData
+	// getStepsErr is the error that GetSteps returns.
+	getStepsErr error
 }
 
 func (b *blockingAPI) CheckpointNewRun(ctx context.Context, runID ulid.ULID, input NewAPIRunData, steps ...sdkrequest.GeneratorOpcode) (*CheckpointRun, error) {
+	if b.inputs != nil {
+		b.inputs <- input
+	}
 	b.called <- steps
 	<-b.release
 	return &CheckpointRun{RunID: runID}, nil
@@ -35,7 +47,10 @@ func (b *blockingAPI) CheckpointResponse(ctx context.Context, run CheckpointRun,
 }
 
 func (b *blockingAPI) GetSteps(ctx context.Context, runID ulid.ULID) (map[string]json.RawMessage, error) {
-	return nil, nil
+	if b.getStepsErr != nil {
+		return nil, b.getStepsErr
+	}
+	return map[string]json.RawMessage{}, nil
 }
 
 func TestFinishedRunCheckpointsInBackground(t *testing.T) {
@@ -92,5 +107,259 @@ func TestFinishedRunCheckpointsInBackground(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Wait did not return after the checkpoint finished")
+	}
+}
+
+func TestHandledStepErrorFinishesRun(t *testing.T) {
+	tests := []struct {
+		name          string
+		asyncResponse AsyncResponse
+	}{
+		{name: "token response", asyncResponse: AsyncResponseToken{}},
+		{name: "redirect response", asyncResponse: AsyncResponseRedirect{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+				release: make(chan struct{}),
+			}
+			close(api.release)
+
+			p := Setup(SetupOpts{
+				Optional: OptionalSetupOpts{DefaultAsyncResponse: tt.asyncResponse},
+			})
+			p.api = api
+
+			handler := p.ServeHTTP(func(w http.ResponseWriter, r *http.Request) {
+				_, err := step.Run(r.Context(), "a", func(ctx context.Context) (int, error) {
+					return 0, fmt.Errorf("boom")
+				})
+				if err != nil {
+					http.Error(w, "handled", http.StatusUnauthorized)
+				}
+			})
+
+			rec := httptest.NewRecorder()
+			handler(rec, httptest.NewRequest(http.MethodGet, "/test", nil))
+
+			require.Equal(t, http.StatusUnauthorized, rec.Code)
+			require.Equal(t, "handled\n", rec.Body.String())
+			require.Empty(t, rec.Header().Get("Location"))
+
+			var steps []sdkrequest.GeneratorOpcode
+			select {
+			case steps = <-api.called:
+			case <-time.After(5 * time.Second):
+				t.Fatal("checkpoint was not sent")
+			}
+			require.Len(t, steps, 2)
+			require.Equal(t, enums.OpcodeStepFailed, steps[0].Op)
+			require.Equal(t, enums.OpcodeRunComplete, steps[1].Op)
+		})
+	}
+}
+
+func TestNewRunStoresRequestBody(t *testing.T) {
+	const body = `{"hello":"world"}`
+
+	tests := []struct {
+		name string
+		// read is how many bytes the handler reads.  -1 reads the whole body.
+		read     int
+		omit     bool
+		expected string
+	}{
+		{name: "handler reads the whole body", read: -1, expected: body},
+		{name: "handler reads no body", read: 0, expected: body},
+		{name: "handler reads part of the body", read: 5, expected: body},
+		{name: "config omits the body", read: -1, omit: true, expected: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+				release: make(chan struct{}),
+				inputs:  make(chan NewAPIRunData, 1),
+			}
+			close(api.release)
+
+			p := Setup(SetupOpts{
+				Optional: OptionalSetupOpts{TrackAllEndpoints: true},
+			})
+			p.api = api
+
+			var handlerRead string
+			handler := p.ServeHTTP(func(w http.ResponseWriter, r *http.Request) {
+				Configure(r.Context(), FnOpts{OmitRequestBody: tt.omit})
+
+				var byt []byte
+				switch tt.read {
+				case -1:
+					byt, _ = io.ReadAll(r.Body)
+				case 0:
+				default:
+					byt = make([]byte, tt.read)
+					_, _ = io.ReadFull(r.Body, byt)
+				}
+				_ = r.Body.Close()
+				handlerRead = string(byt)
+				_, _ = w.Write([]byte("ok"))
+			})
+
+			req := httptest.NewRequest(http.MethodPost, "/test", strings.NewReader(body))
+			handler(httptest.NewRecorder(), req)
+
+			switch tt.read {
+			case -1:
+				require.Equal(t, body, handlerRead)
+			default:
+				require.Equal(t, body[:tt.read], handlerRead)
+			}
+
+			select {
+			case input := <-api.inputs:
+				require.Equal(t, tt.expected, string(input.Body))
+			case <-time.After(5 * time.Second):
+				t.Fatal("checkpoint was not sent")
+			}
+		})
+	}
+}
+
+func TestHandlerPanicRecordsError(t *testing.T) {
+	tests := []struct {
+		name string
+		// write is the response the handler writes before it panics.  zero writes
+		// nothing.
+		write          int
+		expectedStatus int
+		expectedBody   string
+	}{
+		{
+			name:           "panic before the response",
+			expectedStatus: http.StatusInternalServerError,
+			expectedBody:   "Internal Server Error\n",
+		},
+		{
+			name:           "panic after the response",
+			write:          http.StatusCreated,
+			expectedStatus: http.StatusCreated,
+			expectedBody:   "created",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+				release: make(chan struct{}),
+			}
+			close(api.release)
+
+			p := Setup(SetupOpts{
+				Optional: OptionalSetupOpts{TrackAllEndpoints: true},
+			})
+			p.api = api
+
+			handler := p.ServeHTTP(func(w http.ResponseWriter, r *http.Request) {
+				if tt.write != 0 {
+					w.WriteHeader(tt.write)
+					_, _ = w.Write([]byte("created"))
+				}
+				panic("kaboom")
+			})
+
+			rec := httptest.NewRecorder()
+			handler(rec, httptest.NewRequest(http.MethodGet, "/test", nil))
+
+			require.Equal(t, tt.expectedStatus, rec.Code)
+			require.Equal(t, tt.expectedBody, rec.Body.String())
+
+			var steps []sdkrequest.GeneratorOpcode
+			select {
+			case steps = <-api.called:
+			case <-time.After(5 * time.Second):
+				t.Fatal("checkpoint was not sent")
+			}
+			require.Len(t, steps, 1)
+			require.Equal(t, enums.OpcodeRunComplete, steps[0].Op)
+
+			var result APIResult
+			require.NoError(t, json.Unmarshal(steps[0].Data, &result))
+			require.Equal(t, tt.expectedStatus, result.Status)
+			require.Equal(t, tt.expectedBody, result.Body)
+			require.Contains(t, result.Error, "function panicked: kaboom")
+		})
+	}
+}
+
+func TestResumeRequiresSavedSteps(t *testing.T) {
+	const signingKey = "signkey-test-12345678"
+
+	tests := []struct {
+		name           string
+		getStepsErr    error
+		expectedStatus int
+		expectHandler  bool
+	}{
+		{
+			name:           "steps load",
+			expectedStatus: http.StatusPartialContent,
+			expectHandler:  true,
+		},
+		{
+			name:           "steps fail to load",
+			getStepsErr:    fmt.Errorf("api unavailable"),
+			expectedStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("INNGEST_DEV", "")
+
+			api := &blockingAPI{
+				called:      make(chan []sdkrequest.GeneratorOpcode, 1),
+				release:     make(chan struct{}),
+				getStepsErr: tt.getStepsErr,
+			}
+			t.Cleanup(func() { close(api.release) })
+
+			p := Setup(SetupOpts{
+				Optional: OptionalSetupOpts{SigningKey: signingKey},
+			})
+			p.api = api
+
+			handlerCalled := false
+			handler := p.ServeHTTP(func(w http.ResponseWriter, r *http.Request) {
+				handlerCalled = true
+				_, _ = step.Run(r.Context(), "a", func(ctx context.Context) (int, error) {
+					return 1, nil
+				})
+				_, _ = w.Write([]byte("ok"))
+			})
+
+			runID := ulid.Make().String()
+			sig, err := inngestgo.Sign(context.Background(), time.Now(), []byte(signingKey), []byte(runID))
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodPost, "/test", nil)
+			req.Header.Set(headerRunID, runID)
+			req.Header.Set(headerSignature, sig)
+
+			rec := httptest.NewRecorder()
+			handler(rec, req)
+
+			require.Equal(t, tt.expectedStatus, rec.Code)
+			require.Equal(t, tt.expectHandler, handlerCalled)
+
+			// a resume never creates a new run.  a new run checkpoints in a tracked
+			// goroutine that blocks on release, so it shows up in both checks.
+			require.Zero(t, p.inflight.Load())
+			require.Empty(t, api.called)
+		})
 	}
 }
