@@ -19,7 +19,7 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-func processRequest(p *provider, opts FnOpts, r *http.Request, w http.ResponseWriter, next http.HandlerFunc) error {
+func processRequest(p *provider, opts FnOpts, known bool, r *http.Request, w http.ResponseWriter, next http.HandlerFunc) error {
 	cfg := p.resolveConfig(opts, r)
 
 	owner := &requestOwner{
@@ -34,6 +34,7 @@ func processRequest(p *provider, opts FnOpts, r *http.Request, w http.ResponseWr
 		}),
 
 		config:    &cfg,
+		known:     known,
 		startTime: time.Now(),
 	}
 	owner.mgr.SetFn(servableRestFn{cfg})
@@ -86,6 +87,12 @@ type requestOwner struct {
 	resumed bool
 	// tracked is true once this request has a run.  See tracking.
 	tracked bool
+	// known is true once the wrapper knows that the handler is an Inngest
+	// function.  See captureResponse.
+	known bool
+	// started is true once the new run is sent to the Inngest API.  after that,
+	// the run keeps its function ID.
+	started bool
 }
 
 func (o *requestOwner) handle(ctx context.Context) error {
@@ -261,11 +268,13 @@ func (o *requestOwner) setRunHeaders(h http.Header) {
 	h.Set("X-Inngest-SDK", version.GetVersion())
 }
 
-// captureResponse reports whether a response write is stored with the run.  it
-// does not wait for the first step, because a handler can respond before it
-// runs its steps.  MaxResponseBodySize limits the stored copy.
+// captureResponse reports whether a response write is stored with the run.  a
+// known function stores from the first write, because a handler can respond
+// before it runs its steps.  other requests store from their first step, so
+// routes behind Provider.Middleware that run no steps keep no copy.
+// MaxResponseBodySize limits the stored copy.
 func (o *requestOwner) captureResponse() bool {
-	return !o.config.OmitResponseBody
+	return !o.config.OmitResponseBody && (o.known || o.tracking())
 }
 
 // getExistingRun loads the saved steps when Inngest sends the request to resume
@@ -386,6 +395,7 @@ func (o *requestOwner) result() APIResult {
 //
 // This returns an optional token used when redirecting to async outputs.
 func (o *requestOwner) handleFirstCheckpoint(ctx context.Context) (string, error) {
+	o.started = true
 	resp, err := o.provider.api.CheckpointNewRun(ctx, o.run.RunID, o.newRunData(), o.mgr.Ops()...)
 	if err != nil {
 		return "", fmt.Errorf("error creating new api-based inngest run %s: %w", o.run.RunID, err)
@@ -401,6 +411,8 @@ func (o *requestOwner) handleFirstCheckpoint(ctx context.Context) (string, error
 // body once the handler returns.  the API call uses a new context, so it keeps
 // no values or deadlines from the request.
 func (o *requestOwner) handleFinalCheckpointAsync() {
+	o.started = true
+
 	var (
 		runID  = o.run.RunID
 		data   = o.newRunData()
@@ -537,9 +549,29 @@ func (o *requestOwner) appendResult(ctx context.Context, res APIResult) error {
 }
 
 // withConfigUpdater allows a caller to update the request's function config from a nested
-// call via ctx.
+// call via ctx.  It is how Configure reaches this request.
 func (o *requestOwner) withConfigUpdater(ctx context.Context) context.Context {
 	return context.WithValue(ctx, fnUpdateCtx, func(update func(*FnOpts)) {
-		update(o.config)
+		cfg := *o.config
+		update(&cfg)
+		cfg = o.provider.resolveConfig(cfg, o.r)
+
+		// the Inngest API already has the run under the old ID.
+		if o.started && cfg.ID != o.config.ID {
+			o.provider.logger.Warn("stephttp.Configure changed the function ID after the run started, and the run keeps its ID",
+				"run_id", o.run.RunID,
+				"id", o.config.ID,
+				"ignored_id", cfg.ID,
+			)
+			cfg.ID = o.config.ID
+		}
+
+		*o.config = cfg
+		o.known = true
+		o.mgr.SetFn(servableRestFn{cfg})
+		o.w.maxBody = cfg.MaxResponseBodySize
+		if o.body != nil {
+			o.body.max = cfg.MaxRequestBodySize
+		}
 	})
 }

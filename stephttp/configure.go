@@ -22,7 +22,8 @@ type AsyncResponse interface {
 }
 
 // FnOpts allows you to define function configuration options for your API-based
-// Inngest function.  Pass it to Provider.Handle or Provider.HandleFunc.
+// Inngest function.  Pass it to Provider.Handle, Provider.HandleFunc, or
+// Provider.Middleware, and change it during a request with Configure.
 type FnOpts struct {
 	// ID represents the function ID.  If empty, this is the http.ServeMux pattern
 	// that routed the request, eg. "POST /users/{id}".  Set this when the handler
@@ -80,15 +81,31 @@ type FnOpts struct {
 	AsyncResponse AsyncResponse
 }
 
+// Configure changes the function config for the current request.  update gets
+// the config from the wrapper and changes only the fields it sets.  Use it when
+// the config depends on the request, eg. a GraphQL operation name:
+//
+//	stephttp.Configure(ctx, func(o *stephttp.FnOpts) {
+//		o.ID = "gql/" + operationName
+//	})
+//
+// A change to ID after the run starts does not apply, and a warning is logged.
+// A request body that the wrapper's config omits is not recorded, so setting
+// OmitRequestBody to false here stores nothing.  Configure does nothing in a
+// handler that the provider does not wrap.
+func Configure(ctx context.Context, update func(*FnOpts)) {
+	if configure, ok := ctx.Value(fnUpdateCtx).(func(func(*FnOpts))); ok {
+		configure(update)
+	}
+}
+
 // UpdateOmitResponseBody sets whether the response body will be tracked in logs and traces.
 // You can call this at any time before sending the API response and this will be respected.
-// It does nothing in a handler that Provider.Handle or Provider.HandleFunc does not wrap.
+// It does nothing in a handler that the provider does not wrap.
 func UpdateOmitResponseBody(ctx context.Context, to bool) {
-	if update, ok := ctx.Value(fnUpdateCtx).(func(func(*FnOpts))); ok {
-		update(func(opts *FnOpts) {
-			opts.OmitResponseBody = to
-		})
-	}
+	Configure(ctx, func(opts *FnOpts) {
+		opts.OmitResponseBody = to
+	})
 }
 
 // AsyncResponseRedirect redirects the user to a URL which will block until the async
