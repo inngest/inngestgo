@@ -79,20 +79,51 @@ func (rw *responseWriter) Push(target string, opts *http.PushOptions) error {
 	return http.ErrNotSupported
 }
 
-// readRequestBody reads and restores the request body
-func readRequestBody(r *http.Request) ([]byte, error) {
-	if r.Body == nil {
-		return nil, nil
-	}
+// bodyRecorder copies the request body as the handler reads it.  the new run
+// stores this copy, because the handler reads the body before the run is
+// checkpointed and nothing else can read it again.
+type bodyRecorder struct {
+	body   io.ReadCloser
+	buf    bytes.Buffer
+	closed bool
+}
 
-	requestBody, err := io.ReadAll(r.Body)
-	if err != nil {
-		return nil, err
+func newBodyRecorder(body io.ReadCloser) *bodyRecorder {
+	if body == nil {
+		body = http.NoBody
 	}
+	return &bodyRecorder{body: body}
+}
 
-	// Restore body for the handler
-	r.Body = io.NopCloser(bytes.NewReader(requestBody))
-	return requestBody, nil
+func (b *bodyRecorder) Read(p []byte) (int, error) {
+	if b.closed {
+		return 0, http.ErrBodyReadAfterClose
+	}
+	n, err := b.body.Read(p)
+	b.buf.Write(p[:n])
+	return n, err
+}
+
+// Close stops the handler from reading more of the body.  it leaves the
+// underlying body open so that readAll can read the rest.  the HTTP server
+// closes the underlying body when the handler returns.
+func (b *bodyRecorder) Close() error {
+	b.closed = true
+	return nil
+}
+
+// readAll reads the part of the body that the handler did not read and returns
+// the full body.  call it before the handler returns, because the HTTP server
+// closes the underlying body after that.
+func (b *bodyRecorder) readAll() ([]byte, error) {
+	_, err := io.Copy(&b.buf, b.body)
+	return b.buf.Bytes(), err
+}
+
+// recorded returns only the part of the body that the handler read.  use it
+// after a hijack, because the request body must not be read after that.
+func (b *bodyRecorder) recorded() []byte {
+	return b.buf.Bytes()
 }
 
 // createResumeManager creates a manager for resumed API requests

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"runtime/debug"
@@ -73,6 +72,9 @@ type requestOwner struct {
 	startTime time.Time
 	// run represents the IDs for the current sync run.
 	run CheckpointRun
+	// body records the request body for a new run.  It is nil when Inngest
+	// resumes an existing run.
+	body *bodyRecorder
 }
 
 func (o *requestOwner) handle(ctx context.Context) error {
@@ -123,6 +125,12 @@ func (o *requestOwner) handle(ctx context.Context) error {
 	// own response.
 	maxAttempts := 1
 	o.mgr.Request().CallCtx.MaxAttempts = &maxAttempts
+
+	// record the body as the handler reads it.  without this, the new run stores
+	// an empty body whenever the handler reads the request body.
+	o.body = newBodyRecorder(o.r.Body)
+	o.r.Body = o.body
+
 	result := o.call(ctx)
 
 	// After calling the API, check if we have nil function config;  if so, `stephttp.FnConfig`
@@ -367,14 +375,11 @@ func (o *requestOwner) newRunData() NewAPIRunData {
 	)
 
 	// Only read the request body if the config specifies so.
-	if o.config == nil || !o.config.OmitRequestBody {
-		requestBody, err = readRequestBody(o.r)
-		if err != nil {
-			if errors.Is(err, http.ErrBodyReadAfterClose) {
-				o.provider.logger.Warn("attempted to read request body twice")
-			} else {
-				o.provider.logger.Error("error reading request body creating new run", "error", err)
-			}
+	if o.body != nil && (o.config == nil || !o.config.OmitRequestBody) {
+		if o.w.hijacked {
+			requestBody = o.body.recorded()
+		} else if requestBody, err = o.body.readAll(); err != nil {
+			o.provider.logger.Error("error reading request body creating new run", "error", err)
 		}
 
 		// TODO: End to end encryption, if enabled.
