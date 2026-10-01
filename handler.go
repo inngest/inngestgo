@@ -709,7 +709,13 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 		return req, nil
 	}
 
+	httpClient := http.DefaultClient
+	if cImpl, ok := h.client.(*apiClient); ok && cImpl.HTTPClient != nil {
+		httpClient = cImpl.HTTPClient
+	}
+
 	resp, err := fetchWithAuthFallback(
+		httpClient,
 		createRequest,
 		h.GetSigningKey(),
 		h.GetSigningKeyFallback(),

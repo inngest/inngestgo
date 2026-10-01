@@ -52,7 +52,8 @@ type ClientOpts struct {
 	// created with this client.
 	Checkpoint *checkpoint.Config
 
-	// HTTPClient is the HTTP client used to send events.
+	// HTTPClient is the HTTP client used to send events, sync the app, and
+	// load function state from the API.  This defaults to http.DefaultClient.
 	HTTPClient *http.Client
 	// EventKey is your Inngest event key for sending events.  This defaults to the
 	// `INNGEST_EVENT_KEY` environment variable if nil.

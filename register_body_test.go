@@ -70,8 +70,12 @@ func TestOutOfBandSyncClosesRegisterResponseBody(t *testing.T) {
 			}))
 			defer mockCloud.Close()
 
+			// the tracker only sees requests from this client.  other tests
+			// that use http.DefaultClient do not change the counts.
+			tracker := &bodyTrackingTransport{base: http.DefaultTransport}
 			client, err := NewClient(ClientOpts{
 				AppID:              "register-body",
+				HTTPClient:         &http.Client{Transport: tracker},
 				Env:                toPtr("my-env"),
 				RegisterURL:        &mockCloud.URL,
 				SigningKey:         toPtr(string(testKey)),
@@ -92,19 +96,11 @@ func TestOutOfBandSyncClosesRegisterResponseBody(t *testing.T) {
 			}))
 			defer server.Close()
 
-			// The handler registers through http.DefaultClient, which uses
-			// http.DefaultTransport.
-			tracker := &bodyTrackingTransport{base: http.DefaultTransport}
-			original := http.DefaultTransport
-			http.DefaultTransport = tracker
-			defer func() { http.DefaultTransport = original }()
-
 			req, err := http.NewRequest(http.MethodPut, server.URL, nil)
 			r.NoError(err)
-			// Use a client that bypasses the tracker for the request under test.
-			resp, err := (&http.Client{Transport: original}).Do(req)
+			resp, err := http.DefaultClient.Do(req)
 			r.NoError(err)
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			_, _ = io.ReadAll(resp.Body)
 
 			r.Equal(tc.wantCode, resp.StatusCode)
