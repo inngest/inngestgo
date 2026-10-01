@@ -1061,3 +1061,87 @@ func TestEmptyFunctionIDWarnsOncePerWrapper(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigureChangesBodyLimits(t *testing.T) {
+	const (
+		requestBody  = `{"hello":"world"}`
+		responseBody = "hello world"
+	)
+
+	tests := []struct {
+		name string
+		opts FnOpts
+		// requestLimit and responseLimit are set by Configure after the handler
+		// reads the request and writes the response.
+		requestLimit     int
+		responseLimit    int
+		expectedRequest  string
+		expectedResponse string
+	}{
+		{
+			name:             "lower request limit",
+			requestLimit:     5,
+			expectedRequest:  requestBody[:5],
+			expectedResponse: responseBody,
+		},
+		{
+			name:             "lower response limit",
+			responseLimit:    4,
+			expectedRequest:  requestBody,
+			expectedResponse: responseBody[:4],
+		},
+		{
+			name:             "raised limits keep what was cut",
+			opts:             FnOpts{MaxRequestBodySize: 5, MaxResponseBodySize: 4},
+			requestLimit:     100,
+			responseLimit:    100,
+			expectedRequest:  requestBody[:5],
+			expectedResponse: responseBody[:4],
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+				release: make(chan struct{}),
+				inputs:  make(chan NewAPIRunData, 1),
+			}
+			close(api.release)
+
+			p := Setup(SetupOpts{})
+			p.api = api
+
+			opts := tt.opts
+			opts.TrackAllRequests = true
+			handler := p.HandleFunc(opts, func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.ReadAll(r.Body)
+				_, _ = w.Write([]byte(responseBody))
+				Configure(r.Context(), func(o *FnOpts) {
+					if tt.requestLimit > 0 {
+						o.MaxRequestBodySize = tt.requestLimit
+					}
+					if tt.responseLimit > 0 {
+						o.MaxResponseBodySize = tt.responseLimit
+					}
+				})
+			})
+
+			rec := httptest.NewRecorder()
+			handler(rec, httptest.NewRequest(http.MethodPost, "/test", strings.NewReader(requestBody)))
+			require.Equal(t, responseBody, rec.Body.String())
+
+			select {
+			case input := <-api.inputs:
+				require.Equal(t, tt.expectedRequest, string(input.Body))
+			case <-time.After(5 * time.Second):
+				t.Fatal("checkpoint was not sent")
+			}
+
+			steps := <-api.called
+			var result APIResult
+			require.NoError(t, json.Unmarshal(steps[len(steps)-1].Data, &result))
+			require.Equal(t, tt.expectedResponse, result.Body)
+		})
+	}
+}
