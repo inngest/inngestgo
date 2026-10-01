@@ -222,3 +222,70 @@ func TestNewRunStoresRequestBody(t *testing.T) {
 		})
 	}
 }
+
+func TestHandlerPanicRecordsError(t *testing.T) {
+	tests := []struct {
+		name string
+		// write is the response the handler writes before it panics.  zero writes
+		// nothing.
+		write          int
+		expectedStatus int
+		expectedBody   string
+	}{
+		{
+			name:           "panic before the response",
+			expectedStatus: http.StatusInternalServerError,
+			expectedBody:   "Internal Server Error\n",
+		},
+		{
+			name:           "panic after the response",
+			write:          http.StatusCreated,
+			expectedStatus: http.StatusCreated,
+			expectedBody:   "created",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+				release: make(chan struct{}),
+			}
+			close(api.release)
+
+			p := Setup(SetupOpts{
+				Optional: OptionalSetupOpts{TrackAllEndpoints: true},
+			})
+			p.api = api
+
+			handler := p.ServeHTTP(func(w http.ResponseWriter, r *http.Request) {
+				if tt.write != 0 {
+					w.WriteHeader(tt.write)
+					_, _ = w.Write([]byte("created"))
+				}
+				panic("kaboom")
+			})
+
+			rec := httptest.NewRecorder()
+			handler(rec, httptest.NewRequest(http.MethodGet, "/test", nil))
+
+			require.Equal(t, tt.expectedStatus, rec.Code)
+			require.Equal(t, tt.expectedBody, rec.Body.String())
+
+			var steps []sdkrequest.GeneratorOpcode
+			select {
+			case steps = <-api.called:
+			case <-time.After(5 * time.Second):
+				t.Fatal("checkpoint was not sent")
+			}
+			require.Len(t, steps, 1)
+			require.Equal(t, enums.OpcodeRunComplete, steps[0].Op)
+
+			var result APIResult
+			require.NoError(t, json.Unmarshal(steps[0].Data, &result))
+			require.Equal(t, tt.expectedStatus, result.Status)
+			require.Equal(t, tt.expectedBody, result.Body)
+			require.Contains(t, result.Error, "function panicked: kaboom")
+		})
+	}
+}

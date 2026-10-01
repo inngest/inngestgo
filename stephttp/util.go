@@ -27,6 +27,9 @@ type responseWriter struct {
 	statusCode int
 	body       *bytes.Buffer
 	hijacked   bool
+	// wroteHeader is true once the status line goes to the client.  after
+	// that, the status code cannot change.
+	wroteHeader bool
 }
 
 func newResponseWriter(w http.ResponseWriter) *responseWriter {
@@ -40,10 +43,12 @@ func newResponseWriter(w http.ResponseWriter) *responseWriter {
 
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
+	rw.wroteHeader = true
 	rw.ResponseWriter.WriteHeader(code)
 }
 
 func (rw *responseWriter) Write(data []byte) (int, error) {
+	rw.wroteHeader = true
 	// Don't capture response body after hijacking
 	if !rw.hijacked {
 		rw.body.Write(data)
@@ -66,6 +71,7 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 // Flush implements http.Flusher interface, passing through to the underlying writer if supported
 func (rw *responseWriter) Flush() {
+	rw.wroteHeader = true
 	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()
 	}

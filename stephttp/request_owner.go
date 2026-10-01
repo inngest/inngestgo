@@ -268,9 +268,7 @@ func (o *requestOwner) getExistingRun(ctx context.Context) bool {
 //
 // It is the callers responsibility to handle the generated opcodes added to the invocation
 // manager.
-func (o *requestOwner) call(ctx context.Context) APIResult {
-	var panicErr error
-
+func (o *requestOwner) call(ctx context.Context) (result APIResult) {
 	defer func() {
 		if r := recover(); r != nil {
 			callCtx := o.mgr.CallContext()
@@ -296,27 +294,41 @@ func (o *requestOwner) call(ctx context.Context) APIResult {
 			// checkpointing.
 
 			panicStack := string(debug.Stack())
-			panicErr = fmt.Errorf("function panicked: %v.  stack:\n%s", r, panicStack)
+			o.provider.logger.Error("api handler panicked",
+				"error", r,
+				"run_id", o.run.RunID,
+				"stack", panicStack,
+			)
 
 			o.provider.mw.AfterExecution(ctx, callCtx, nil, nil)
 			o.provider.mw.OnPanic(ctx, callCtx, r, panicStack)
+
+			// the panic is recovered here, so net/http does not abort the response.
+			// without this, a client gets 200 with an empty body from a handler that
+			// crashed.
+			if !o.w.wroteHeader && !o.w.hijacked {
+				http.Error(o.w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			}
+
+			result = o.result()
+			result.Error = fmt.Sprintf("function panicked: %v.  stack:\n%s", r, panicStack)
 		}
 	}()
 
 	// Execute the handler with step tooling available (o.w is already wrapped)
 	o.next(o.w, o.r.WithContext(ctx))
-	duration := time.Since(o.startTime)
+	return o.result()
+}
 
+// result returns the API result from the response that the handler wrote.
+func (o *requestOwner) result() APIResult {
 	result := APIResult{
 		Status:   o.w.statusCode,
 		Headers:  flattenHeaders(o.w.Header()),
 		Body:     o.w.body.String(),
-		Duration: duration,
+		Duration: time.Since(o.startTime),
 	}
 
-	if panicErr != nil {
-		result.Error = panicErr.Error()
-	}
 	if o.mgr.Err() != nil {
 		result.Error = o.mgr.Err().Error()
 	}
