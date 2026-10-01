@@ -19,8 +19,8 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-func processRequest(p *provider, opts FnOpts, r *http.Request, w http.ResponseWriter, next http.HandlerFunc) error {
-	cfg := p.resolveConfig(opts, r)
+func processRequest(p *provider, wrap *routeWrapper, r *http.Request, w http.ResponseWriter, next http.HandlerFunc) error {
+	cfg := p.resolveConfig(wrap.opts, r)
 
 	owner := &requestOwner{
 		r:        r,
@@ -33,7 +33,9 @@ func processRequest(p *provider, opts FnOpts, r *http.Request, w http.ResponseWr
 			APIBaseURL: env.APIServerURL(nil),
 		}),
 
+		wrapper:   wrap,
 		config:    &cfg,
+		known:     wrap.known,
 		startTime: time.Now(),
 	}
 	owner.mgr.SetFn(servableRestFn{cfg})
@@ -69,6 +71,11 @@ type requestOwner struct {
 	provider *provider
 	// sdkrequest is the step execution manager for the underlying function.
 	mgr sdkrequest.InvocationManager
+	// wrapper is the Handle, HandleFunc, or Middleware call that wraps next.
+	wrapper *routeWrapper
+	// handlerReq is the request that next gets.  an http.ServeMux behind
+	// Provider.Middleware sets Pattern on this request, not on r.
+	handlerReq *http.Request
 
 	// # Run-specific options
 
@@ -86,6 +93,12 @@ type requestOwner struct {
 	resumed bool
 	// tracked is true once this request has a run.  See tracking.
 	tracked bool
+	// known is true once the wrapper knows that the handler is an Inngest
+	// function.  See captureResponse.
+	known bool
+	// started is true once the new run is sent to the Inngest API.  after that,
+	// the run keeps its function ID.
+	started bool
 }
 
 func (o *requestOwner) handle(ctx context.Context) error {
@@ -261,11 +274,13 @@ func (o *requestOwner) setRunHeaders(h http.Header) {
 	h.Set("X-Inngest-SDK", version.GetVersion())
 }
 
-// captureResponse reports whether a response write is stored with the run.  it
-// does not wait for the first step, because a handler can respond before it
-// runs its steps.  MaxResponseBodySize limits the stored copy.
+// captureResponse reports whether a response write is stored with the run.  a
+// known function stores from the first write, because a handler can respond
+// before it runs its steps.  other requests store from their first step, so
+// routes behind Provider.Middleware that run no steps keep no copy.
+// MaxResponseBodySize limits the stored copy.
 func (o *requestOwner) captureResponse() bool {
-	return !o.config.OmitResponseBody
+	return !o.config.OmitResponseBody && (o.known || o.tracking())
 }
 
 // getExistingRun loads the saved steps when Inngest sends the request to resume
@@ -355,7 +370,8 @@ func (o *requestOwner) call(ctx context.Context) (result APIResult) {
 	}()
 
 	// Execute the handler with step tooling available (o.w is already wrapped)
-	o.next(o.w, o.r.WithContext(ctx))
+	o.handlerReq = o.r.WithContext(ctx)
+	o.next(o.w, o.handlerReq)
 	return o.result()
 }
 
@@ -386,6 +402,7 @@ func (o *requestOwner) result() APIResult {
 //
 // This returns an optional token used when redirecting to async outputs.
 func (o *requestOwner) handleFirstCheckpoint(ctx context.Context) (string, error) {
+	o.started = true
 	resp, err := o.provider.api.CheckpointNewRun(ctx, o.run.RunID, o.newRunData(), o.mgr.Ops()...)
 	if err != nil {
 		return "", fmt.Errorf("error creating new api-based inngest run %s: %w", o.run.RunID, err)
@@ -401,6 +418,8 @@ func (o *requestOwner) handleFirstCheckpoint(ctx context.Context) (string, error
 // body once the handler returns.  the API call uses a new context, so it keeps
 // no values or deadlines from the request.
 func (o *requestOwner) handleFinalCheckpointAsync() {
+	o.started = true
+
 	var (
 		runID  = o.run.RunID
 		data   = o.newRunData()
@@ -442,6 +461,7 @@ func (o *requestOwner) newRunData() NewAPIRunData {
 	}
 
 	scheme := httputil.GetScheme(o.r)
+	o.resolveFunctionID()
 
 	return NewAPIRunData{
 		Domain:      scheme + "://" + o.r.Host,
@@ -455,6 +475,36 @@ func (o *requestOwner) newRunData() NewAPIRunData {
 		// generates a slug using the URL and method.
 		Fn: o.config.ID,
 	}
+}
+
+// routedRequest returns the request that next got, once next runs.  a route
+// pattern from an http.ServeMux behind Provider.Middleware is only on that
+// request.  a ServeMux behind other middleware that copies the request sets the
+// pattern on a copy that the wrapper cannot see.
+func (o *requestOwner) routedRequest() *http.Request {
+	if o.handlerReq != nil {
+		return o.handlerReq
+	}
+	return o.r
+}
+
+// resolveFunctionID sets an empty function ID from the route pattern.  if the
+// ID is still empty, the Inngest API builds it from the method and the path,
+// which creates a separate function for each value in a path such as
+// /users/123.  a warning shows this once for each wrapper.
+func (o *requestOwner) resolveFunctionID() {
+	if o.config.ID == "" {
+		o.config.ID = defaultFunctionID(o.routedRequest())
+	}
+	if o.config.ID != "" {
+		return
+	}
+	o.wrapper.emptyID.Do(func() {
+		o.provider.logger.Warn("api function has no ID, so each URL creates a separate function.  set FnOpts.ID or call stephttp.Configure",
+			"method", o.r.Method,
+			"path", o.r.URL.Path,
+		)
+	})
 }
 
 // validateResumeRequestSignature validates the signature for resume requests.
@@ -537,9 +587,29 @@ func (o *requestOwner) appendResult(ctx context.Context, res APIResult) error {
 }
 
 // withConfigUpdater allows a caller to update the request's function config from a nested
-// call via ctx.
+// call via ctx.  It is how Configure reaches this request.
 func (o *requestOwner) withConfigUpdater(ctx context.Context) context.Context {
 	return context.WithValue(ctx, fnUpdateCtx, func(update func(*FnOpts)) {
-		update(o.config)
+		cfg := *o.config
+		update(&cfg)
+		cfg = o.provider.resolveConfig(cfg, o.routedRequest())
+
+		// the Inngest API already has the run under the old ID.
+		if o.started && cfg.ID != o.config.ID {
+			o.provider.logger.Warn("stephttp.Configure changed the function ID after the run started, and the run keeps its ID",
+				"run_id", o.run.RunID,
+				"id", o.config.ID,
+				"ignored_id", cfg.ID,
+			)
+			cfg.ID = o.config.ID
+		}
+
+		*o.config = cfg
+		o.known = true
+		o.mgr.SetFn(servableRestFn{cfg})
+		o.w.setMaxBody(cfg.MaxResponseBodySize)
+		if o.body != nil {
+			o.body.setMax(cfg.MaxRequestBodySize)
+		}
 	})
 }

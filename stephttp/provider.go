@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -26,6 +27,11 @@ type Provider interface {
 
 	// HandleFunc is Handle for a handler function.
 	HandleFunc(opts FnOpts, next http.HandlerFunc) http.HandlerFunc
+
+	// Middleware returns middleware that wraps any handler with opts, eg. a whole
+	// router.  A request through it stores its response only once it has a
+	// function ID, calls Configure, or runs a step.
+	Middleware(opts FnOpts) func(http.Handler) http.Handler
 
 	// Wait provides a mechanism to wait for all cehckpoints to finish before shutting down.
 	// Cancel the incoming context to quit polling for checkpoint progres.
@@ -138,14 +144,43 @@ func (p *provider) Handle(opts FnOpts, next http.Handler) http.Handler {
 
 // HandleFunc is Handle for a handler function.
 func (p *provider) HandleFunc(opts FnOpts, next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return p.serve(opts, true, next)
+}
+
+// Middleware returns middleware that wraps any handler with opts, eg. a whole
+// router.  A request through it stores its response only once it has a
+// function ID, calls Configure, or runs a step.  Without this, every route
+// behind the middleware keeps a copy of its response.
+func (p *provider) Middleware(opts FnOpts) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return p.serve(opts, opts.ID != "", next.ServeHTTP)
+	}
+}
+
+// serve wraps next.  known is true when the wrapper knows that next is an
+// Inngest function, so the request stores its response from the first write.
+func (p *provider) serve(opts FnOpts, known bool, next http.HandlerFunc) http.HandlerFunc {
+	w := &routeWrapper{opts: opts, known: known}
+	return func(rw http.ResponseWriter, r *http.Request) {
 		p.inflight.Add(1)
 		defer func() { p.inflight.Add(-1) }()
 
-		if err := processRequest(p, opts, r, w, next); err != nil {
+		if err := processRequest(p, w, r, rw, next); err != nil {
 			p.logger.Error("error handling api request", "error", err)
 		}
 	}
+}
+
+// routeWrapper holds what one Handle, HandleFunc, or Middleware call shares
+// across its requests.
+type routeWrapper struct {
+	opts FnOpts
+	// known is true when the wrapper knows that the handler is an Inngest
+	// function.  See requestOwner.captureResponse.
+	known bool
+	// emptyID logs the empty function ID warning once for this wrapper, so a
+	// route with an ID in each URL does not log on every request.
+	emptyID sync.Once
 }
 
 // resolveConfig returns the config for one request to a wrapped handler.  each

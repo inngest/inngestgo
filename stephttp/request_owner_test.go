@@ -1,10 +1,12 @@
 package stephttp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -378,10 +380,16 @@ func TestFunctionIDDefaultsToRoutePattern(t *testing.T) {
 		id   string
 		// pattern is the http.ServeMux pattern.  empty calls the handler without
 		// a ServeMux.
-		pattern  string
-		method   string
-		path     string
-		expected string
+		pattern string
+		// middleware wraps the ServeMux with Provider.Middleware.  false wraps the
+		// route with Provider.HandleFunc.
+		middleware bool
+		// copyRequest puts middleware that calls r.WithContext between
+		// Provider.Middleware and the ServeMux.
+		copyRequest bool
+		method      string
+		path        string
+		expected    string
 	}{
 		{
 			name:     "config ID wins",
@@ -411,6 +419,23 @@ func TestFunctionIDDefaultsToRoutePattern(t *testing.T) {
 			path:     "/users/123",
 			expected: "",
 		},
+		{
+			name:       "Middleware in front of a ServeMux",
+			pattern:    "POST /users/{id}",
+			middleware: true,
+			method:     http.MethodPost,
+			path:       "/users/123",
+			expected:   "POST /users/{id}",
+		},
+		{
+			name:        "Middleware in front of middleware that copies the request",
+			pattern:     "POST /users/{id}",
+			middleware:  true,
+			copyRequest: true,
+			method:      http.MethodPost,
+			path:        "/users/123",
+			expected:    "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -425,10 +450,24 @@ func TestFunctionIDDefaultsToRoutePattern(t *testing.T) {
 			p := Setup(SetupOpts{})
 			p.api = api
 
-			var handler http.Handler = p.HandleFunc(FnOpts{ID: tt.id, TrackAllRequests: true}, func(w http.ResponseWriter, r *http.Request) {
+			opts := FnOpts{ID: tt.id, TrackAllRequests: true}
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = w.Write([]byte("ok"))
 			})
-			if tt.pattern != "" {
+
+			var handler http.Handler = p.HandleFunc(opts, next)
+			switch {
+			case tt.middleware:
+				mux := http.NewServeMux()
+				mux.Handle(tt.pattern, next)
+				handler = mux
+				if tt.copyRequest {
+					handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						mux.ServeHTTP(w, r.WithContext(r.Context()))
+					})
+				}
+				handler = p.Middleware(opts)(handler)
+			case tt.pattern != "":
 				mux := http.NewServeMux()
 				mux.Handle(tt.pattern, handler)
 				handler = mux
@@ -740,6 +779,369 @@ func TestAsyncStartFailureFailsRequest(t *testing.T) {
 			require.Equal(t, "Internal Server Error\n", rec.Body.String())
 			require.Empty(t, rec.Header().Get("Location"))
 			require.Len(t, api.called, 1)
+		})
+	}
+}
+
+func TestConfigureDuringRequest(t *testing.T) {
+	type operation struct {
+		Name   string `json:"operationName"`
+		Secret bool   `json:"secret"`
+	}
+
+	tests := []struct {
+		name string
+		// middleware wraps the whole ServeMux with Provider.Middleware.  false
+		// wraps the route with Provider.Handle.
+		middleware bool
+		opts       FnOpts
+		body       string
+		// configure runs inside the handler after it reads the operation.
+		configure            func(op operation, o *FnOpts)
+		expectedFn           string
+		expectedBody         string
+		expectResponseStored bool
+	}{
+		{
+			name:       "GraphQL operation sets the ID",
+			middleware: true,
+			body:       `{"operationName":"GetUser"}`,
+			configure: func(op operation, o *FnOpts) {
+				o.ID = "gql/" + op.Name
+				o.OmitRequestBody = op.Secret
+			},
+			expectedFn:           "gql/GetUser",
+			expectedBody:         `{"operationName":"GetUser"}`,
+			expectResponseStored: true,
+		},
+		{
+			name:       "GraphQL operation omits a secret body",
+			middleware: true,
+			body:       `{"operationName":"SetSecret","secret":true}`,
+			configure: func(op operation, o *FnOpts) {
+				o.ID = "gql/" + op.Name
+				o.OmitRequestBody = op.Secret
+			},
+			expectedFn:           "gql/SetSecret",
+			expectedBody:         "",
+			expectResponseStored: true,
+		},
+		{
+			name: "fields that Configure does not set stay",
+			opts: FnOpts{ID: "route"},
+			body: `{}`,
+			configure: func(op operation, o *FnOpts) {
+				o.OmitResponseBody = true
+			},
+			expectedFn:   "route",
+			expectedBody: `{}`,
+		},
+		{
+			name: "an empty ID falls back to the route pattern",
+			opts: FnOpts{ID: "route"},
+			body: `{}`,
+			configure: func(op operation, o *FnOpts) {
+				o.ID = ""
+			},
+			expectedFn:           "POST /gql",
+			expectedBody:         `{}`,
+			expectResponseStored: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+				release: make(chan struct{}),
+				inputs:  make(chan NewAPIRunData, 1),
+			}
+			close(api.release)
+
+			p := Setup(SetupOpts{})
+			p.api = api
+
+			gql := func(w http.ResponseWriter, r *http.Request) {
+				var op operation
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&op))
+				Configure(r.Context(), func(o *FnOpts) { tt.configure(op, o) })
+
+				_, _ = step.Run(r.Context(), "resolve", func(ctx context.Context) (int, error) {
+					return 1, nil
+				})
+				_, _ = w.Write([]byte(`{"data":{}}`))
+			}
+
+			mux := http.NewServeMux()
+			var handler http.Handler = mux
+			if tt.middleware {
+				mux.HandleFunc("POST /gql", gql)
+				handler = p.Middleware(tt.opts)(mux)
+			} else {
+				mux.Handle("POST /gql", p.HandleFunc(tt.opts, gql))
+			}
+
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/gql", strings.NewReader(tt.body)))
+			require.Equal(t, `{"data":{}}`, rec.Body.String())
+
+			select {
+			case input := <-api.inputs:
+				require.Equal(t, tt.expectedFn, input.Fn)
+				require.Equal(t, tt.expectedBody, string(input.Body))
+			case <-time.After(5 * time.Second):
+				t.Fatal("checkpoint was not sent")
+			}
+
+			steps := <-api.called
+			complete := steps[len(steps)-1]
+			require.Equal(t, enums.OpcodeRunComplete, complete.Op)
+			if !tt.expectResponseStored {
+				require.Empty(t, complete.Data)
+				return
+			}
+			var result APIResult
+			require.NoError(t, json.Unmarshal(complete.Data, &result))
+			require.Equal(t, `{"data":{}}`, result.Body)
+		})
+	}
+}
+
+func TestConfigureAfterRunStarts(t *testing.T) {
+	tests := []struct {
+		name       string
+		started    bool
+		expectedID string
+	}{
+		{name: "before the run starts", expectedID: "second"},
+		{name: "after the run starts", started: true, expectedID: "first"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := Setup(SetupOpts{})
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			cfg := p.resolveConfig(FnOpts{ID: "first"}, req)
+			o := &requestOwner{
+				r:        req,
+				w:        newResponseWriter(httptest.NewRecorder()),
+				provider: p,
+				mgr:      sdkrequest.NewManager(sdkrequest.Opts{Mode: sdkrequest.StepModeManual}),
+				config:   &cfg,
+				started:  tt.started,
+			}
+			ctx := o.withConfigUpdater(context.Background())
+
+			Configure(ctx, func(opts *FnOpts) {
+				opts.ID = "second"
+				opts.OmitResponseBody = true
+			})
+
+			require.Equal(t, tt.expectedID, o.config.ID)
+			// other fields change at any time.
+			require.True(t, o.config.OmitResponseBody)
+		})
+	}
+}
+
+func TestResponseStoredForKnownFunctions(t *testing.T) {
+	tests := []struct {
+		name string
+		// middleware wraps with Provider.Middleware.  false wraps with
+		// Provider.HandleFunc.
+		middleware   bool
+		opts         FnOpts
+		configure    bool
+		expectedBody string
+	}{
+		{name: "HandleFunc without an ID", expectedBody: "ok"},
+		{name: "Middleware without an ID", middleware: true, expectedBody: ""},
+		{name: "Middleware with an ID", middleware: true, opts: FnOpts{ID: "route"}, expectedBody: "ok"},
+		{name: "Middleware and Configure", middleware: true, configure: true, expectedBody: "ok"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+				release: make(chan struct{}),
+			}
+			close(api.release)
+
+			p := Setup(SetupOpts{})
+			p.api = api
+
+			// the handler responds before its first step.
+			next := func(w http.ResponseWriter, r *http.Request) {
+				if tt.configure {
+					Configure(r.Context(), func(o *FnOpts) { o.ID = "configured" })
+				}
+				_, _ = w.Write([]byte("ok"))
+				_, _ = step.Run(r.Context(), "a", func(ctx context.Context) (int, error) {
+					return 1, nil
+				})
+			}
+
+			var handler http.Handler = p.HandleFunc(tt.opts, next)
+			if tt.middleware {
+				handler = p.Middleware(tt.opts)(http.HandlerFunc(next))
+			}
+
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/test", nil))
+			require.Equal(t, "ok", rec.Body.String())
+
+			var steps []sdkrequest.GeneratorOpcode
+			select {
+			case steps = <-api.called:
+			case <-time.After(5 * time.Second):
+				t.Fatal("checkpoint was not sent")
+			}
+			var result APIResult
+			require.NoError(t, json.Unmarshal(steps[len(steps)-1].Data, &result))
+			require.Equal(t, tt.expectedBody, result.Body)
+		})
+	}
+}
+
+func TestEmptyFunctionIDWarnsOncePerWrapper(t *testing.T) {
+	tests := []struct {
+		name string
+		// wrappers is how many HandleFunc calls wrap the handler.  each gets
+		// every path.
+		wrappers         int
+		id               string
+		paths            []string
+		expectedWarnings int
+	}{
+		{
+			name:             "one wrapper and many URLs",
+			wrappers:         1,
+			paths:            []string{"/users/1", "/users/2", "/users/3"},
+			expectedWarnings: 1,
+		},
+		{
+			name:             "two wrappers",
+			wrappers:         2,
+			paths:            []string{"/users/1", "/users/2"},
+			expectedWarnings: 2,
+		},
+		{
+			name:             "a function ID",
+			wrappers:         1,
+			id:               "get-user",
+			paths:            []string{"/users/1", "/users/2"},
+			expectedWarnings: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 10),
+				release: make(chan struct{}),
+			}
+			close(api.release)
+
+			var logs bytes.Buffer
+			p := Setup(SetupOpts{})
+			p.api = api
+			p.logger = slog.New(slog.NewTextHandler(&logs, nil))
+
+			for range tt.wrappers {
+				handler := p.HandleFunc(FnOpts{ID: tt.id, TrackAllRequests: true}, func(w http.ResponseWriter, r *http.Request) {
+					_, _ = w.Write([]byte("ok"))
+				})
+				for _, path := range tt.paths {
+					handler(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
+				}
+			}
+
+			require.Equal(t, tt.expectedWarnings, strings.Count(logs.String(), "api function has no ID"))
+		})
+	}
+}
+
+func TestConfigureChangesBodyLimits(t *testing.T) {
+	const (
+		requestBody  = `{"hello":"world"}`
+		responseBody = "hello world"
+	)
+
+	tests := []struct {
+		name string
+		opts FnOpts
+		// requestLimit and responseLimit are set by Configure after the handler
+		// reads the request and writes the response.
+		requestLimit     int
+		responseLimit    int
+		expectedRequest  string
+		expectedResponse string
+	}{
+		{
+			name:             "lower request limit",
+			requestLimit:     5,
+			expectedRequest:  requestBody[:5],
+			expectedResponse: responseBody,
+		},
+		{
+			name:             "lower response limit",
+			responseLimit:    4,
+			expectedRequest:  requestBody,
+			expectedResponse: responseBody[:4],
+		},
+		{
+			name:             "raised limits keep what was cut",
+			opts:             FnOpts{MaxRequestBodySize: 5, MaxResponseBodySize: 4},
+			requestLimit:     100,
+			responseLimit:    100,
+			expectedRequest:  requestBody[:5],
+			expectedResponse: responseBody[:4],
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+				release: make(chan struct{}),
+				inputs:  make(chan NewAPIRunData, 1),
+			}
+			close(api.release)
+
+			p := Setup(SetupOpts{})
+			p.api = api
+
+			opts := tt.opts
+			opts.TrackAllRequests = true
+			handler := p.HandleFunc(opts, func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.ReadAll(r.Body)
+				_, _ = w.Write([]byte(responseBody))
+				Configure(r.Context(), func(o *FnOpts) {
+					if tt.requestLimit > 0 {
+						o.MaxRequestBodySize = tt.requestLimit
+					}
+					if tt.responseLimit > 0 {
+						o.MaxResponseBodySize = tt.responseLimit
+					}
+				})
+			})
+
+			rec := httptest.NewRecorder()
+			handler(rec, httptest.NewRequest(http.MethodPost, "/test", strings.NewReader(requestBody)))
+			require.Equal(t, responseBody, rec.Body.String())
+
+			select {
+			case input := <-api.inputs:
+				require.Equal(t, tt.expectedRequest, string(input.Body))
+			case <-time.After(5 * time.Second):
+				t.Fatal("checkpoint was not sent")
+			}
+
+			steps := <-api.called
+			var result APIResult
+			require.NoError(t, json.Unmarshal(steps[len(steps)-1].Data, &result))
+			require.Equal(t, tt.expectedResponse, result.Body)
 		})
 	}
 }
