@@ -19,7 +19,9 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-func processRequest(p *provider, r *http.Request, w http.ResponseWriter, next http.HandlerFunc) error {
+func processRequest(p *provider, opts FnOpts, r *http.Request, w http.ResponseWriter, next http.HandlerFunc) error {
+	cfg := p.resolveConfig(opts, r)
+
 	owner := &requestOwner{
 		r:        r,
 		w:        newResponseWriter(w),
@@ -31,8 +33,13 @@ func processRequest(p *provider, r *http.Request, w http.ResponseWriter, next ht
 			APIBaseURL: env.APIServerURL(nil),
 		}),
 
+		config:    &cfg,
 		startTime: time.Now(),
 	}
+	owner.mgr.SetFn(servableRestFn{cfg})
+	owner.w.onHeader = owner.setRunHeaders
+	owner.w.capture = owner.captureResponse
+	owner.w.maxBody = cfg.MaxResponseBodySize
 
 	owner.run = CheckpointRun{
 		RunID: ulid.MustNew(
@@ -65,7 +72,7 @@ type requestOwner struct {
 
 	// # Run-specific options
 
-	// config represents function-specific config.
+	// config represents function-specific config.  It is never nil.
 	config *FnOpts
 	// startTime tracks the start time of the API request. We must track this
 	// as early as possible.
@@ -73,22 +80,19 @@ type requestOwner struct {
 	// run represents the IDs for the current sync run.
 	run CheckpointRun
 	// body records the request body for a new run.  It is nil when Inngest
-	// resumes an existing run.
+	// resumes an existing run, or when the config omits the request body.
 	body *bodyRecorder
+	// resumed is true when Inngest sent this request to resume a run.
+	resumed bool
+	// tracked is true once this request has a run.  See tracking.
+	tracked bool
 }
 
 func (o *requestOwner) handle(ctx context.Context) error {
-	// Always add the run ID to the header.
-	o.w.Header().Add("x-run-id", o.run.RunID.String())
-	o.w.Header().Add("X-Inngest-SDK", version.GetVersion())
-
 	// Always add the manager to context.
 	ctx = sdkrequest.SetManager(ctx, o.mgr)
-	// and add a setter which is invoked to update the function config via
-	// ctx during an API call (by calling stephttp.FnConfig)
-	ctx = o.withConfigSetter(ctx, o.mgr)
-	// Add a getter, allowing us to fetch config to update values (eg. in UpdateOmitResponseBody)
-	ctx = o.withConfigGetter(ctx)
+	// Add an updater, allowing the handler to change config via ctx (eg. in UpdateOmitResponseBody)
+	ctx = o.withConfigUpdater(ctx)
 
 	resumed, err := o.getExistingRun(ctx)
 	if err != nil {
@@ -99,6 +103,8 @@ func (o *requestOwner) handle(ctx context.Context) error {
 		return err
 	}
 	if resumed {
+		o.resumed = true
+
 		// In this case, we're re-entering an existing run, which means we're now
 		// running async and are responding to an Inngest's executor call.
 		//
@@ -135,20 +141,14 @@ func (o *requestOwner) handle(ctx context.Context) error {
 	o.mgr.Request().CallCtx.MaxAttempts = &maxAttempts
 
 	// record the body as the handler reads it.  without this, the new run stores
-	// an empty body whenever the handler reads the request body.
-	o.body = newBodyRecorder(o.r.Body)
-	o.r.Body = o.body
+	// an empty body whenever the handler reads the request body.  the handler can
+	// read the body before its first step, so this starts before the run does.
+	if !o.config.OmitRequestBody {
+		o.body = newBodyRecorder(o.r.Body)
+		o.r.Body = o.body
+	}
 
 	result := o.call(ctx)
-
-	// After calling the API, check if we have nil function config;  if so, `stephttp.FnConfig`
-	// wasn't called.  In this case, use defaults.
-	if o.config == nil {
-		o.config = &FnOpts{
-			// Use the global provider default (which may be nil)
-			AsyncResponse: o.provider.opts.Optional.DefaultAsyncResponse,
-		}
-	}
 
 	// Note that at this point the request would typically have finished, therefore the
 	// context could be cancelled.  Stop this from breaking our API calls.
@@ -166,9 +166,9 @@ func (o *requestOwner) handle(ctx context.Context) error {
 		o.w.Flush()
 	}
 
-	if len(o.mgr.Ops()) == 0 && !o.provider.opts.Optional.TrackAllEndpoints {
-		// If there are no steps and TrackAllEndpoints is disabled, we don't actually
-		// need to do anbything.
+	if len(o.mgr.Ops()) == 0 && !o.config.TrackAllRequests {
+		// If there are no steps and TrackAllRequests is disabled, we don't actually
+		// need to do anything.
 		return nil
 	}
 
@@ -202,19 +202,8 @@ func (o *requestOwner) handleAsyncConversion(ctx context.Context, token string) 
 		return nil
 	}
 
-	// Then handle the response to our user.
-	if o.config == nil {
-		o.config = &FnOpts{
-			// Use the global provider default (which may be nil)
-			AsyncResponse: o.provider.opts.Optional.DefaultAsyncResponse,
-		}
-	}
-
-	// Assign defaults if not set in provider config;  use redirect.
-	if o.config.AsyncResponse == nil {
-		o.config.AsyncResponse = AsyncResponseRedirect{}
-	}
-
+	// Then handle the response to our user.  resolveConfig always sets
+	// AsyncResponse.
 	var url string
 
 	switch v := o.config.AsyncResponse.(type) {
@@ -238,6 +227,36 @@ func (o *requestOwner) handleAsyncConversion(ctx context.Context, token string) 
 
 	http.Redirect(o.w, o.r, url, http.StatusSeeOther)
 	return nil
+}
+
+// tracking reports whether this request has a run.  a new request gets a run
+// when its first step runs, or at the start when the config sets
+// TrackAllRequests.  a request from Inngest always resumes a run.  a request
+// without a run sends no run headers, keeps no copy of the response, and makes
+// no call to the Inngest API.
+func (o *requestOwner) tracking() bool {
+	if !o.tracked {
+		o.tracked = o.resumed || o.config.TrackAllRequests || len(o.mgr.Ops()) > 0
+	}
+	return o.tracked
+}
+
+// setRunHeaders adds the run headers when the request has a run.  it runs just
+// before the headers go to the client, so a handler that writes before its
+// first step sends no run ID.
+func (o *requestOwner) setRunHeaders(h http.Header) {
+	if !o.tracking() {
+		return
+	}
+	h.Set(headerRunID, o.run.RunID.String())
+	h.Set("X-Inngest-SDK", version.GetVersion())
+}
+
+// captureResponse reports whether a response write is stored with the run.  it
+// does not wait for the first step, because a handler can respond before it
+// runs its steps.  MaxResponseBodySize limits the stored copy.
+func (o *requestOwner) captureResponse() bool {
+	return !o.config.OmitResponseBody
 }
 
 // getExistingRun loads the saved steps when Inngest sends the request to resume
@@ -398,7 +417,7 @@ func (o *requestOwner) newRunData() NewAPIRunData {
 	)
 
 	// Only read the request body if the config specifies so.
-	if o.body != nil && (o.config == nil || !o.config.OmitRequestBody) {
+	if o.body != nil && !o.config.OmitRequestBody {
 		if o.w.hijacked {
 			requestBody = o.body.recorded()
 		} else if requestBody, err = o.body.readAll(); err != nil {
@@ -414,13 +433,6 @@ func (o *requestOwner) newRunData() NewAPIRunData {
 	// Note that it is important that this finishes before we begin to checkpoint step data.
 	scheme := httputil.GetScheme(o.r)
 
-	// fnID is the optional function slug to use.  If this is undefined, a slug will be generated
-	// using the URL and method directly in our API.
-	fnID := ""
-	if o.config != nil {
-		fnID = o.config.ID
-	}
-
 	return NewAPIRunData{
 		Domain:      scheme + "://" + o.r.Host,
 		Method:      o.r.Method,
@@ -429,7 +441,9 @@ func (o *requestOwner) newRunData() NewAPIRunData {
 		ContentType: o.r.Header.Get("Content-Type"),
 		QueryParams: o.r.URL.RawQuery,
 		Body:        requestBody,
-		Fn:          fnID,
+		// Fn is the optional function slug to use.  If this is empty, our API
+		// generates a slug using the URL and method.
+		Fn: o.config.ID,
 	}
 }
 
@@ -487,7 +501,13 @@ func (o *requestOwner) appendResult(ctx context.Context, res APIResult) error {
 		err          error
 	)
 
-	if o.config == nil || !o.config.OmitResponseBody {
+	if !o.config.OmitResponseBody {
+		if o.w.truncated {
+			o.provider.logger.Warn("api response body is larger than MaxResponseBodySize and was truncated in the run",
+				"run_id", o.run.RunID,
+				"max_response_body_size", o.config.MaxResponseBodySize,
+			)
+		}
 		responseBody, err = json.Marshal(res)
 		if err != nil {
 			return err
@@ -506,25 +526,10 @@ func (o *requestOwner) appendResult(ctx context.Context, res APIResult) error {
 	return nil
 }
 
-// withConfigSetter allows a caller to update the request's function config from a nested
+// withConfigUpdater allows a caller to update the request's function config from a nested
 // call via ctx.
-func (o *requestOwner) withConfigSetter(ctx context.Context, mgr sdkrequest.InvocationManager) context.Context {
-	return context.WithValue(ctx, fnSetterCtx, func(cfg FnOpts) {
-		o.setConfig(cfg, mgr)
+func (o *requestOwner) withConfigUpdater(ctx context.Context) context.Context {
+	return context.WithValue(ctx, fnUpdateCtx, func(update func(*FnOpts)) {
+		update(o.config)
 	})
-}
-
-func (o *requestOwner) withConfigGetter(ctx context.Context) context.Context {
-	return context.WithValue(ctx, fnGetterCtx, func() FnOpts {
-		if o.config == nil {
-			o.config = &FnOpts{}
-		}
-		return *o.config
-	})
-}
-
-func (o *requestOwner) setConfig(cfg FnOpts, mgr sdkrequest.InvocationManager) {
-	o.config = &cfg
-	// Set the servable function in our manager now that it exists.
-	mgr.SetFn(servableRestFn{cfg})
 }

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/oklog/ulid/v2"
 )
@@ -21,7 +22,13 @@ func defaultRedirectURL(o SetupOpts, runID ulid.ULID, token string) string {
 	)
 }
 
-// responseWriter captures the response for storing as the API result
+// responseWriter captures the response for storing as the API result.
+//
+// it has no Unwrap method.  every header and body write must go through it,
+// because a write to the underlying writer sends no run headers, is missing
+// from the stored response, and lets a later async response or panic response
+// write over a response that the client already has.  http.ResponseController
+// finds the methods below on this type before it looks for Unwrap.
 type responseWriter struct {
 	http.ResponseWriter
 	statusCode int
@@ -30,6 +37,20 @@ type responseWriter struct {
 	// wroteHeader is true once the status line goes to the client.  after
 	// that, the status code cannot change.
 	wroteHeader bool
+
+	// onHeader runs just before the status line and headers go to the client.
+	// it is the last point at which a header can be added.  it can run again
+	// when a flush fails, so it must be safe to run more than once.
+	onHeader func(http.Header)
+	// capture reports whether a write is copied into body.  nil copies every
+	// write.  a write that it skips is missing from the stored response.
+	capture func() bool
+	// maxBody is the most bytes that body holds.  zero has no limit.  without a
+	// limit, a long response such as a stream stays in memory until the handler
+	// returns.
+	maxBody int
+	// truncated is true when body stopped at maxBody.
+	truncated bool
 }
 
 func newResponseWriter(w http.ResponseWriter) *responseWriter {
@@ -42,18 +63,52 @@ func newResponseWriter(w http.ResponseWriter) *responseWriter {
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
-	rw.statusCode = code
-	rw.wroteHeader = true
+	// a 1xx status other than 101 goes to the client at once, and the handler
+	// still sends a final status after it.  without this check, the run headers
+	// are decided at the 1xx status and the final status is not recorded.
+	if code >= 100 && code <= 199 && code != http.StatusSwitchingProtocols {
+		rw.ResponseWriter.WriteHeader(code)
+		return
+	}
+
+	// net/http keeps the first final status and ignores later ones, so only the
+	// first one is recorded.
+	if !rw.wroteHeader {
+		rw.beforeHeader()
+		rw.statusCode = code
+	}
 	rw.ResponseWriter.WriteHeader(code)
 }
 
 func (rw *responseWriter) Write(data []byte) (int, error) {
-	rw.wroteHeader = true
+	rw.beforeHeader()
 	// Don't capture response body after hijacking
-	if !rw.hijacked {
-		rw.body.Write(data)
+	if !rw.hijacked && (rw.capture == nil || rw.capture()) {
+		rw.copyBody(data)
 	}
 	return rw.ResponseWriter.Write(data)
+}
+
+// copyBody adds data to body until body holds maxBody bytes.
+func (rw *responseWriter) copyBody(data []byte) {
+	if rw.maxBody > 0 {
+		if remaining := rw.maxBody - rw.body.Len(); len(data) > remaining {
+			data = data[:max(remaining, 0)]
+			rw.truncated = true
+		}
+	}
+	rw.body.Write(data)
+}
+
+// beforeHeader marks the headers as sent and runs onHeader the first time.
+func (rw *responseWriter) beforeHeader() {
+	if rw.wroteHeader {
+		return
+	}
+	rw.wroteHeader = true
+	if rw.onHeader != nil {
+		rw.onHeader(rw.Header())
+	}
 }
 
 // Hijack implements http.Hijacker interface, passing through to the underlying writer if supported
@@ -71,10 +126,45 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 // Flush implements http.Flusher interface, passing through to the underlying writer if supported
 func (rw *responseWriter) Flush() {
-	rw.wroteHeader = true
-	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
-		flusher.Flush()
+	_ = rw.FlushError()
+}
+
+// FlushError is Flush with an error.  http.ResponseController calls it.  the
+// headers count as sent only when the underlying writer flushes.  without this
+// check, a writer that cannot flush stops a later panic response and the run
+// headers.
+func (rw *responseWriter) FlushError() error {
+	if rw.wroteHeader {
+		return http.NewResponseController(rw.ResponseWriter).Flush()
 	}
+
+	if rw.onHeader != nil {
+		rw.onHeader(rw.Header())
+	}
+	if err := http.NewResponseController(rw.ResponseWriter).Flush(); err != nil {
+		return err
+	}
+	rw.wroteHeader = true
+	return nil
+}
+
+// SetReadDeadline passes through to the underlying writer.
+// http.ResponseController calls it.
+func (rw *responseWriter) SetReadDeadline(deadline time.Time) error {
+	return http.NewResponseController(rw.ResponseWriter).SetReadDeadline(deadline)
+}
+
+// SetWriteDeadline passes through to the underlying writer.
+// http.ResponseController calls it.  a handler that runs many steps can use it
+// to extend the server's WriteTimeout.
+func (rw *responseWriter) SetWriteDeadline(deadline time.Time) error {
+	return http.NewResponseController(rw.ResponseWriter).SetWriteDeadline(deadline)
+}
+
+// EnableFullDuplex passes through to the underlying writer.
+// http.ResponseController calls it.
+func (rw *responseWriter) EnableFullDuplex() error {
+	return http.NewResponseController(rw.ResponseWriter).EnableFullDuplex()
 }
 
 // Push implements http.Pusher interface, passing through to the underlying writer if supported

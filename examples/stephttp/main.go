@@ -17,21 +17,21 @@ func main() {
 		Domain: "api.mycompany.com",
 	})
 
-	// Create HTTP server with step tooling
-	http.HandleFunc("/users", provider.ServeHTTP(handleUsers))
+	// Create HTTP server with step tooling.  Each wrapped handler is an Inngest
+	// function, and its ID defaults to the route pattern ("POST /users").
+	mux := http.NewServeMux()
+	mux.Handle("POST /users", provider.HandleFunc(stephttp.FnOpts{
+		AsyncResponse: stephttp.AsyncResponseRedirect{},
+	}, handleUsers))
 
 	fmt.Println("API server with Inngest step tooling running on :8080")
-	fmt.Println("Try: curl -X POST http://localhost:8080/users -d '{\"email\":\"user@example.com\"}'")
-	_ = http.ListenAndServe(":8080", nil)
+	fmt.Println("Try: curl -L -X POST http://localhost:8080/users -d '{\"email\":\"user@example.com\"}'")
+	_ = http.ListenAndServe(":8080", mux)
 }
 
 // handleUsers demonstrates API function with step tooling
 func handleUsers(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-
-	stephttp.Configure(ctx, stephttp.FnOpts{
-		AsyncResponse: stephttp.AsyncResponseRedirect{},
-	})
 
 	// Step 1: Authenticate (with full observability)
 	auth, err := step.Run(ctx, "authenticate", func(ctx context.Context) (*AuthResult, error) {

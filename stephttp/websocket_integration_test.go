@@ -210,7 +210,7 @@ func TestWebSocketWithStepHTTPProvider(t *testing.T) {
 	}
 
 	// Wrap with stephttp middleware
-	wrappedHandler := provider.ServeHTTP(wsHandler)
+	wrappedHandler := provider.HandleFunc(FnOpts{}, wsHandler)
 
 	// Create test server
 	server := httptest.NewServer(wrappedHandler)

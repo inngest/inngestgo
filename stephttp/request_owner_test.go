@@ -60,12 +60,11 @@ func TestFinishedRunCheckpointsInBackground(t *testing.T) {
 	}
 
 	p := Setup(SetupOpts{
-		Domain:   "test.example.com",
-		Optional: OptionalSetupOpts{TrackAllEndpoints: true},
+		Domain: "test.example.com",
 	})
 	p.api = api
 
-	handler := p.ServeHTTP(func(w http.ResponseWriter, r *http.Request) {
+	handler := p.HandleFunc(FnOpts{TrackAllRequests: true}, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
 
@@ -132,7 +131,7 @@ func TestHandledStepErrorFinishesRun(t *testing.T) {
 			})
 			p.api = api
 
-			handler := p.ServeHTTP(func(w http.ResponseWriter, r *http.Request) {
+			handler := p.HandleFunc(FnOpts{}, func(w http.ResponseWriter, r *http.Request) {
 				_, err := step.Run(r.Context(), "a", func(ctx context.Context) (int, error) {
 					return 0, fmt.Errorf("boom")
 				})
@@ -186,15 +185,12 @@ func TestNewRunStoresRequestBody(t *testing.T) {
 			}
 			close(api.release)
 
-			p := Setup(SetupOpts{
-				Optional: OptionalSetupOpts{TrackAllEndpoints: true},
-			})
+			p := Setup(SetupOpts{})
 			p.api = api
 
 			var handlerRead string
-			handler := p.ServeHTTP(func(w http.ResponseWriter, r *http.Request) {
-				Configure(r.Context(), FnOpts{OmitRequestBody: tt.omit})
-
+			opts := FnOpts{TrackAllRequests: true, OmitRequestBody: tt.omit}
+			handler := p.HandleFunc(opts, func(w http.ResponseWriter, r *http.Request) {
 				var byt []byte
 				switch tt.read {
 				case -1:
@@ -259,12 +255,10 @@ func TestHandlerPanicRecordsError(t *testing.T) {
 			}
 			close(api.release)
 
-			p := Setup(SetupOpts{
-				Optional: OptionalSetupOpts{TrackAllEndpoints: true},
-			})
+			p := Setup(SetupOpts{})
 			p.api = api
 
-			handler := p.ServeHTTP(func(w http.ResponseWriter, r *http.Request) {
+			handler := p.HandleFunc(FnOpts{TrackAllRequests: true}, func(w http.ResponseWriter, r *http.Request) {
 				if tt.write != 0 {
 					w.WriteHeader(tt.write)
 					_, _ = w.Write([]byte("created"))
@@ -334,7 +328,7 @@ func TestResumeRequiresSavedSteps(t *testing.T) {
 			p.api = api
 
 			handlerCalled := false
-			handler := p.ServeHTTP(func(w http.ResponseWriter, r *http.Request) {
+			handler := p.HandleFunc(FnOpts{}, func(w http.ResponseWriter, r *http.Request) {
 				handlerCalled = true
 				_, _ = step.Run(r.Context(), "a", func(ctx context.Context) (int, error) {
 					return 1, nil
@@ -355,6 +349,9 @@ func TestResumeRequiresSavedSteps(t *testing.T) {
 
 			require.Equal(t, tt.expectedStatus, rec.Code)
 			require.Equal(t, tt.expectHandler, handlerCalled)
+			if tt.expectHandler {
+				require.Equal(t, runID, rec.Header().Get(headerRunID))
+			}
 
 			// a resume never creates a new run.  a new run checkpoints in a tracked
 			// goroutine that blocks on release, so it shows up in both checks.
@@ -362,4 +359,336 @@ func TestResumeRequiresSavedSteps(t *testing.T) {
 			require.Empty(t, api.called)
 		})
 	}
+}
+
+func TestFunctionIDDefaultsToRoutePattern(t *testing.T) {
+	tests := []struct {
+		name string
+		id   string
+		// pattern is the http.ServeMux pattern.  empty calls the handler without
+		// a ServeMux.
+		pattern  string
+		method   string
+		path     string
+		expected string
+	}{
+		{
+			name:     "config ID wins",
+			id:       "create-user",
+			pattern:  "POST /users/{id}",
+			method:   http.MethodPost,
+			path:     "/users/123",
+			expected: "create-user",
+		},
+		{
+			name:     "pattern with a method",
+			pattern:  "POST /users/{id}",
+			method:   http.MethodPost,
+			path:     "/users/123",
+			expected: "POST /users/{id}",
+		},
+		{
+			name:     "pattern without a method",
+			pattern:  "/users/{id}",
+			method:   http.MethodGet,
+			path:     "/users/123",
+			expected: "GET /users/{id}",
+		},
+		{
+			name:     "no ServeMux",
+			method:   http.MethodGet,
+			path:     "/users/123",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+				release: make(chan struct{}),
+				inputs:  make(chan NewAPIRunData, 1),
+			}
+			close(api.release)
+
+			p := Setup(SetupOpts{})
+			p.api = api
+
+			var handler http.Handler = p.HandleFunc(FnOpts{ID: tt.id, TrackAllRequests: true}, func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte("ok"))
+			})
+			if tt.pattern != "" {
+				mux := http.NewServeMux()
+				mux.Handle(tt.pattern, handler)
+				handler = mux
+			}
+
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(tt.method, tt.path, nil))
+			require.Equal(t, http.StatusOK, rec.Code)
+
+			select {
+			case input := <-api.inputs:
+				require.Equal(t, tt.expected, input.Fn)
+			case <-time.After(5 * time.Second):
+				t.Fatal("checkpoint was not sent")
+			}
+		})
+	}
+}
+
+func TestAsyncResponseDefaults(t *testing.T) {
+	tests := []struct {
+		name            string
+		providerDefault AsyncResponse
+		route           AsyncResponse
+		// omitResponse calls UpdateOmitResponseBody before the async step.
+		omitResponse   bool
+		expectedStatus int
+	}{
+		{
+			name:           "redirect without any config",
+			expectedStatus: http.StatusSeeOther,
+		},
+		{
+			name:            "provider default",
+			providerDefault: AsyncResponseToken{},
+			expectedStatus:  http.StatusOK,
+		},
+		{
+			name:            "provider default after UpdateOmitResponseBody",
+			providerDefault: AsyncResponseToken{},
+			omitResponse:    true,
+			expectedStatus:  http.StatusOK,
+		},
+		{
+			name:            "route config wins",
+			providerDefault: AsyncResponseToken{},
+			route:           AsyncResponseRedirect{},
+			expectedStatus:  http.StatusSeeOther,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+				release: make(chan struct{}),
+			}
+			close(api.release)
+
+			p := Setup(SetupOpts{
+				Optional: OptionalSetupOpts{DefaultAsyncResponse: tt.providerDefault},
+			})
+			p.api = api
+
+			handler := p.HandleFunc(FnOpts{AsyncResponse: tt.route}, func(w http.ResponseWriter, r *http.Request) {
+				if tt.omitResponse {
+					UpdateOmitResponseBody(r.Context(), true)
+				}
+				step.Sleep(r.Context(), "wait", time.Second)
+				_, _ = w.Write([]byte("done"))
+			})
+
+			rec := httptest.NewRecorder()
+			handler(rec, httptest.NewRequest(http.MethodGet, "/test", nil))
+
+			require.Equal(t, tt.expectedStatus, rec.Code)
+			if tt.expectedStatus == http.StatusOK {
+				var token asyncResponseToken
+				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &token))
+				require.NotEqual(t, ulid.ULID{}, token.RunID)
+			}
+		})
+	}
+}
+
+func TestTrackingStartsAtFirstStep(t *testing.T) {
+	tests := []struct {
+		name string
+		opts FnOpts
+		// stepBeforeWrite runs a step before the handler writes.  stepAfterWrite
+		// runs a step after it.
+		stepBeforeWrite bool
+		stepAfterWrite  bool
+		expectRun       bool
+		expectHeader    bool
+		// expectedBody is the response body stored with the run.
+		expectedBody string
+	}{
+		{
+			name: "no steps",
+		},
+		{
+			name:         "no steps with TrackAllRequests",
+			opts:         FnOpts{TrackAllRequests: true},
+			expectRun:    true,
+			expectHeader: true,
+			expectedBody: "ok",
+		},
+		{
+			name:            "step before the response",
+			stepBeforeWrite: true,
+			expectRun:       true,
+			expectHeader:    true,
+			expectedBody:    "ok",
+		},
+		{
+			name:           "step after the response",
+			stepAfterWrite: true,
+			expectRun:      true,
+			expectedBody:   "ok",
+		},
+		{
+			name:            "step before the response with OmitResponseBody",
+			opts:            FnOpts{OmitResponseBody: true},
+			stepBeforeWrite: true,
+			expectRun:       true,
+			expectHeader:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+				release: make(chan struct{}),
+			}
+			close(api.release)
+
+			p := Setup(SetupOpts{})
+			p.api = api
+
+			runStep := func(r *http.Request) {
+				_, _ = step.Run(r.Context(), "a", func(ctx context.Context) (int, error) {
+					return 1, nil
+				})
+			}
+			handler := p.HandleFunc(tt.opts, func(w http.ResponseWriter, r *http.Request) {
+				if tt.stepBeforeWrite {
+					runStep(r)
+				}
+				_, _ = w.Write([]byte("ok"))
+				if tt.stepAfterWrite {
+					runStep(r)
+				}
+			})
+
+			rec := httptest.NewRecorder()
+			handler(rec, httptest.NewRequest(http.MethodGet, "/test", nil))
+			require.Equal(t, "ok", rec.Body.String())
+
+			if tt.expectHeader {
+				_, err := ulid.Parse(rec.Header().Get(headerRunID))
+				require.NoError(t, err)
+				require.NotEmpty(t, rec.Header().Get("X-Inngest-SDK"))
+			} else {
+				require.Empty(t, rec.Header().Get(headerRunID))
+				require.Empty(t, rec.Header().Get("X-Inngest-SDK"))
+			}
+
+			if !tt.expectRun {
+				// a new run checkpoints in a tracked goroutine that sends to called
+				// before it returns, so a run shows up in one of these checks.
+				require.Zero(t, p.inflight.Load())
+				require.Empty(t, api.called)
+				return
+			}
+
+			var steps []sdkrequest.GeneratorOpcode
+			select {
+			case steps = <-api.called:
+			case <-time.After(5 * time.Second):
+				t.Fatal("checkpoint was not sent")
+			}
+			complete := steps[len(steps)-1]
+			require.Equal(t, enums.OpcodeRunComplete, complete.Op)
+
+			if tt.opts.OmitResponseBody {
+				require.Empty(t, complete.Data)
+				return
+			}
+			var result APIResult
+			require.NoError(t, json.Unmarshal(complete.Data, &result))
+			require.Equal(t, tt.expectedBody, result.Body)
+		})
+	}
+}
+
+func TestStoredResponseBodyLimit(t *testing.T) {
+	tests := []struct {
+		name         string
+		limit        int
+		writes       []string
+		expectedBody string
+	}{
+		{
+			name:         "body under the limit",
+			limit:        10,
+			writes:       []string{"hello"},
+			expectedBody: "hello",
+		},
+		{
+			name:         "one write over the limit",
+			limit:        5,
+			writes:       []string{"hello world"},
+			expectedBody: "hello",
+		},
+		{
+			name:         "writes that cross the limit",
+			limit:        7,
+			writes:       []string{"hello", " ", "world"},
+			expectedBody: "hello w",
+		},
+		{
+			name:         "zero uses the default limit",
+			writes:       []string{"hello"},
+			expectedBody: "hello",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+				release: make(chan struct{}),
+			}
+			close(api.release)
+
+			p := Setup(SetupOpts{})
+			p.api = api
+
+			opts := FnOpts{TrackAllRequests: true, MaxResponseBodySize: tt.limit}
+			handler := p.HandleFunc(opts, func(w http.ResponseWriter, r *http.Request) {
+				for _, write := range tt.writes {
+					_, _ = w.Write([]byte(write))
+				}
+			})
+
+			rec := httptest.NewRecorder()
+			handler(rec, httptest.NewRequest(http.MethodGet, "/test", nil))
+
+			// the client always gets the full response.
+			require.Equal(t, strings.Join(tt.writes, ""), rec.Body.String())
+
+			var steps []sdkrequest.GeneratorOpcode
+			select {
+			case steps = <-api.called:
+			case <-time.After(5 * time.Second):
+				t.Fatal("checkpoint was not sent")
+			}
+			var result APIResult
+			require.NoError(t, json.Unmarshal(steps[len(steps)-1].Data, &result))
+			require.Equal(t, tt.expectedBody, result.Body)
+		})
+	}
+}
+
+func TestResolveConfigMaxResponseBodySize(t *testing.T) {
+	p := Setup(SetupOpts{})
+	r := httptest.NewRequest(http.MethodGet, "/test", nil)
+
+	require.Equal(t, DefaultMaxResponseBodySize, p.resolveConfig(FnOpts{}, r).MaxResponseBodySize)
+	require.Equal(t, DefaultMaxResponseBodySize, p.resolveConfig(FnOpts{MaxResponseBodySize: -1}, r).MaxResponseBodySize)
+	require.Equal(t, 10, p.resolveConfig(FnOpts{MaxResponseBodySize: 10}, r).MaxResponseBodySize)
 }
