@@ -537,7 +537,7 @@ func TestTrackingStartsAtFirstStep(t *testing.T) {
 			name:           "step after the response",
 			stepAfterWrite: true,
 			expectRun:      true,
-			expectedBody:   "",
+			expectedBody:   "ok",
 		},
 		{
 			name:            "step before the response with OmitResponseBody",
@@ -613,4 +613,82 @@ func TestTrackingStartsAtFirstStep(t *testing.T) {
 			require.Equal(t, tt.expectedBody, result.Body)
 		})
 	}
+}
+
+func TestStoredResponseBodyLimit(t *testing.T) {
+	tests := []struct {
+		name         string
+		limit        int
+		writes       []string
+		expectedBody string
+	}{
+		{
+			name:         "body under the limit",
+			limit:        10,
+			writes:       []string{"hello"},
+			expectedBody: "hello",
+		},
+		{
+			name:         "one write over the limit",
+			limit:        5,
+			writes:       []string{"hello world"},
+			expectedBody: "hello",
+		},
+		{
+			name:         "writes that cross the limit",
+			limit:        7,
+			writes:       []string{"hello", " ", "world"},
+			expectedBody: "hello w",
+		},
+		{
+			name:         "zero uses the default limit",
+			writes:       []string{"hello"},
+			expectedBody: "hello",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+				release: make(chan struct{}),
+			}
+			close(api.release)
+
+			p := Setup(SetupOpts{})
+			p.api = api
+
+			opts := FnOpts{TrackAllRequests: true, MaxResponseBodySize: tt.limit}
+			handler := p.HandleFunc(opts, func(w http.ResponseWriter, r *http.Request) {
+				for _, write := range tt.writes {
+					_, _ = w.Write([]byte(write))
+				}
+			})
+
+			rec := httptest.NewRecorder()
+			handler(rec, httptest.NewRequest(http.MethodGet, "/test", nil))
+
+			// the client always gets the full response.
+			require.Equal(t, strings.Join(tt.writes, ""), rec.Body.String())
+
+			var steps []sdkrequest.GeneratorOpcode
+			select {
+			case steps = <-api.called:
+			case <-time.After(5 * time.Second):
+				t.Fatal("checkpoint was not sent")
+			}
+			var result APIResult
+			require.NoError(t, json.Unmarshal(steps[len(steps)-1].Data, &result))
+			require.Equal(t, tt.expectedBody, result.Body)
+		})
+	}
+}
+
+func TestResolveConfigMaxResponseBodySize(t *testing.T) {
+	p := Setup(SetupOpts{})
+	r := httptest.NewRequest(http.MethodGet, "/test", nil)
+
+	require.Equal(t, DefaultMaxResponseBodySize, p.resolveConfig(FnOpts{}, r).MaxResponseBodySize)
+	require.Equal(t, DefaultMaxResponseBodySize, p.resolveConfig(FnOpts{MaxResponseBodySize: -1}, r).MaxResponseBodySize)
+	require.Equal(t, 10, p.resolveConfig(FnOpts{MaxResponseBodySize: 10}, r).MaxResponseBodySize)
 }

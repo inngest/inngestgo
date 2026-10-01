@@ -39,6 +39,7 @@ func processRequest(p *provider, opts FnOpts, r *http.Request, w http.ResponseWr
 	owner.mgr.SetFn(servableRestFn{cfg})
 	owner.w.onHeader = owner.setRunHeaders
 	owner.w.capture = owner.captureResponse
+	owner.w.maxBody = cfg.MaxResponseBodySize
 
 	owner.run = CheckpointRun{
 		RunID: ulid.MustNew(
@@ -251,11 +252,11 @@ func (o *requestOwner) setRunHeaders(h http.Header) {
 	h.Set("X-Inngest-SDK", version.GetVersion())
 }
 
-// captureResponse reports whether a response write is stored with the run.
-// writes that happen before the first step are not stored.  without this check,
-// every response on a wrapped route stays in memory until the handler returns.
+// captureResponse reports whether a response write is stored with the run.  it
+// does not wait for the first step, because a handler can respond before it
+// runs its steps.  MaxResponseBodySize limits the stored copy.
 func (o *requestOwner) captureResponse() bool {
-	return !o.config.OmitResponseBody && o.tracking()
+	return !o.config.OmitResponseBody
 }
 
 // getExistingRun loads the saved steps when Inngest sends the request to resume
@@ -501,6 +502,12 @@ func (o *requestOwner) appendResult(ctx context.Context, res APIResult) error {
 	)
 
 	if !o.config.OmitResponseBody {
+		if o.w.truncated {
+			o.provider.logger.Warn("api response body is larger than MaxResponseBodySize and was truncated in the run",
+				"run_id", o.run.RunID,
+				"max_response_body_size", o.config.MaxResponseBodySize,
+			)
+		}
 		responseBody, err = json.Marshal(res)
 		if err != nil {
 			return err

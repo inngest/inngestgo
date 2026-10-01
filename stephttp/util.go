@@ -45,6 +45,12 @@ type responseWriter struct {
 	// capture reports whether a write is copied into body.  nil copies every
 	// write.  a write that it skips is missing from the stored response.
 	capture func() bool
+	// maxBody is the most bytes that body holds.  zero has no limit.  without a
+	// limit, a long response such as a stream stays in memory until the handler
+	// returns.
+	maxBody int
+	// truncated is true when body stopped at maxBody.
+	truncated bool
 }
 
 func newResponseWriter(w http.ResponseWriter) *responseWriter {
@@ -78,9 +84,20 @@ func (rw *responseWriter) Write(data []byte) (int, error) {
 	rw.beforeHeader()
 	// Don't capture response body after hijacking
 	if !rw.hijacked && (rw.capture == nil || rw.capture()) {
-		rw.body.Write(data)
+		rw.copyBody(data)
 	}
 	return rw.ResponseWriter.Write(data)
+}
+
+// copyBody adds data to body until body holds maxBody bytes.
+func (rw *responseWriter) copyBody(data []byte) {
+	if rw.maxBody > 0 {
+		if remaining := rw.maxBody - rw.body.Len(); len(data) > remaining {
+			data = data[:max(remaining, 0)]
+			rw.truncated = true
+		}
+	}
+	rw.body.Write(data)
 }
 
 // beforeHeader marks the headers as sent and runs onHeader the first time.

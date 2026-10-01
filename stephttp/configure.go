@@ -8,6 +8,10 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
+// DefaultMaxResponseBodySize is the number of response body bytes stored with a
+// run when FnOpts.MaxResponseBodySize is zero.
+const DefaultMaxResponseBodySize = 1024 * 1024
+
 type AsyncResponse interface {
 	isAsyncResponse()
 }
@@ -44,6 +48,11 @@ type FnOpts struct {
 	// allows you to properly store eg. errors for debugging, then only omit successful
 	// responses at the end of your function.
 	OmitResponseBody bool
+
+	// MaxResponseBodySize is the number of response body bytes stored with the run.
+	// The client always gets the full response.  Bytes past this limit are not
+	// stored, and a warning is logged.  If zero, this is DefaultMaxResponseBodySize.
+	MaxResponseBodySize int
 
 	// AsyncResponse determines how we respond to a user when an API hits an
 	// async step (eg. step.sleep, step.waitForEvent) or if a step errors.
