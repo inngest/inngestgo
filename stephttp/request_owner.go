@@ -160,7 +160,10 @@ func (o *requestOwner) handle(ctx context.Context) error {
 		)
 	}
 
-	o.handleFirstCheckpoint(ctx)
+	// the client already has its response, so commit the run in the background.
+	// the provider counts this as in flight, so Wait does not return until the
+	// commit request to the Inngest API finishes.
+	o.handleFinalCheckpointAsync()
 
 	return nil
 }
@@ -313,10 +316,44 @@ func (o *requestOwner) call(ctx context.Context) APIResult {
 //
 // It also checkpoints the first N steps (potentially including the entire function).
 //
-// This is a blocking operation;  to run this in the background use a goroutine.
+// This is a blocking operation;  handleFinalCheckpointAsync runs it in the background.
 //
 // This returns an optional token used when redirecting to async outputs.
 func (o *requestOwner) handleFirstCheckpoint(ctx context.Context) string {
+	resp, err := o.provider.api.CheckpointNewRun(ctx, o.run.RunID, o.newRunData(), o.mgr.Ops()...)
+	if err != nil {
+		o.provider.logger.Error("error creating new api-based inngest run", "error", err, "run_id", o.run.RunID)
+		return ""
+	}
+
+	o.run = *resp
+	return resp.Token
+}
+
+// handleFinalCheckpointAsync creates a new run and checkpoints every op of a
+// finished run in a goroutine that the provider tracks.  it reads the request
+// and the ops before it returns, because the HTTP server closes the request
+// body once the handler returns.  the API call uses a new context, so it keeps
+// no values or deadlines from the request.
+func (o *requestOwner) handleFinalCheckpointAsync() {
+	var (
+		runID  = o.run.RunID
+		data   = o.newRunData()
+		ops    = o.mgr.Ops()
+		api    = o.provider.api
+		logger = o.provider.logger
+	)
+
+	o.provider.goTracked(func() {
+		if _, err := api.CheckpointNewRun(context.Background(), runID, data, ops...); err != nil {
+			logger.Error("error creating new api-based inngest run", "error", err, "run_id", runID)
+		}
+	})
+}
+
+// newRunData reads the incoming request into the run data for a new run.  it
+// reads the request body unless the function config omits it.
+func (o *requestOwner) newRunData() NewAPIRunData {
 	var (
 		requestBody []byte
 		err         error
@@ -349,7 +386,7 @@ func (o *requestOwner) handleFirstCheckpoint(ctx context.Context) string {
 		fnID = o.config.ID
 	}
 
-	resp, err := o.provider.api.CheckpointNewRun(ctx, o.run.RunID, NewAPIRunData{
+	return NewAPIRunData{
 		Domain:      scheme + "://" + o.r.Host,
 		Method:      o.r.Method,
 		Path:        o.r.URL.Path,
@@ -358,14 +395,7 @@ func (o *requestOwner) handleFirstCheckpoint(ctx context.Context) string {
 		QueryParams: o.r.URL.RawQuery,
 		Body:        requestBody,
 		Fn:          fnID,
-	}, o.mgr.Ops()...)
-	if err != nil {
-		o.provider.logger.Error("error creating new api-based inngest run", "error", err, "run_id", o.run.RunID)
-		return ""
 	}
-
-	o.run = *resp
-	return resp.Token
 }
 
 // validateResumeRequestSignature validates the signature for resume requests.
