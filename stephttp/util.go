@@ -90,6 +90,16 @@ func (rw *responseWriter) Write(data []byte) (int, error) {
 	return rw.ResponseWriter.Write(data)
 }
 
+// setMaxBody changes maxBody.  a copy already longer than the new limit is cut
+// to it, so a lower limit also applies to bytes stored before the change.
+func (rw *responseWriter) setMaxBody(limit int) {
+	rw.maxBody = limit
+	if limit > 0 && rw.body.Len() > limit {
+		rw.body.Truncate(limit)
+		rw.truncated = true
+	}
+}
+
 // copyBody adds data to body until body holds maxBody bytes.
 func (rw *responseWriter) copyBody(data []byte) {
 	if rw.maxBody > 0 {
@@ -204,6 +214,16 @@ func (b *bodyRecorder) Read(p []byte) (int, error) {
 	n, err := b.body.Read(p)
 	b.copy(p[:n])
 	return n, err
+}
+
+// setMax changes max.  a copy already longer than the new limit is cut to it,
+// so a lower limit also applies to bytes stored before the change.
+func (b *bodyRecorder) setMax(limit int) {
+	b.max = limit
+	if limit > 0 && b.buf.Len() > limit {
+		b.buf.Truncate(limit)
+		b.truncated = true
+	}
 }
 
 // copy adds data to buf until buf holds max bytes.

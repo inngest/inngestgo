@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -159,14 +160,27 @@ func (p *provider) Middleware(opts FnOpts) func(http.Handler) http.Handler {
 // serve wraps next.  known is true when the wrapper knows that next is an
 // Inngest function, so the request stores its response from the first write.
 func (p *provider) serve(opts FnOpts, known bool, next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	w := &routeWrapper{opts: opts, known: known}
+	return func(rw http.ResponseWriter, r *http.Request) {
 		p.inflight.Add(1)
 		defer func() { p.inflight.Add(-1) }()
 
-		if err := processRequest(p, opts, known, r, w, next); err != nil {
+		if err := processRequest(p, w, r, rw, next); err != nil {
 			p.logger.Error("error handling api request", "error", err)
 		}
 	}
+}
+
+// routeWrapper holds what one Handle, HandleFunc, or Middleware call shares
+// across its requests.
+type routeWrapper struct {
+	opts FnOpts
+	// known is true when the wrapper knows that the handler is an Inngest
+	// function.  See requestOwner.captureResponse.
+	known bool
+	// emptyID logs the empty function ID warning once for this wrapper, so a
+	// route with an ID in each URL does not log on every request.
+	emptyID sync.Once
 }
 
 // resolveConfig returns the config for one request to a wrapped handler.  each

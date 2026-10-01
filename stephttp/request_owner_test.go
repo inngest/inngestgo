@@ -1,10 +1,12 @@
 package stephttp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -378,10 +380,16 @@ func TestFunctionIDDefaultsToRoutePattern(t *testing.T) {
 		id   string
 		// pattern is the http.ServeMux pattern.  empty calls the handler without
 		// a ServeMux.
-		pattern  string
-		method   string
-		path     string
-		expected string
+		pattern string
+		// middleware wraps the ServeMux with Provider.Middleware.  false wraps the
+		// route with Provider.HandleFunc.
+		middleware bool
+		// copyRequest puts middleware that calls r.WithContext between
+		// Provider.Middleware and the ServeMux.
+		copyRequest bool
+		method      string
+		path        string
+		expected    string
 	}{
 		{
 			name:     "config ID wins",
@@ -411,6 +419,23 @@ func TestFunctionIDDefaultsToRoutePattern(t *testing.T) {
 			path:     "/users/123",
 			expected: "",
 		},
+		{
+			name:       "Middleware in front of a ServeMux",
+			pattern:    "POST /users/{id}",
+			middleware: true,
+			method:     http.MethodPost,
+			path:       "/users/123",
+			expected:   "POST /users/{id}",
+		},
+		{
+			name:        "Middleware in front of middleware that copies the request",
+			pattern:     "POST /users/{id}",
+			middleware:  true,
+			copyRequest: true,
+			method:      http.MethodPost,
+			path:        "/users/123",
+			expected:    "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -425,10 +450,24 @@ func TestFunctionIDDefaultsToRoutePattern(t *testing.T) {
 			p := Setup(SetupOpts{})
 			p.api = api
 
-			var handler http.Handler = p.HandleFunc(FnOpts{ID: tt.id, TrackAllRequests: true}, func(w http.ResponseWriter, r *http.Request) {
+			opts := FnOpts{ID: tt.id, TrackAllRequests: true}
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = w.Write([]byte("ok"))
 			})
-			if tt.pattern != "" {
+
+			var handler http.Handler = p.HandleFunc(opts, next)
+			switch {
+			case tt.middleware:
+				mux := http.NewServeMux()
+				mux.Handle(tt.pattern, next)
+				handler = mux
+				if tt.copyRequest {
+					handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						mux.ServeHTTP(w, r.WithContext(r.Context()))
+					})
+				}
+				handler = p.Middleware(opts)(handler)
+			case tt.pattern != "":
 				mux := http.NewServeMux()
 				mux.Handle(tt.pattern, handler)
 				handler = mux
@@ -961,6 +1000,64 @@ func TestResponseStoredForKnownFunctions(t *testing.T) {
 			var result APIResult
 			require.NoError(t, json.Unmarshal(steps[len(steps)-1].Data, &result))
 			require.Equal(t, tt.expectedBody, result.Body)
+		})
+	}
+}
+
+func TestEmptyFunctionIDWarnsOncePerWrapper(t *testing.T) {
+	tests := []struct {
+		name string
+		// wrappers is how many HandleFunc calls wrap the handler.  each gets
+		// every path.
+		wrappers         int
+		id               string
+		paths            []string
+		expectedWarnings int
+	}{
+		{
+			name:             "one wrapper and many URLs",
+			wrappers:         1,
+			paths:            []string{"/users/1", "/users/2", "/users/3"},
+			expectedWarnings: 1,
+		},
+		{
+			name:             "two wrappers",
+			wrappers:         2,
+			paths:            []string{"/users/1", "/users/2"},
+			expectedWarnings: 2,
+		},
+		{
+			name:             "a function ID",
+			wrappers:         1,
+			id:               "get-user",
+			paths:            []string{"/users/1", "/users/2"},
+			expectedWarnings: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 10),
+				release: make(chan struct{}),
+			}
+			close(api.release)
+
+			var logs bytes.Buffer
+			p := Setup(SetupOpts{})
+			p.api = api
+			p.logger = slog.New(slog.NewTextHandler(&logs, nil))
+
+			for range tt.wrappers {
+				handler := p.HandleFunc(FnOpts{ID: tt.id, TrackAllRequests: true}, func(w http.ResponseWriter, r *http.Request) {
+					_, _ = w.Write([]byte("ok"))
+				})
+				for _, path := range tt.paths {
+					handler(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
+				}
+			}
+
+			require.Equal(t, tt.expectedWarnings, strings.Count(logs.String(), "api function has no ID"))
 		})
 	}
 }

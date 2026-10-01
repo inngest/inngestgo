@@ -19,8 +19,8 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-func processRequest(p *provider, opts FnOpts, known bool, r *http.Request, w http.ResponseWriter, next http.HandlerFunc) error {
-	cfg := p.resolveConfig(opts, r)
+func processRequest(p *provider, wrap *routeWrapper, r *http.Request, w http.ResponseWriter, next http.HandlerFunc) error {
+	cfg := p.resolveConfig(wrap.opts, r)
 
 	owner := &requestOwner{
 		r:        r,
@@ -33,8 +33,9 @@ func processRequest(p *provider, opts FnOpts, known bool, r *http.Request, w htt
 			APIBaseURL: env.APIServerURL(nil),
 		}),
 
+		wrapper:   wrap,
 		config:    &cfg,
-		known:     known,
+		known:     wrap.known,
 		startTime: time.Now(),
 	}
 	owner.mgr.SetFn(servableRestFn{cfg})
@@ -70,6 +71,11 @@ type requestOwner struct {
 	provider *provider
 	// sdkrequest is the step execution manager for the underlying function.
 	mgr sdkrequest.InvocationManager
+	// wrapper is the Handle, HandleFunc, or Middleware call that wraps next.
+	wrapper *routeWrapper
+	// handlerReq is the request that next gets.  an http.ServeMux behind
+	// Provider.Middleware sets Pattern on this request, not on r.
+	handlerReq *http.Request
 
 	// # Run-specific options
 
@@ -364,7 +370,8 @@ func (o *requestOwner) call(ctx context.Context) (result APIResult) {
 	}()
 
 	// Execute the handler with step tooling available (o.w is already wrapped)
-	o.next(o.w, o.r.WithContext(ctx))
+	o.handlerReq = o.r.WithContext(ctx)
+	o.next(o.w, o.handlerReq)
 	return o.result()
 }
 
@@ -454,6 +461,7 @@ func (o *requestOwner) newRunData() NewAPIRunData {
 	}
 
 	scheme := httputil.GetScheme(o.r)
+	o.resolveFunctionID()
 
 	return NewAPIRunData{
 		Domain:      scheme + "://" + o.r.Host,
@@ -467,6 +475,36 @@ func (o *requestOwner) newRunData() NewAPIRunData {
 		// generates a slug using the URL and method.
 		Fn: o.config.ID,
 	}
+}
+
+// routedRequest returns the request that next got, once next runs.  a route
+// pattern from an http.ServeMux behind Provider.Middleware is only on that
+// request.  a ServeMux behind other middleware that copies the request sets the
+// pattern on a copy that the wrapper cannot see.
+func (o *requestOwner) routedRequest() *http.Request {
+	if o.handlerReq != nil {
+		return o.handlerReq
+	}
+	return o.r
+}
+
+// resolveFunctionID sets an empty function ID from the route pattern.  if the
+// ID is still empty, the Inngest API builds it from the method and the path,
+// which creates a separate function for each value in a path such as
+// /users/123.  a warning shows this once for each wrapper.
+func (o *requestOwner) resolveFunctionID() {
+	if o.config.ID == "" {
+		o.config.ID = defaultFunctionID(o.routedRequest())
+	}
+	if o.config.ID != "" {
+		return
+	}
+	o.wrapper.emptyID.Do(func() {
+		o.provider.logger.Warn("api function has no ID, so each URL creates a separate function.  set FnOpts.ID or call stephttp.Configure",
+			"method", o.r.Method,
+			"path", o.r.URL.Path,
+		)
+	})
 }
 
 // validateResumeRequestSignature validates the signature for resume requests.
@@ -554,7 +592,7 @@ func (o *requestOwner) withConfigUpdater(ctx context.Context) context.Context {
 	return context.WithValue(ctx, fnUpdateCtx, func(update func(*FnOpts)) {
 		cfg := *o.config
 		update(&cfg)
-		cfg = o.provider.resolveConfig(cfg, o.r)
+		cfg = o.provider.resolveConfig(cfg, o.routedRequest())
 
 		// the Inngest API already has the run under the old ID.
 		if o.started && cfg.ID != o.config.ID {
@@ -569,9 +607,9 @@ func (o *requestOwner) withConfigUpdater(ctx context.Context) context.Context {
 		*o.config = cfg
 		o.known = true
 		o.mgr.SetFn(servableRestFn{cfg})
-		o.w.maxBody = cfg.MaxResponseBodySize
+		o.w.setMaxBody(cfg.MaxResponseBodySize)
 		if o.body != nil {
-			o.body.max = cfg.MaxRequestBodySize
+			o.body.setMax(cfg.MaxRequestBodySize)
 		}
 	})
 }
