@@ -193,6 +193,13 @@ type bodyRecorder struct {
 	body   io.ReadCloser
 	buf    bytes.Buffer
 	closed bool
+	// recording is true when reads are copied into buf.  a request behind
+	// Provider.Middleware passes its body through with no copy until its
+	// handler calls Configure.
+	recording bool
+	// read is true once the handler reads from the body.  after that, recording
+	// cannot start, because the start of the body is gone.
+	read bool
 	// max is the most bytes that buf holds.  zero has no limit.  without a
 	// limit, a large upload stays in memory twice and goes to the Inngest API.
 	max int
@@ -200,11 +207,11 @@ type bodyRecorder struct {
 	truncated bool
 }
 
-func newBodyRecorder(body io.ReadCloser, limit int) *bodyRecorder {
+func newBodyRecorder(body io.ReadCloser, limit int, recording bool) *bodyRecorder {
 	if body == nil {
 		body = http.NoBody
 	}
-	return &bodyRecorder{body: body, max: limit}
+	return &bodyRecorder{body: body, max: limit, recording: recording}
 }
 
 func (b *bodyRecorder) Read(p []byte) (int, error) {
@@ -212,8 +219,25 @@ func (b *bodyRecorder) Read(p []byte) (int, error) {
 		return 0, http.ErrBodyReadAfterClose
 	}
 	n, err := b.body.Read(p)
-	b.copy(p[:n])
+	b.read = true
+	if b.recording {
+		b.copy(p[:n])
+	}
 	return n, err
+}
+
+// startRecording starts copying reads into buf.  it reports false when the
+// handler already read from the body, because the stored body would miss its
+// start.
+func (b *bodyRecorder) startRecording() bool {
+	if b.recording {
+		return true
+	}
+	if b.read {
+		return false
+	}
+	b.recording = true
+	return true
 }
 
 // setMax changes max.  a copy already longer than the new limit is cut to it,

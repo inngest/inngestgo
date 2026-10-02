@@ -458,15 +458,23 @@ func TestFunctionIDDefaultsToRoutePattern(t *testing.T) {
 			var handler http.Handler = p.HandleFunc(opts, next)
 			switch {
 			case tt.middleware:
+				// behind the middleware, the handler opts in with Configure.
+				optedIn := func(w http.ResponseWriter, r *http.Request) {
+					Configure(r.Context(), func(o *FnOpts) {
+						o.ID = tt.id
+						o.TrackAllRequests = true
+					})
+					next(w, r)
+				}
 				mux := http.NewServeMux()
-				mux.Handle(tt.pattern, next)
+				mux.HandleFunc(tt.pattern, optedIn)
 				handler = mux
 				if tt.copyRequest {
 					handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						mux.ServeHTTP(w, r.WithContext(r.Context()))
 					})
 				}
-				handler = p.Middleware(opts)(handler)
+				handler = p.Middleware(MiddlewareOpts{})(handler)
 			case tt.pattern != "":
 				mux := http.NewServeMux()
 				mux.Handle(tt.pattern, handler)
@@ -492,7 +500,7 @@ func TestAsyncResponseDefaults(t *testing.T) {
 		name            string
 		providerDefault AsyncResponse
 		route           AsyncResponse
-		// omitResponse calls UpdateOmitResponseBody before the async step.
+		// omitResponse calls Configure to omit the response before the async step.
 		omitResponse   bool
 		expectedStatus int
 	}{
@@ -506,7 +514,7 @@ func TestAsyncResponseDefaults(t *testing.T) {
 			expectedStatus:  http.StatusOK,
 		},
 		{
-			name:            "provider default after UpdateOmitResponseBody",
+			name:            "provider default after Configure",
 			providerDefault: AsyncResponseToken{},
 			omitResponse:    true,
 			expectedStatus:  http.StatusOK,
@@ -534,7 +542,7 @@ func TestAsyncResponseDefaults(t *testing.T) {
 
 			handler := p.HandleFunc(FnOpts{AsyncResponse: tt.route}, func(w http.ResponseWriter, r *http.Request) {
 				if tt.omitResponse {
-					UpdateOmitResponseBody(r.Context(), true)
+					Configure(r.Context(), func(o *FnOpts) { o.OmitResponseBody = true })
 				}
 				step.Sleep(r.Context(), "wait", time.Second)
 				_, _ = w.Write([]byte("done"))
@@ -875,8 +883,10 @@ func TestConfigureDuringRequest(t *testing.T) {
 			mux := http.NewServeMux()
 			var handler http.Handler = mux
 			if tt.middleware {
+				// GraphQL reads the body before Configure, so the middleware
+				// records every body.
 				mux.HandleFunc("POST /gql", gql)
-				handler = p.Middleware(tt.opts)(mux)
+				handler = p.Middleware(MiddlewareOpts{RecordRequestBodies: true})(mux)
 			} else {
 				mux.Handle("POST /gql", p.HandleFunc(tt.opts, gql))
 			}
@@ -949,15 +959,18 @@ func TestResponseStoredForKnownFunctions(t *testing.T) {
 		name string
 		// middleware wraps with Provider.Middleware.  false wraps with
 		// Provider.HandleFunc.
-		middleware   bool
-		opts         FnOpts
-		configure    bool
-		expectedBody string
+		middleware bool
+		// configureBefore and configureAfter call Configure before or after the
+		// handler writes its response.
+		configureBefore bool
+		configureAfter  bool
+		expectRun       bool
+		expectedBody    string
 	}{
-		{name: "HandleFunc without an ID", expectedBody: "ok"},
-		{name: "Middleware without an ID", middleware: true, expectedBody: ""},
-		{name: "Middleware with an ID", middleware: true, opts: FnOpts{ID: "route"}, expectedBody: "ok"},
-		{name: "Middleware and Configure", middleware: true, configure: true, expectedBody: "ok"},
+		{name: "HandleFunc", expectRun: true, expectedBody: "ok"},
+		{name: "Middleware without Configure", middleware: true},
+		{name: "Middleware and Configure before the response", middleware: true, configureBefore: true, expectRun: true, expectedBody: "ok"},
+		{name: "Middleware and Configure after the response", middleware: true, configureAfter: true, expectRun: true, expectedBody: ""},
 	}
 
 	for _, tt := range tests {
@@ -971,25 +984,40 @@ func TestResponseStoredForKnownFunctions(t *testing.T) {
 			p := Setup(SetupOpts{})
 			p.api = api
 
+			configure := func(r *http.Request) {
+				Configure(r.Context(), func(o *FnOpts) { o.ID = "configured" })
+			}
 			// the handler responds before its first step.
 			next := func(w http.ResponseWriter, r *http.Request) {
-				if tt.configure {
-					Configure(r.Context(), func(o *FnOpts) { o.ID = "configured" })
+				if tt.configureBefore {
+					configure(r)
 				}
 				_, _ = w.Write([]byte("ok"))
+				if tt.configureAfter {
+					configure(r)
+				}
 				_, _ = step.Run(r.Context(), "a", func(ctx context.Context) (int, error) {
 					return 1, nil
 				})
 			}
 
-			var handler http.Handler = p.HandleFunc(tt.opts, next)
+			var handler http.Handler = p.HandleFunc(FnOpts{}, next)
 			if tt.middleware {
-				handler = p.Middleware(tt.opts)(http.HandlerFunc(next))
+				handler = p.Middleware(MiddlewareOpts{})(http.HandlerFunc(next))
 			}
 
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/test", nil))
 			require.Equal(t, "ok", rec.Body.String())
+
+			if !tt.expectRun {
+				// a new run checkpoints in a tracked goroutine that sends to called
+				// before it returns, so a run shows up in one of these checks.
+				require.Zero(t, p.inflight.Load())
+				require.Empty(t, api.called)
+				require.Empty(t, rec.Header().Get(headerRunID))
+				return
+			}
 
 			var steps []sdkrequest.GeneratorOpcode
 			select {
@@ -1144,4 +1172,200 @@ func TestConfigureChangesBodyLimits(t *testing.T) {
 			require.Equal(t, tt.expectedResponse, result.Body)
 		})
 	}
+}
+
+func TestMiddlewareOptIn(t *testing.T) {
+	const body = `{"hello":"world"}`
+
+	tests := []struct {
+		name string
+		opts MiddlewareOpts
+		// configure is the handler's Configure call.  nil does not opt in.
+		configure func(o *FnOpts)
+		// readFirst reads the request body before Configure.
+		readFirst bool
+		asyncStep bool
+
+		expectedStatus int
+		expectedBody   string
+		expectRun      bool
+		// expectedStored is the request body stored with the run.
+		expectedStored string
+		expectedLog    string
+	}{
+		{
+			name:           "steps run without Configure",
+			expectedStatus: http.StatusOK,
+			expectedBody:   "1",
+		},
+		{
+			name:           "Configure before reading the body",
+			configure:      func(o *FnOpts) { o.ID = "fn" },
+			expectedStatus: http.StatusOK,
+			expectedBody:   "1",
+			expectRun:      true,
+			expectedStored: body,
+		},
+		{
+			name:           "Configure after reading the body",
+			configure:      func(o *FnOpts) { o.ID = "fn" },
+			readFirst:      true,
+			expectedStatus: http.StatusOK,
+			expectedBody:   "1",
+			expectRun:      true,
+			expectedStored: "",
+			expectedLog:    "read the request body before stephttp.Configure",
+		},
+		{
+			name:           "RecordRequestBodies and Configure after reading the body",
+			opts:           MiddlewareOpts{RecordRequestBodies: true},
+			configure:      func(o *FnOpts) { o.ID = "fn" },
+			readFirst:      true,
+			expectedStatus: http.StatusOK,
+			expectedBody:   "1",
+			expectRun:      true,
+			expectedStored: body,
+		},
+		{
+			name: "RecordRequestBodies and OmitRequestBody",
+			opts: MiddlewareOpts{RecordRequestBodies: true},
+			configure: func(o *FnOpts) {
+				o.ID = "fn"
+				o.OmitRequestBody = true
+			},
+			readFirst:      true,
+			expectedStatus: http.StatusOK,
+			expectedBody:   "1",
+			expectRun:      true,
+			expectedStored: "",
+		},
+		{
+			name: "Configure cannot raise the middleware buffer",
+			opts: MiddlewareOpts{RecordRequestBodies: true, MaxRequestBodySize: 5},
+			configure: func(o *FnOpts) {
+				o.ID = "fn"
+				o.MaxRequestBodySize = 100
+			},
+			expectedStatus: http.StatusOK,
+			expectedBody:   "1",
+			expectRun:      true,
+			expectedStored: body[:5],
+		},
+		{
+			name:           "async step without Configure",
+			asyncStep:      true,
+			expectedStatus: http.StatusInternalServerError,
+			expectedBody:   "Internal Server Error\n",
+			expectedLog:    "ran an async step without stephttp.Configure",
+		},
+		{
+			name:           "async step with Configure",
+			configure:      func(o *FnOpts) { o.ID = "fn" },
+			asyncStep:      true,
+			expectedStatus: http.StatusSeeOther,
+			expectRun:      true,
+			expectedStored: body,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &blockingAPI{
+				called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+				release: make(chan struct{}),
+				inputs:  make(chan NewAPIRunData, 1),
+			}
+			close(api.release)
+
+			var logs bytes.Buffer
+			p := Setup(SetupOpts{})
+			p.api = api
+			p.logger = slog.New(slog.NewTextHandler(&logs, nil))
+
+			handler := p.Middleware(tt.opts)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tt.configure != nil && !tt.readFirst {
+					Configure(r.Context(), tt.configure)
+				}
+				_, _ = io.ReadAll(r.Body)
+				if tt.configure != nil && tt.readFirst {
+					Configure(r.Context(), tt.configure)
+				}
+				if tt.asyncStep {
+					step.Sleep(r.Context(), "wait", time.Second)
+				}
+				n, _ := step.Run(r.Context(), "a", func(ctx context.Context) (int, error) {
+					return 1, nil
+				})
+				_, _ = fmt.Fprint(w, n)
+			}))
+
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/test", strings.NewReader(body)))
+
+			require.Equal(t, tt.expectedStatus, rec.Code)
+			if tt.expectedBody != "" {
+				require.Equal(t, tt.expectedBody, rec.Body.String())
+			}
+			if tt.expectedLog != "" {
+				require.Contains(t, logs.String(), tt.expectedLog)
+			}
+
+			if !tt.expectRun {
+				// a new run checkpoints in a tracked goroutine that sends to called
+				// before it returns, so a run shows up in one of these checks.
+				require.Zero(t, p.inflight.Load())
+				require.Empty(t, api.called)
+				require.Empty(t, rec.Header().Get(headerRunID))
+				return
+			}
+
+			select {
+			case input := <-api.inputs:
+				require.Equal(t, "fn", input.Fn)
+				require.Equal(t, tt.expectedStored, string(input.Body))
+			case <-time.After(5 * time.Second):
+				t.Fatal("checkpoint was not sent")
+			}
+			_, err := ulid.Parse(rec.Header().Get(headerRunID))
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestMiddlewareResumesWithoutConfigure(t *testing.T) {
+	const signingKey = "signkey-test-12345678"
+	t.Setenv("INNGEST_DEV", "")
+
+	api := &blockingAPI{
+		called:  make(chan []sdkrequest.GeneratorOpcode, 1),
+		release: make(chan struct{}),
+	}
+	t.Cleanup(func() { close(api.release) })
+
+	p := Setup(SetupOpts{Optional: OptionalSetupOpts{SigningKey: signingKey}})
+	p.api = api
+
+	// a resumed run opted in on its first request, so the handler does not need
+	// Configure to continue it.
+	handler := p.Middleware(MiddlewareOpts{})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = step.Run(r.Context(), "a", func(ctx context.Context) (int, error) {
+			return 1, nil
+		})
+		_, _ = w.Write([]byte("ok"))
+	}))
+
+	runID := ulid.Make().String()
+	sig, err := inngestgo.Sign(context.Background(), time.Now(), []byte(signingKey), []byte(runID))
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/test", nil)
+	req.Header.Set(headerRunID, runID)
+	req.Header.Set(headerSignature, sig)
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusPartialContent, rec.Code)
+	require.Equal(t, runID, rec.Header().Get(headerRunID))
+	require.Empty(t, api.called)
 }

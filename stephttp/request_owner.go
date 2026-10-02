@@ -19,7 +19,23 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-func processRequest(p *provider, wrap *routeWrapper, r *http.Request, w http.ResponseWriter, next http.HandlerFunc) error {
+// processRequest runs next as an Inngest API function for one request.
+func processRequest(p *provider, wrap *routeWrapper, r *http.Request, w http.ResponseWriter, next http.HandlerFunc) (err error) {
+	o := newRequestOwner(p, wrap, r, w, next)
+	if err := o.begin(r.Context()); err != nil {
+		return err
+	}
+
+	defer func() {
+		err = o.finish(recover())
+	}()
+	o.next(o.w, o.handlerReq)
+	return nil
+}
+
+// newRequestOwner prepares one request to an Inngest API function.  next is nil
+// for Provider.Start, where the handler runs between begin and finish.
+func newRequestOwner(p *provider, wrap *routeWrapper, r *http.Request, w http.ResponseWriter, next http.HandlerFunc) *requestOwner {
 	cfg := p.resolveConfig(wrap.opts, r)
 
 	owner := &requestOwner{
@@ -50,7 +66,7 @@ func processRequest(p *provider, wrap *routeWrapper, r *http.Request, w http.Res
 		),
 	}
 
-	return owner.handle(r.Context())
+	return owner
 }
 
 // requestOwner represents a manager for a single request to a sync function.
@@ -76,6 +92,9 @@ type requestOwner struct {
 	// handlerReq is the request that next gets.  an http.ServeMux behind
 	// Provider.Middleware sets Pattern on this request, not on r.
 	handlerReq *http.Request
+	// ctx is the request context with the step manager and the config updater.
+	// begin sets it.
+	ctx context.Context
 
 	// # Run-specific options
 
@@ -87,25 +106,37 @@ type requestOwner struct {
 	// run represents the IDs for the current sync run.
 	run CheckpointRun
 	// body records the request body for a new run.  It is nil when Inngest
-	// resumes an existing run, or when the config omits the request body.
+	// resumes an existing run, or when a function's own config omits the request
+	// body.  Behind Provider.Middleware it passes the body through with no copy
+	// until the handler opts in.
 	body *bodyRecorder
 	// resumed is true when Inngest sent this request to resume a run.
 	resumed bool
 	// tracked is true once this request has a run.  See tracking.
 	tracked bool
-	// known is true once the wrapper knows that the handler is an Inngest
-	// function.  See captureResponse.
+	// known is true once the handler is an Inngest function.  Handle,
+	// HandleFunc, Start, and a resumed run set it at the start.  behind
+	// Provider.Middleware, Configure sets it.
 	known bool
+	// warnedBody is true once this request logs that its body was read before
+	// Configure.
+	warnedBody bool
 	// started is true once the new run is sent to the Inngest API.  after that,
 	// the run keeps its function ID.
 	started bool
 }
 
-func (o *requestOwner) handle(ctx context.Context) error {
+// begin prepares the request before the handler runs.  it puts the step
+// manager and the config updater into the request context, finds a request
+// from Inngest that resumes a run, and starts the request body recorder for a
+// new run.  it returns an error when a resumed run cannot load its steps, and
+// it has already written the 500.  the handler must not run after that.
+func (o *requestOwner) begin(ctx context.Context) error {
 	// Always add the manager to context.
 	ctx = sdkrequest.SetManager(ctx, o.mgr)
-	// Add an updater, allowing the handler to change config via ctx (eg. in UpdateOmitResponseBody)
+	// Add an updater, allowing the handler to change config via ctx with Configure
 	ctx = o.withConfigUpdater(ctx)
+	o.ctx = ctx
 
 	resumed, err := o.getExistingRun(ctx)
 	if err != nil {
@@ -115,8 +146,10 @@ func (o *requestOwner) handle(ctx context.Context) error {
 		http.Error(o.w, "error loading run state", http.StatusInternalServerError)
 		return err
 	}
+
 	if resumed {
 		o.resumed = true
+		o.known = true
 
 		// In this case, we're re-entering an existing run, which means we're now
 		// running async and are responding to an Inngest's executor call.
@@ -124,10 +157,46 @@ func (o *requestOwner) handle(ctx context.Context) error {
 		// In this case, we always want to start returning opcodes to the HTTP request
 		// directly so that the async engine can take over.
 		o.mgr.SetStepMode(sdkrequest.StepModeYield)
+	} else {
+		// Here, we're always creating a net-new run.  This will continue to execute
+		// step.run calls until either an error, an async step, or the fn finishes.
+		//
+		// a new run gets one attempt, so a step error is final and step.Run returns it
+		// to the handler.  without this, a step error that the handler catches still
+		// makes the run async, and the async response is written after the handler's
+		// own response.
+		maxAttempts := 1
+		o.mgr.Request().CallCtx.MaxAttempts = &maxAttempts
 
-		// Call the handler to execute the next steps.
-		_ = o.call(ctx)
+		// record the body as the handler reads it.  without this, the new run stores
+		// an empty body whenever the handler reads the request body.  the handler can
+		// read the body before its first step, so this starts before the run does.
+		// behind Provider.Middleware, the body passes through until Configure, so a
+		// route that never opts in keeps no copy.
+		switch {
+		case o.known && !o.config.OmitRequestBody:
+			o.body = newBodyRecorder(o.r.Body, o.config.MaxRequestBodySize, true)
+		case !o.known:
+			o.body = newBodyRecorder(o.r.Body, o.config.MaxRequestBodySize, o.wrapper.recordAll)
+		}
+		if o.body != nil {
+			o.r.Body = o.body
+		}
+	}
 
+	// the handler gets this request, so it must carry the body recorder.
+	o.handlerReq = o.r.WithContext(ctx)
+	return nil
+}
+
+// finish completes the request after the handler returns.  recovered is the
+// value from recover() in the function that ran the handler.  for a request
+// from Inngest, it writes the opcodes.  for a new run, it writes the async
+// response or sends the finished run to Inngest in the background.
+func (o *requestOwner) finish(recovered any) error {
+	result := o.handlerResult(recovered)
+
+	if o.resumed {
 		if len(o.mgr.Ops()) > 0 {
 			// Write the ops to the response writer.  We know that this request is from Inngest,
 			// therefore its safe to write opcodes directly to the response.
@@ -142,30 +211,13 @@ func (o *requestOwner) handle(ctx context.Context) error {
 		return nil
 	}
 
-	// Here, we're always creating a net-new run.  Firstly, we must hit the API endpoint
-	// to begin the logic and check for any function config.  This will continue to execute
-	// step.run calls until either an error, an async step, or the fn finishes.
-	//
-	// a new run gets one attempt, so a step error is final and step.Run returns it
-	// to the handler.  without this, a step error that the handler catches still
-	// makes the run async, and the async response is written after the handler's
-	// own response.
-	maxAttempts := 1
-	o.mgr.Request().CallCtx.MaxAttempts = &maxAttempts
-
-	// record the body as the handler reads it.  without this, the new run stores
-	// an empty body whenever the handler reads the request body.  the handler can
-	// read the body before its first step, so this starts before the run does.
-	if !o.config.OmitRequestBody {
-		o.body = newBodyRecorder(o.r.Body, o.config.MaxRequestBodySize)
-		o.r.Body = o.body
+	if !o.known {
+		return o.finishWithoutRun()
 	}
-
-	result := o.call(ctx)
 
 	// Note that at this point the request would typically have finished, therefore the
 	// context could be cancelled.  Stop this from breaking our API calls.
-	ctx = context.WithoutCancel(ctx)
+	ctx := context.WithoutCancel(o.ctx)
 
 	if opcode.HasAsyncOps(o.mgr.Ops(), o.run.Attempt, 0) {
 		// Always checkpoint first, then handle the async conversion.
@@ -213,6 +265,26 @@ func (o *requestOwner) handle(ctx context.Context) error {
 	return nil
 }
 
+// finishWithoutRun completes a request behind Provider.Middleware whose handler
+// did not call Configure.  its steps already ran, and no run is created.  an
+// async step stopped the handler, and no run exists to continue it, so the
+// client gets a 500.
+func (o *requestOwner) finishWithoutRun() error {
+	if opcode.HasAsyncOps(o.mgr.Ops(), o.run.Attempt, 0) {
+		if !o.w.wroteHeader && !o.w.hijacked {
+			http.Error(o.w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		}
+		return fmt.Errorf("handler for %s %s ran an async step without stephttp.Configure, so no run exists to continue it.  call stephttp.Configure before the step",
+			o.r.Method, o.r.URL.Path,
+		)
+	}
+
+	if !o.w.hijacked {
+		o.w.Flush()
+	}
+	return nil
+}
+
 // handleAsyncConversion handles the conversion of sync -> async functions, which
 // essetially means checkpointing the steps in the foreground (blocking) so that
 // we can handle them with the async executor.
@@ -252,13 +324,13 @@ func (o *requestOwner) handleAsyncConversion(ctx context.Context, token string) 
 	return nil
 }
 
-// tracking reports whether this request has a run.  a new request gets a run
-// when its first step runs, or at the start when the config sets
-// TrackAllRequests.  a request from Inngest always resumes a run.  a request
-// without a run sends no run headers and makes no call to the Inngest API.
+// tracking reports whether this request has a run.  a function gets a run when
+// its first step runs, or at the start when its config sets TrackAllRequests.  a
+// request from Inngest always resumes a run.  a request without a run sends no
+// run headers and makes no call to the Inngest API.
 func (o *requestOwner) tracking() bool {
 	if !o.tracked {
-		o.tracked = o.resumed || o.config.TrackAllRequests || len(o.mgr.Ops()) > 0
+		o.tracked = o.resumed || (o.known && (o.config.TrackAllRequests || len(o.mgr.Ops()) > 0))
 	}
 	return o.tracked
 }
@@ -275,12 +347,12 @@ func (o *requestOwner) setRunHeaders(h http.Header) {
 }
 
 // captureResponse reports whether a response write is stored with the run.  a
-// known function stores from the first write, because a handler can respond
-// before it runs its steps.  other requests store from their first step, so
-// routes behind Provider.Middleware that run no steps keep no copy.
+// function stores from its first write, because a handler can respond before
+// it runs its steps.  behind Provider.Middleware, a handler stores from the
+// point it calls Configure, so routes that never opt in keep no copy.
 // MaxResponseBodySize limits the stored copy.
 func (o *requestOwner) captureResponse() bool {
-	return !o.config.OmitResponseBody && (o.known || o.tracking())
+	return !o.config.OmitResponseBody && o.known
 }
 
 // getExistingRun loads the saved steps when Inngest sends the request to resume
@@ -316,63 +388,58 @@ func (o *requestOwner) getExistingRun(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// call initializes the hijacking control flow, then executes the API-based Inngest function.
-// Depending on the step mode, this may execute all steps or execute a single step then halt
-// once the step finishes.
-//
-// It is the callers responsibility to handle the generated opcodes added to the invocation
-// manager.
-func (o *requestOwner) call(ctx context.Context) (result APIResult) {
-	defer func() {
-		if r := recover(); r != nil {
-			callCtx := o.mgr.CallContext()
+// handlerResult returns the API result after the handler returns.  recovered
+// is the value from recover() in the function that ran the handler.  a
+// ControlHijack means that a step stopped the handler, eg. an async step.  any
+// other value is a panic in the handler.
+func (o *requestOwner) handlerResult(recovered any) APIResult {
+	if recovered == nil {
+		return o.result()
+	}
 
-			// Was this us attepmting to prevent functions from continuing, using
-			// panic as a crappy control flow because go doesn't have generators?
-			if _, ok := r.(sdkrequest.ControlHijack); ok {
-				// Step attempt ended (completed or errored).
-				//
-				// NOTE: In this case, for API-based functions, we only get ControlHijack
-				// panics when we need to checkpoint via a blocking call.
-				//
-				// For example, when you `step.sleep` or `step.waitForEvent`, the function
-				// turns from a synchronous API to an asynchronous background function
-				// automatically.
-				o.mgr.SetStepMode(sdkrequest.StepModeYield)
-				o.provider.mw.AfterExecution(ctx, callCtx, nil, nil)
-				return
-			}
+	ctx := o.ctx
+	callCtx := o.mgr.CallContext()
 
-			// TODO: How many retries does this function have?  If zero, we can ignore
-			// any retries and show the error directly to the user, keeping StepModeBackground
-			// checkpointing.
+	// Was this us attepmting to prevent functions from continuing, using
+	// panic as a crappy control flow because go doesn't have generators?
+	if _, ok := recovered.(sdkrequest.ControlHijack); ok {
+		// Step attempt ended (completed or errored).
+		//
+		// NOTE: In this case, for API-based functions, we only get ControlHijack
+		// panics when we need to checkpoint via a blocking call.
+		//
+		// For example, when you `step.sleep` or `step.waitForEvent`, the function
+		// turns from a synchronous API to an asynchronous background function
+		// automatically.
+		o.mgr.SetStepMode(sdkrequest.StepModeYield)
+		o.provider.mw.AfterExecution(ctx, callCtx, nil, nil)
+		return APIResult{}
+	}
 
-			panicStack := string(debug.Stack())
-			o.provider.logger.Error("api handler panicked",
-				"error", r,
-				"run_id", o.run.RunID,
-				"stack", panicStack,
-			)
+	// TODO: How many retries does this function have?  If zero, we can ignore
+	// any retries and show the error directly to the user, keeping StepModeBackground
+	// checkpointing.
 
-			o.provider.mw.AfterExecution(ctx, callCtx, nil, nil)
-			o.provider.mw.OnPanic(ctx, callCtx, r, panicStack)
+	panicStack := string(debug.Stack())
+	o.provider.logger.Error("api handler panicked",
+		"error", recovered,
+		"run_id", o.run.RunID,
+		"stack", panicStack,
+	)
 
-			// the panic is recovered here, so net/http does not abort the response.
-			// without this, a client gets 200 with an empty body from a handler that
-			// crashed.
-			if !o.w.wroteHeader && !o.w.hijacked {
-				http.Error(o.w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			}
+	o.provider.mw.AfterExecution(ctx, callCtx, nil, nil)
+	o.provider.mw.OnPanic(ctx, callCtx, recovered, panicStack)
 
-			result = o.result()
-			result.Error = fmt.Sprintf("function panicked: %v.  stack:\n%s", r, panicStack)
-		}
-	}()
+	// the panic is recovered here, so net/http does not abort the response.
+	// without this, a client gets 200 with an empty body from a handler that
+	// crashed.
+	if !o.w.wroteHeader && !o.w.hijacked {
+		http.Error(o.w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+	}
 
-	// Execute the handler with step tooling available (o.w is already wrapped)
-	o.handlerReq = o.r.WithContext(ctx)
-	o.next(o.w, o.handlerReq)
-	return o.result()
+	result := o.result()
+	result.Error = fmt.Sprintf("function panicked: %v.  stack:\n%s", recovered, panicStack)
+	return result
 }
 
 // result returns the API result from the response that the handler wrote.
@@ -444,7 +511,7 @@ func (o *requestOwner) newRunData() NewAPIRunData {
 	)
 
 	// Only read the request body if the config specifies so.
-	if o.body != nil && !o.config.OmitRequestBody {
+	if o.body != nil && o.body.recording && !o.config.OmitRequestBody {
 		if o.w.hijacked {
 			requestBody = o.body.recorded()
 		} else if requestBody, err = o.body.readAll(); err != nil {
@@ -609,7 +676,28 @@ func (o *requestOwner) withConfigUpdater(ctx context.Context) context.Context {
 		o.mgr.SetFn(servableRestFn{cfg})
 		o.w.setMaxBody(cfg.MaxResponseBodySize)
 		if o.body != nil {
-			o.body.setMax(cfg.MaxRequestBodySize)
+			o.updateBodyRecorder(cfg)
 		}
 	})
+}
+
+// updateBodyRecorder applies a function's config to the request body recorder.
+// a limit cannot go past the buffer of Provider.Middleware, because those bytes
+// were not kept.  a function that stores its request body starts recording,
+// which only works if the handler has not read the body yet.
+func (o *requestOwner) updateBodyRecorder(cfg FnOpts) {
+	limit := cfg.MaxRequestBodySize
+	if buffer := o.wrapper.requestBodyBuffer; buffer > 0 && limit > buffer {
+		limit = buffer
+	}
+	o.body.setMax(limit)
+
+	if cfg.OmitRequestBody || o.body.startRecording() || o.warnedBody {
+		return
+	}
+	o.warnedBody = true
+	o.provider.logger.Warn("the handler read the request body before stephttp.Configure, so the run stores no request body.  call Configure first, or set MiddlewareOpts.RecordRequestBodies",
+		"method", o.r.Method,
+		"path", o.r.URL.Path,
+	)
 }
