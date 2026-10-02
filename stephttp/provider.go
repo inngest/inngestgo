@@ -33,6 +33,10 @@ type Provider interface {
 	// function ID, calls Configure, or runs a step.
 	Middleware(opts FnOpts) func(http.Handler) http.Handler
 
+	// Start begins an Inngest API function inside a handler, without a wrapper.
+	// The handler must defer the returned end func.  See provider.Start.
+	Start(w http.ResponseWriter, r *http.Request, opts FnOpts) (http.ResponseWriter, *http.Request, func(), error)
+
 	// Wait provides a mechanism to wait for all cehckpoints to finish before shutting down.
 	// Cancel the incoming context to quit polling for checkpoint progres.
 	Wait(ctx context.Context) chan bool
@@ -112,6 +116,9 @@ type provider struct {
 	// inflight records the total number of in flight requests and background
 	// checkpoints.  Wait returns only when this is zero.
 	inflight *atomic.Int32
+	// startEmptyID logs the empty function ID warning once for all Start calls.
+	// a Start call has no wrapper that lives across requests.
+	startEmptyID *sync.Once
 }
 
 // Setup creates a new API provider instance
@@ -123,10 +130,11 @@ func Setup(opts SetupOpts) *provider {
 	}
 
 	p := &provider{
-		opts:     opts,
-		mw:       mw,
-		inflight: &atomic.Int32{},
-		logger:   logger.Default(),
+		opts:         opts,
+		mw:           mw,
+		inflight:     &atomic.Int32{},
+		startEmptyID: &sync.Once{},
+		logger:       logger.Default(),
 	}
 
 	apiClient := NewAPIClient(p.opts.baseURL(), p.opts.signingKey(), p.opts.signingKeyFallback())
@@ -160,7 +168,7 @@ func (p *provider) Middleware(opts FnOpts) func(http.Handler) http.Handler {
 // serve wraps next.  known is true when the wrapper knows that next is an
 // Inngest function, so the request stores its response from the first write.
 func (p *provider) serve(opts FnOpts, known bool, next http.HandlerFunc) http.HandlerFunc {
-	w := &routeWrapper{opts: opts, known: known}
+	w := &routeWrapper{opts: opts, known: known, emptyID: &sync.Once{}}
 	return func(rw http.ResponseWriter, r *http.Request) {
 		p.inflight.Add(1)
 		defer func() { p.inflight.Add(-1) }()
@@ -180,7 +188,64 @@ type routeWrapper struct {
 	known bool
 	// emptyID logs the empty function ID warning once for this wrapper, so a
 	// route with an ID in each URL does not log on every request.
-	emptyID sync.Once
+	emptyID *sync.Once
+}
+
+// Start begins an Inngest API function inside a handler, without a wrapper.
+// use it when the provider cannot wrap the handler, eg. routes that generated
+// code registers.
+//
+//	func (a api) ListCredits(w http.ResponseWriter, r *http.Request) {
+//		w, r, end, err := a.steps.Start(w, r, stephttp.FnOpts{ID: "list-credits"})
+//		defer end()
+//		if err != nil {
+//			return // Start already wrote the 500
+//		}
+//		// the handler, with steps
+//	}
+//
+// call Start before the handler reads the request body or writes the response.
+// the handler must use the w and r that Start returns.  shadowing them as in
+// the example does that.  a write to the handler's own w is missing from the
+// run, and a step that gets the handler's own r creates no run.
+//
+// the handler must defer end directly.  without it, a finished run is not sent
+// to Inngest, and an async step or a request from Inngest that resumes a run
+// panics up to net/http, which drops the connection.  end runs once.  when
+// Start returns an error, the 500 is already written, and the handler must
+// return.
+func (p *provider) Start(w http.ResponseWriter, r *http.Request, opts FnOpts) (http.ResponseWriter, *http.Request, func(), error) {
+	p.inflight.Add(1)
+
+	wrap := &routeWrapper{opts: opts, known: true, emptyID: p.startEmptyID}
+	o := newRequestOwner(p, wrap, r, w, nil)
+
+	var once sync.Once
+	if err := o.begin(r.Context()); err != nil {
+		end := func() {
+			once.Do(func() { p.inflight.Add(-1) })
+		}
+		return o.w, r, end, err
+	}
+
+	end := func() {
+		// recover only stops a panic when end is the deferred function.
+		recovered := recover()
+		ran := false
+		once.Do(func() {
+			ran = true
+			defer p.inflight.Add(-1)
+			if err := o.finish(recovered); err != nil {
+				p.logger.Error("error handling api request", "error", err)
+			}
+		})
+		// a second call has nothing to finish.  a panic that it recovers belongs
+		// to the handler, so it continues.
+		if !ran && recovered != nil {
+			panic(recovered)
+		}
+	}
+	return o.w, o.handlerReq, end, nil
 }
 
 // resolveConfig returns the config for one request to a wrapped handler.  each
