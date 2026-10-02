@@ -241,8 +241,9 @@ type routeWrapper struct {
 // the handler must defer end directly.  without it, a finished run is not sent
 // to Inngest, and an async step or a request from Inngest that resumes a run
 // panics up to net/http, which drops the connection.  end runs once.  when
-// Start returns an error, the 500 is already written, and the handler must
-// return.
+// Start returns an error, the 500 is already written, end does nothing, and
+// the handler must return.  the handler can check the error before or after it
+// defers end.
 func (p *provider) Start(w http.ResponseWriter, r *http.Request, opts FnOpts) (http.ResponseWriter, *http.Request, func(), error) {
 	p.inflight.Add(1)
 
@@ -251,10 +252,11 @@ func (p *provider) Start(w http.ResponseWriter, r *http.Request, opts FnOpts) (h
 
 	var once sync.Once
 	if err := o.begin(r.Context()); err != nil {
-		end := func() {
-			once.Do(func() { p.inflight.Add(-1) })
-		}
-		return o.w, r, end, err
+		// nothing runs after a failed begin, so the count is released here.
+		// without this, a handler that returns on the error before it defers end
+		// leaves the count above zero, and Wait never returns.
+		p.inflight.Add(-1)
+		return o.w, r, func() {}, err
 	}
 
 	end := func() {

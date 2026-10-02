@@ -227,3 +227,59 @@ func TestStartEmptyIDWarnsOnce(t *testing.T) {
 
 	require.Equal(t, 1, strings.Count(logs.String(), "api function has no ID"))
 }
+
+func TestStartErrorReleasesInflight(t *testing.T) {
+	const signingKey = "signkey-test-12345678"
+
+	tests := []struct {
+		name string
+		// deferFirst defers end before it checks the error.  false returns on the
+		// error before it defers end.
+		deferFirst bool
+	}{
+		{name: "defer end before the error check", deferFirst: true},
+		{name: "return on the error before defer end"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("INNGEST_DEV", "")
+
+			api := &blockingAPI{
+				called:      make(chan []sdkrequest.GeneratorOpcode, 1),
+				release:     make(chan struct{}),
+				getStepsErr: fmt.Errorf("api unavailable"),
+			}
+			close(api.release)
+
+			p := Setup(SetupOpts{Optional: OptionalSetupOpts{SigningKey: signingKey}})
+			p.api = api
+
+			handler := func(w http.ResponseWriter, r *http.Request) {
+				w, r, end, err := p.Start(w, r, FnOpts{ID: "start-fn"})
+				if tt.deferFirst {
+					defer end()
+				}
+				if err != nil {
+					return
+				}
+				defer end()
+				_, _ = w.Write([]byte("ok"))
+				_ = r
+			}
+
+			runID := ulid.Make().String()
+			sig, err := inngestgo.Sign(context.Background(), time.Now(), []byte(signingKey), []byte(runID))
+			require.NoError(t, err)
+			req := httptest.NewRequest(http.MethodPost, "/test", nil)
+			req.Header.Set(headerRunID, runID)
+			req.Header.Set(headerSignature, sig)
+
+			rec := httptest.NewRecorder()
+			handler(rec, req)
+
+			require.Equal(t, http.StatusInternalServerError, rec.Code)
+			require.Zero(t, p.inflight.Load())
+		})
+	}
+}
