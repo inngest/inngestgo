@@ -23,7 +23,8 @@ type AsyncResponse interface {
 
 // FnOpts allows you to define function configuration options for your API-based
 // Inngest function.  Pass it to Provider.Handle, Provider.HandleFunc, or
-// Provider.Middleware, and change it during a request with Configure.
+// Provider.Start, and change it during a request with Configure.  Behind
+// Provider.Middleware, Configure sets it and opts the handler in.
 type FnOpts struct {
 	// ID represents the function ID.  If empty, this is the http.ServeMux pattern
 	// that routed the request, eg. "POST /users/{id}".  Set this when the handler
@@ -49,10 +50,8 @@ type FnOpts struct {
 
 	// OmitResponseBody prevents the API response from being stored every time.
 	//
-	// Note that you can override this by calling `stephttp.UpdateOmitResponseBody(ctx, bool)`
-	// before the API responds to dynamically adjust whether the response is stored. This
-	// allows you to properly store eg. errors for debugging, then only omit successful
-	// responses at the end of your function.
+	// Configure can change this before the API responds, eg. to store errors for
+	// debugging and omit successful responses.
 	OmitResponseBody bool
 
 	// MaxRequestBodySize is the number of request body bytes stored with the run.
@@ -82,30 +81,44 @@ type FnOpts struct {
 }
 
 // Configure changes the function config for the current request.  update gets
-// the config from the wrapper and changes only the fields it sets.  Use it when
-// the config depends on the request, eg. a GraphQL operation name:
+// the current config and changes only the fields it sets.  Use it when the
+// config depends on the request, eg. a GraphQL operation name:
 //
 //	stephttp.Configure(ctx, func(o *stephttp.FnOpts) {
 //		o.ID = "gql/" + operationName
 //	})
 //
+// Behind Provider.Middleware, Configure also opts the handler in, and the
+// request becomes an Inngest function.  Without it, steps run with no run.
+// Call it on the handler's first line, before the request body is read.  If the
+// handler reads the body first, the run stores no request body, unless
+// MiddlewareOpts.RecordRequestBodies is set.
+//
 // A change to ID after the run starts does not apply, and a warning is logged.
-// A request body that the wrapper's config omits is not recorded, so setting
-// OmitRequestBody to false here stores nothing.  Configure does nothing in a
-// handler that the provider does not wrap.
+// A request body that Provider.Handle, Provider.HandleFunc, or Provider.Start
+// omits is not recorded, so setting OmitRequestBody to false there stores
+// nothing.  Configure does nothing in a handler that the provider does not wrap.
 func Configure(ctx context.Context, update func(*FnOpts)) {
 	if configure, ok := ctx.Value(fnUpdateCtx).(func(func(*FnOpts))); ok {
 		configure(update)
 	}
 }
 
-// UpdateOmitResponseBody sets whether the response body will be tracked in logs and traces.
-// You can call this at any time before sending the API response and this will be respected.
-// It does nothing in a handler that the provider does not wrap.
-func UpdateOmitResponseBody(ctx context.Context, to bool) {
-	Configure(ctx, func(opts *FnOpts) {
-		opts.OmitResponseBody = to
-	})
+// MiddlewareOpts configures Provider.Middleware.  It only controls request body
+// buffering, because each handler behind the middleware sets its own FnOpts with
+// Configure.
+type MiddlewareOpts struct {
+	// RecordRequestBodies buffers every request body from the start, so a handler
+	// that reads the body before it calls Configure still stores it, eg. GraphQL,
+	// which parses the operation first.  This copies every request body behind the
+	// middleware, up to MaxRequestBodySize.  A handler that does not call
+	// Configure, or sets OmitRequestBody, stores nothing.
+	RecordRequestBodies bool
+
+	// MaxRequestBodySize is the number of request body bytes buffered for each
+	// request.  A handler can lower it with Configure, but cannot raise it past
+	// this.  If zero, this is DefaultMaxRequestBodySize.
+	MaxRequestBodySize int
 }
 
 // AsyncResponseRedirect redirects the user to a URL which will block until the async

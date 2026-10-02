@@ -28,10 +28,10 @@ type Provider interface {
 	// HandleFunc is Handle for a handler function.
 	HandleFunc(opts FnOpts, next http.HandlerFunc) http.HandlerFunc
 
-	// Middleware returns middleware that wraps any handler with opts, eg. a whole
-	// router.  A request through it stores its response only once it has a
-	// function ID, calls Configure, or runs a step.
-	Middleware(opts FnOpts) func(http.Handler) http.Handler
+	// Middleware returns middleware for many handlers, eg. a whole router.  A
+	// handler behind it is an Inngest function only after it calls Configure.
+	// See provider.Middleware.
+	Middleware(opts MiddlewareOpts) func(http.Handler) http.Handler
 
 	// Start begins an Inngest API function inside a handler, without a wrapper.
 	// The handler must defer the returned end func.  See provider.Start.
@@ -152,28 +152,50 @@ func (p *provider) Handle(opts FnOpts, next http.Handler) http.Handler {
 
 // HandleFunc is Handle for a handler function.
 func (p *provider) HandleFunc(opts FnOpts, next http.HandlerFunc) http.HandlerFunc {
-	return p.serve(opts, true, next)
+	return p.serve(&routeWrapper{opts: opts, known: true}, next)
 }
 
-// Middleware returns middleware that wraps any handler with opts, eg. a whole
-// router.  A request through it stores its response only once it has a
-// function ID, calls Configure, or runs a step.  Without this, every route
-// behind the middleware keeps a copy of its response.
-func (p *provider) Middleware(opts FnOpts) func(http.Handler) http.Handler {
+// Middleware returns middleware for many handlers, eg. a whole router.  A
+// handler behind it is an Inngest function only after it opts in with
+// Configure, best on its first line:
+//
+//	api.Use(steps.Middleware(stephttp.MiddlewareOpts{}))
+//
+//	func (a api) ListCredits(w http.ResponseWriter, r *http.Request) {
+//		stephttp.Configure(r.Context(), func(o *stephttp.FnOpts) {
+//			o.ID = "list-credits"
+//		})
+//		// the handler, with steps
+//	}
+//
+// until a handler opts in, its request sends no run headers, keeps no copy of
+// the response, and makes no call to the Inngest API.  its steps run with no
+// run.  an async step, eg. step.Sleep, gets a 500, because no run exists to
+// continue it.  the request body passes through with no copy, unless opts sets
+// RecordRequestBodies.  a request from Inngest that resumes a run works on any
+// route behind the middleware.
+func (p *provider) Middleware(opts MiddlewareOpts) func(http.Handler) http.Handler {
+	limit := opts.MaxRequestBodySize
+	if limit <= 0 {
+		limit = DefaultMaxRequestBodySize
+	}
 	return func(next http.Handler) http.Handler {
-		return p.serve(opts, opts.ID != "", next.ServeHTTP)
+		return p.serve(&routeWrapper{
+			opts:              FnOpts{MaxRequestBodySize: limit},
+			recordAll:         opts.RecordRequestBodies,
+			requestBodyBuffer: limit,
+		}, next.ServeHTTP)
 	}
 }
 
-// serve wraps next.  known is true when the wrapper knows that next is an
-// Inngest function, so the request stores its response from the first write.
-func (p *provider) serve(opts FnOpts, known bool, next http.HandlerFunc) http.HandlerFunc {
-	w := &routeWrapper{opts: opts, known: known, emptyID: &sync.Once{}}
+// serve wraps next with wrap.
+func (p *provider) serve(wrap *routeWrapper, next http.HandlerFunc) http.HandlerFunc {
+	wrap.emptyID = &sync.Once{}
 	return func(rw http.ResponseWriter, r *http.Request) {
 		p.inflight.Add(1)
 		defer func() { p.inflight.Add(-1) }()
 
-		if err := processRequest(p, w, r, rw, next); err != nil {
+		if err := processRequest(p, wrap, r, rw, next); err != nil {
 			p.logger.Error("error handling api request", "error", err)
 		}
 	}
@@ -183,9 +205,16 @@ func (p *provider) serve(opts FnOpts, known bool, next http.HandlerFunc) http.Ha
 // across its requests.
 type routeWrapper struct {
 	opts FnOpts
-	// known is true when the wrapper knows that the handler is an Inngest
-	// function.  See requestOwner.captureResponse.
+	// known is true when the handler is an Inngest function from the start.  it
+	// is false behind Provider.Middleware, where Configure opts the handler in.
 	known bool
+	// recordAll buffers every request body from the start.  See
+	// MiddlewareOpts.RecordRequestBodies.
+	recordAll bool
+	// requestBodyBuffer is the most request body bytes that Provider.Middleware
+	// buffers.  Configure cannot raise a handler's limit past it.  zero has no
+	// such limit.
+	requestBodyBuffer int
 	// emptyID logs the empty function ID warning once for this wrapper, so a
 	// route with an ID in each URL does not log on every request.
 	emptyID *sync.Once
@@ -249,7 +278,7 @@ func (p *provider) Start(w http.ResponseWriter, r *http.Request, opts FnOpts) (h
 }
 
 // resolveConfig returns the config for one request to a wrapped handler.  each
-// request gets its own copy, because UpdateOmitResponseBody changes it.
+// request gets its own copy, because Configure changes it.
 func (p *provider) resolveConfig(opts FnOpts, r *http.Request) FnOpts {
 	if opts.ID == "" {
 		opts.ID = defaultFunctionID(r)

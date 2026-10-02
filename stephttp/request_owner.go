@@ -106,15 +106,21 @@ type requestOwner struct {
 	// run represents the IDs for the current sync run.
 	run CheckpointRun
 	// body records the request body for a new run.  It is nil when Inngest
-	// resumes an existing run, or when the config omits the request body.
+	// resumes an existing run, or when a function's own config omits the request
+	// body.  Behind Provider.Middleware it passes the body through with no copy
+	// until the handler opts in.
 	body *bodyRecorder
 	// resumed is true when Inngest sent this request to resume a run.
 	resumed bool
 	// tracked is true once this request has a run.  See tracking.
 	tracked bool
-	// known is true once the wrapper knows that the handler is an Inngest
-	// function.  See captureResponse.
+	// known is true once the handler is an Inngest function.  Handle,
+	// HandleFunc, Start, and a resumed run set it at the start.  behind
+	// Provider.Middleware, Configure sets it.
 	known bool
+	// warnedBody is true once this request logs that its body was read before
+	// Configure.
+	warnedBody bool
 	// started is true once the new run is sent to the Inngest API.  after that,
 	// the run keeps its function ID.
 	started bool
@@ -128,7 +134,7 @@ type requestOwner struct {
 func (o *requestOwner) begin(ctx context.Context) error {
 	// Always add the manager to context.
 	ctx = sdkrequest.SetManager(ctx, o.mgr)
-	// Add an updater, allowing the handler to change config via ctx (eg. in UpdateOmitResponseBody)
+	// Add an updater, allowing the handler to change config via ctx with Configure
 	ctx = o.withConfigUpdater(ctx)
 	o.ctx = ctx
 
@@ -143,6 +149,7 @@ func (o *requestOwner) begin(ctx context.Context) error {
 
 	if resumed {
 		o.resumed = true
+		o.known = true
 
 		// In this case, we're re-entering an existing run, which means we're now
 		// running async and are responding to an Inngest's executor call.
@@ -164,8 +171,15 @@ func (o *requestOwner) begin(ctx context.Context) error {
 		// record the body as the handler reads it.  without this, the new run stores
 		// an empty body whenever the handler reads the request body.  the handler can
 		// read the body before its first step, so this starts before the run does.
-		if !o.config.OmitRequestBody {
-			o.body = newBodyRecorder(o.r.Body, o.config.MaxRequestBodySize)
+		// behind Provider.Middleware, the body passes through until Configure, so a
+		// route that never opts in keeps no copy.
+		switch {
+		case o.known && !o.config.OmitRequestBody:
+			o.body = newBodyRecorder(o.r.Body, o.config.MaxRequestBodySize, true)
+		case !o.known:
+			o.body = newBodyRecorder(o.r.Body, o.config.MaxRequestBodySize, o.wrapper.recordAll)
+		}
+		if o.body != nil {
 			o.r.Body = o.body
 		}
 	}
@@ -195,6 +209,10 @@ func (o *requestOwner) finish(recovered any) error {
 			_, _ = o.w.Write(byt)
 		}
 		return nil
+	}
+
+	if !o.known {
+		return o.finishWithoutRun()
 	}
 
 	// Note that at this point the request would typically have finished, therefore the
@@ -247,6 +265,26 @@ func (o *requestOwner) finish(recovered any) error {
 	return nil
 }
 
+// finishWithoutRun completes a request behind Provider.Middleware whose handler
+// did not call Configure.  its steps already ran, and no run is created.  an
+// async step stopped the handler, and no run exists to continue it, so the
+// client gets a 500.
+func (o *requestOwner) finishWithoutRun() error {
+	if opcode.HasAsyncOps(o.mgr.Ops(), o.run.Attempt, 0) {
+		if !o.w.wroteHeader && !o.w.hijacked {
+			http.Error(o.w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		}
+		return fmt.Errorf("handler for %s %s ran an async step without stephttp.Configure, so no run exists to continue it.  call stephttp.Configure before the step",
+			o.r.Method, o.r.URL.Path,
+		)
+	}
+
+	if !o.w.hijacked {
+		o.w.Flush()
+	}
+	return nil
+}
+
 // handleAsyncConversion handles the conversion of sync -> async functions, which
 // essetially means checkpointing the steps in the foreground (blocking) so that
 // we can handle them with the async executor.
@@ -286,13 +324,13 @@ func (o *requestOwner) handleAsyncConversion(ctx context.Context, token string) 
 	return nil
 }
 
-// tracking reports whether this request has a run.  a new request gets a run
-// when its first step runs, or at the start when the config sets
-// TrackAllRequests.  a request from Inngest always resumes a run.  a request
-// without a run sends no run headers and makes no call to the Inngest API.
+// tracking reports whether this request has a run.  a function gets a run when
+// its first step runs, or at the start when its config sets TrackAllRequests.  a
+// request from Inngest always resumes a run.  a request without a run sends no
+// run headers and makes no call to the Inngest API.
 func (o *requestOwner) tracking() bool {
 	if !o.tracked {
-		o.tracked = o.resumed || o.config.TrackAllRequests || len(o.mgr.Ops()) > 0
+		o.tracked = o.resumed || (o.known && (o.config.TrackAllRequests || len(o.mgr.Ops()) > 0))
 	}
 	return o.tracked
 }
@@ -309,12 +347,12 @@ func (o *requestOwner) setRunHeaders(h http.Header) {
 }
 
 // captureResponse reports whether a response write is stored with the run.  a
-// known function stores from the first write, because a handler can respond
-// before it runs its steps.  other requests store from their first step, so
-// routes behind Provider.Middleware that run no steps keep no copy.
+// function stores from its first write, because a handler can respond before
+// it runs its steps.  behind Provider.Middleware, a handler stores from the
+// point it calls Configure, so routes that never opt in keep no copy.
 // MaxResponseBodySize limits the stored copy.
 func (o *requestOwner) captureResponse() bool {
-	return !o.config.OmitResponseBody && (o.known || o.tracking())
+	return !o.config.OmitResponseBody && o.known
 }
 
 // getExistingRun loads the saved steps when Inngest sends the request to resume
@@ -473,7 +511,7 @@ func (o *requestOwner) newRunData() NewAPIRunData {
 	)
 
 	// Only read the request body if the config specifies so.
-	if o.body != nil && !o.config.OmitRequestBody {
+	if o.body != nil && o.body.recording && !o.config.OmitRequestBody {
 		if o.w.hijacked {
 			requestBody = o.body.recorded()
 		} else if requestBody, err = o.body.readAll(); err != nil {
@@ -638,7 +676,28 @@ func (o *requestOwner) withConfigUpdater(ctx context.Context) context.Context {
 		o.mgr.SetFn(servableRestFn{cfg})
 		o.w.setMaxBody(cfg.MaxResponseBodySize)
 		if o.body != nil {
-			o.body.setMax(cfg.MaxRequestBodySize)
+			o.updateBodyRecorder(cfg)
 		}
 	})
+}
+
+// updateBodyRecorder applies a function's config to the request body recorder.
+// a limit cannot go past the buffer of Provider.Middleware, because those bytes
+// were not kept.  a function that stores its request body starts recording,
+// which only works if the handler has not read the body yet.
+func (o *requestOwner) updateBodyRecorder(cfg FnOpts) {
+	limit := cfg.MaxRequestBodySize
+	if buffer := o.wrapper.requestBodyBuffer; buffer > 0 && limit > buffer {
+		limit = buffer
+	}
+	o.body.setMax(limit)
+
+	if cfg.OmitRequestBody || o.body.startRecording() || o.warnedBody {
+		return
+	}
+	o.warnedBody = true
+	o.provider.logger.Warn("the handler read the request body before stephttp.Configure, so the run stores no request body.  call Configure first, or set MiddlewareOpts.RecordRequestBodies",
+		"method", o.r.Method,
+		"path", o.r.URL.Path,
+	)
 }
