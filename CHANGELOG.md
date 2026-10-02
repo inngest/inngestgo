@@ -1,8 +1,17 @@
+## [v0.16.4] - 2026-10-02
+
+### 🚀 Features
+
+- *(stephttp)* Add Start(), for durable endpoints without middleware (#264)
 ## [v0.16.3] - 2026-10-01
 
 ### 🚀 Features
 
 - *(stephttp)* Re-introduce middleware in a nicer way (#262)
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* V0.16.3 (#263)
 ## [v0.16.2] - 2026-10-01
 
 ### 🚀 Features
