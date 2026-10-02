@@ -52,6 +52,9 @@ type responseWriter struct {
 	maxBody int
 	// truncated is true when body stopped at maxBody.
 	truncated bool
+	// discard drops every later write.  a failed Provider.Start sets it after it
+	// writes the 500, so the handler's own response does not follow the 500.
+	discard bool
 }
 
 func newResponseWriter(w http.ResponseWriter) *responseWriter {
@@ -64,6 +67,9 @@ func newResponseWriter(w http.ResponseWriter) *responseWriter {
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
+	if rw.discard {
+		return
+	}
 	// a 1xx status other than 101 goes to the client at once, and the handler
 	// still sends a final status after it.  without this check, the run headers
 	// are decided at the 1xx status and the final status is not recorded.
@@ -82,6 +88,9 @@ func (rw *responseWriter) WriteHeader(code int) {
 }
 
 func (rw *responseWriter) Write(data []byte) (int, error) {
+	if rw.discard {
+		return len(data), nil
+	}
 	rw.beforeHeader()
 	// Don't capture response body after hijacking
 	if !rw.hijacked && (rw.capture == nil || rw.capture()) {
@@ -145,6 +154,9 @@ func (rw *responseWriter) Flush() {
 // check, a writer that cannot flush stops a later panic response and the run
 // headers.
 func (rw *responseWriter) FlushError() error {
+	if rw.discard {
+		return nil
+	}
 	if rw.wroteHeader {
 		return http.NewResponseController(rw.ResponseWriter).Flush()
 	}

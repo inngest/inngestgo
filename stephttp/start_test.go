@@ -34,7 +34,6 @@ func TestStart(t *testing.T) {
 		getStepsErr error
 		// handler runs after Start with the w and r that Start returns.
 		handler        func(w http.ResponseWriter, r *http.Request)
-		expectStartErr bool
 		expectedStatus int
 		expectRun      bool
 		// check runs on the response and the ops of the new run.
@@ -99,16 +98,6 @@ func TestStart(t *testing.T) {
 				require.Contains(t, result.Error, "function panicked: kaboom")
 			},
 		},
-		{
-			name:        "resume that cannot load its steps",
-			resume:      true,
-			getStepsErr: fmt.Errorf("api unavailable"),
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				t.Fatal("the handler ran after Start returned an error")
-			},
-			expectStartErr: true,
-			expectedStatus: http.StatusInternalServerError,
-		},
 	}
 
 	for _, tt := range tests {
@@ -128,14 +117,9 @@ func TestStart(t *testing.T) {
 			})
 			p.api = api
 
-			var startErr error
 			handler := func(w http.ResponseWriter, r *http.Request) {
-				w, r, end, err := p.Start(w, r, FnOpts{ID: "start-fn"})
+				w, r, end := p.Start(w, r, FnOpts{ID: "start-fn"})
 				defer end()
-				if err != nil {
-					startErr = err
-					return
-				}
 				tt.handler(w, r)
 			}
 
@@ -152,7 +136,6 @@ func TestStart(t *testing.T) {
 			handler(rec, req)
 
 			require.Equal(t, tt.expectedStatus, rec.Code)
-			require.Equal(t, tt.expectStartErr, startErr != nil)
 
 			if !tt.expectRun {
 				// a new run checkpoints in a tracked goroutine that sends to called
@@ -178,8 +161,7 @@ func TestStartEnd(t *testing.T) {
 		p := Setup(SetupOpts{})
 		p.api = &blockingAPI{called: make(chan []sdkrequest.GeneratorOpcode, 1), release: make(chan struct{})}
 
-		_, _, end, err := p.Start(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/test", nil), FnOpts{})
-		require.NoError(t, err)
+		_, _, end := p.Start(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/test", nil), FnOpts{})
 
 		// Wait must not return while the request is open.
 		require.EqualValues(t, 1, p.inflight.Load())
@@ -194,8 +176,7 @@ func TestStartEnd(t *testing.T) {
 		p.api = &blockingAPI{called: make(chan []sdkrequest.GeneratorOpcode, 1), release: make(chan struct{})}
 
 		require.PanicsWithValue(t, "kaboom", func() {
-			_, _, end, err := p.Start(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/test", nil), FnOpts{})
-			require.NoError(t, err)
+			_, _, end := p.Start(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/test", nil), FnOpts{})
 			end()
 			defer end()
 			panic("kaboom")
@@ -218,9 +199,8 @@ func TestStartEmptyIDWarnsOnce(t *testing.T) {
 
 	for _, path := range []string{"/users/1", "/users/2", "/users/3"} {
 		func() {
-			w, _, end, err := p.Start(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil), FnOpts{TrackAllRequests: true})
+			w, _, end := p.Start(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil), FnOpts{TrackAllRequests: true})
 			defer end()
-			require.NoError(t, err)
 			_, _ = w.Write([]byte("ok"))
 		}()
 	}
@@ -228,17 +208,50 @@ func TestStartEmptyIDWarnsOnce(t *testing.T) {
 	require.Equal(t, 1, strings.Count(logs.String(), "api function has no ID"))
 }
 
-func TestStartErrorReleasesInflight(t *testing.T) {
+func TestStartFailedResume(t *testing.T) {
 	const signingKey = "signkey-test-12345678"
 
 	tests := []struct {
 		name string
-		// deferFirst defers end before it checks the error.  false returns on the
-		// error before it defers end.
-		deferFirst bool
+		// handler runs after Start with the w and r that Start returns.  ran
+		// records code that must not run.
+		handler func(w http.ResponseWriter, r *http.Request, ran *bool)
+		// expectPanicLog is true when the handler panics.  a step that stops is
+		// not a panic in the log.
+		expectPanicLog bool
 	}{
-		{name: "defer end before the error check", deferFirst: true},
-		{name: "return on the error before defer end"},
+		{
+			name: "a step does not run",
+			handler: func(w http.ResponseWriter, r *http.Request, ran *bool) {
+				_, _ = step.Run(r.Context(), "a", func(ctx context.Context) (int, error) {
+					*ran = true
+					return 1, nil
+				})
+				*ran = true
+			},
+		},
+		{
+			name: "an async step does not run",
+			handler: func(w http.ResponseWriter, r *http.Request, ran *bool) {
+				step.Sleep(r.Context(), "wait", time.Second)
+				*ran = true
+			},
+		},
+		{
+			name: "code outside steps gets a cancelled context and its writes are dropped",
+			handler: func(w http.ResponseWriter, r *http.Request, ran *bool) {
+				*ran = r.Context().Err() == nil
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte("ok"))
+			},
+		},
+		{
+			name: "a panic is logged",
+			handler: func(w http.ResponseWriter, r *http.Request, ran *bool) {
+				panic("kaboom")
+			},
+			expectPanicLog: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -252,20 +265,16 @@ func TestStartErrorReleasesInflight(t *testing.T) {
 			}
 			close(api.release)
 
+			var logs bytes.Buffer
 			p := Setup(SetupOpts{Optional: OptionalSetupOpts{SigningKey: signingKey}})
 			p.api = api
+			p.logger = slog.New(slog.NewTextHandler(&logs, nil))
 
+			ran := false
 			handler := func(w http.ResponseWriter, r *http.Request) {
-				w, r, end, err := p.Start(w, r, FnOpts{ID: "start-fn"})
-				if tt.deferFirst {
-					defer end()
-				}
-				if err != nil {
-					return
-				}
+				w, r, end := p.Start(w, r, FnOpts{ID: "start-fn"})
 				defer end()
-				_, _ = w.Write([]byte("ok"))
-				_ = r
+				tt.handler(w, r, &ran)
 			}
 
 			runID := ulid.Make().String()
@@ -276,10 +285,15 @@ func TestStartErrorReleasesInflight(t *testing.T) {
 			req.Header.Set(headerSignature, sig)
 
 			rec := httptest.NewRecorder()
-			handler(rec, req)
+			require.NotPanics(t, func() { handler(rec, req) })
 
+			require.False(t, ran)
 			require.Equal(t, http.StatusInternalServerError, rec.Code)
+			require.Equal(t, "error loading run state\n", rec.Body.String())
+			require.Contains(t, logs.String(), "error loading steps")
+			require.Equal(t, tt.expectPanicLog, strings.Contains(logs.String(), "api handler panicked"))
 			require.Zero(t, p.inflight.Load())
+			require.Empty(t, api.called)
 		})
 	}
 }

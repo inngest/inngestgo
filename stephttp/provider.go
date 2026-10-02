@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inngest/inngestgo/internal/logger"
+	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/middleware"
 	"github.com/inngest/inngestgo/pkg/env"
 )
@@ -35,7 +36,7 @@ type Provider interface {
 
 	// Start begins an Inngest API function inside a handler, without a wrapper.
 	// The handler must defer the returned end func.  See provider.Start.
-	Start(w http.ResponseWriter, r *http.Request, opts FnOpts) (http.ResponseWriter, *http.Request, func(), error)
+	Start(w http.ResponseWriter, r *http.Request, opts FnOpts) (http.ResponseWriter, *http.Request, func())
 
 	// Wait provides a mechanism to wait for all cehckpoints to finish before shutting down.
 	// Cancel the incoming context to quit polling for checkpoint progres.
@@ -225,11 +226,8 @@ type routeWrapper struct {
 // code registers.
 //
 //	func (a api) ListCredits(w http.ResponseWriter, r *http.Request) {
-//		w, r, end, err := a.steps.Start(w, r, stephttp.FnOpts{ID: "list-credits"})
+//		w, r, end := a.steps.Start(w, r, stephttp.FnOpts{ID: "list-credits"})
 //		defer end()
-//		if err != nil {
-//			return // Start already wrote the 500
-//		}
 //		// the handler, with steps
 //	}
 //
@@ -240,25 +238,24 @@ type routeWrapper struct {
 //
 // the handler must defer end directly.  without it, a finished run is not sent
 // to Inngest, and an async step or a request from Inngest that resumes a run
-// panics up to net/http, which drops the connection.  end runs once.  when
-// Start returns an error, the 500 is already written, end does nothing, and
-// the handler must return.  the handler can check the error before or after it
-// defers end.
-func (p *provider) Start(w http.ResponseWriter, r *http.Request, opts FnOpts) (http.ResponseWriter, *http.Request, func(), error) {
+// panics up to net/http, which drops the connection.  end runs once.
+//
+// when Inngest resumes a run whose steps cannot load, Start writes a 500, so
+// Inngest sends the request again.  the handler still runs.  its steps stop
+// before their funcs run, its request context is cancelled, and its writes are
+// dropped.
+func (p *provider) Start(w http.ResponseWriter, r *http.Request, opts FnOpts) (http.ResponseWriter, *http.Request, func()) {
 	p.inflight.Add(1)
 
 	wrap := &routeWrapper{opts: opts, known: true, emptyID: p.startEmptyID}
 	o := newRequestOwner(p, wrap, r, w, nil)
 
-	var once sync.Once
 	if err := o.begin(r.Context()); err != nil {
-		// nothing runs after a failed begin, so the count is released here.
-		// without this, a handler that returns on the error before it defers end
-		// leaves the count above zero, and Wait never returns.
-		p.inflight.Add(-1)
-		return o.w, r, func() {}, err
+		p.logger.Error("error handling api request", "error", err)
+		return p.failedStart(o, err)
 	}
 
+	var once sync.Once
 	end := func() {
 		// recover only stops a panic when end is the deferred function.
 		recovered := recover()
@@ -276,7 +273,44 @@ func (p *provider) Start(w http.ResponseWriter, r *http.Request, opts FnOpts) (h
 			panic(recovered)
 		}
 	}
-	return o.w, o.handlerReq, end, nil
+	return o.w, o.handlerReq, end
+}
+
+// failedStart completes a Start whose resumed run cannot load its steps, after
+// begin writes the 500.  the handler still runs.  each step stops in its
+// preflight check, because the request context is cancelled, so no step runs
+// again with no saved state and repeats its side effects.  the handler's writes
+// are dropped, so they do not follow the 500.  nothing waits on this request,
+// so it no longer counts as in flight.
+func (p *provider) failedStart(o *requestOwner, err error) (http.ResponseWriter, *http.Request, func()) {
+	p.inflight.Add(-1)
+
+	ctx, cancel := context.WithCancelCause(o.ctx)
+	cancel(err)
+	o.w.discard = true
+
+	var once sync.Once
+	end := func() {
+		// recover only stops a panic when end is the deferred function.
+		recovered := recover()
+		if recovered == nil {
+			return
+		}
+		if _, ok := recovered.(sdkrequest.ControlHijack); ok {
+			return
+		}
+		ran := false
+		once.Do(func() {
+			ran = true
+			p.logger.Error("api handler panicked after its run failed to load", "error", recovered)
+		})
+		// a second call has nothing to finish.  a panic that it recovers belongs
+		// to the handler, so it continues.
+		if !ran {
+			panic(recovered)
+		}
+	}
+	return o.w, o.r.WithContext(ctx), end
 }
 
 // resolveConfig returns the config for one request to a wrapped handler.  each

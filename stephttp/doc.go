@@ -19,11 +19,8 @@
 // Call Start on the first line of a handler that the provider cannot wrap, eg.
 // a route that generated code registers.  The handler must defer end:
 //
-//	w, r, end, err := steps.Start(w, r, stephttp.FnOpts{ID: "create-user"})
+//	w, r, end := steps.Start(w, r, stephttp.FnOpts{ID: "create-user"})
 //	defer end()
-//	if err != nil {
-//		return
-//	}
 //
 // Put Middleware in front of many handlers, eg. a whole router.  A handler behind
 // it is a function only after it opts in with Configure.  Until then, its steps
