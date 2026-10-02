@@ -1,8 +1,17 @@
+## [v0.16.5] - 2026-10-02
+
+### ⚙️ Miscellaneous Tasks
+
+- *(stephttp)* Remove err from start
 ## [v0.16.4] - 2026-10-02
 
 ### 🚀 Features
 
 - *(stephttp)* Add Start(), for durable endpoints without middleware (#264)
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* V0.16.4 (#265)
 ## [v0.16.3] - 2026-10-01
 
 ### 🚀 Features
