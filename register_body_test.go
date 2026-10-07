@@ -104,7 +104,7 @@ func TestOutOfBandSyncClosesRegisterResponseBody(t *testing.T) {
 			// Use a client that bypasses the tracker for the request under test.
 			resp, err := (&http.Client{Transport: original}).Do(req)
 			r.NoError(err)
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			_, _ = io.ReadAll(resp.Body)
 
 			r.Equal(tc.wantCode, resp.StatusCode)
