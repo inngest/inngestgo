@@ -22,6 +22,7 @@ import (
 	"github.com/inngest/inngestgo/internal/logger"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/middleware"
+	"github.com/inngest/inngestgo/pkg/checkpoint"
 	"github.com/inngest/inngestgo/pkg/env"
 	"github.com/inngest/inngestgo/step"
 	"github.com/stretchr/testify/assert"
@@ -199,9 +200,10 @@ func TestServeHydratesUseAPIRequest(t *testing.T) {
 	r.NoError(err)
 
 	var functionCalls, stepCalls atomic.Int32
+	// the second request loads the first step record through the API, so this function yields that record.
 	fn, err := CreateFunction(
 		c,
-		FunctionOpts{ID: "fn"},
+		FunctionOpts{ID: "fn", Checkpoint: &checkpoint.Config{Disable: true}},
 		EventTrigger(event.Name, nil),
 		func(ctx context.Context, input Input[EventAData]) (any, error) {
 			call := functionCalls.Add(1)
@@ -1332,8 +1334,9 @@ func TestInBandSync(t *testing.T) {
 				AppID: c.AppID(),
 				Env:   toPtr("my-env"),
 				Functions: []ifn.SyncConfig{{
-					Name: "my-fn",
-					Slug: fmt.Sprintf("%s-my-fn", c.AppID()),
+					Name:       "my-fn",
+					Slug:       fmt.Sprintf("%s-my-fn", c.AppID()),
+					Checkpoint: &checkpoint.Config{},
 					Steps: map[string]ifn.SDKStep{
 						"step": {
 							ID:   "step",
@@ -1576,8 +1579,9 @@ func TestInBandSync(t *testing.T) {
 				AppID: c.AppID(),
 				Env:   toPtr("my-env"),
 				Functions: []ifn.SyncConfig{{
-					Name: "my-fn",
-					Slug: fmt.Sprintf("%s-my-fn", c.AppID()),
+					Name:       "my-fn",
+					Slug:       fmt.Sprintf("%s-my-fn", c.AppID()),
+					Checkpoint: &checkpoint.Config{},
 					Steps: map[string]ifn.SDKStep{
 						"step": {
 							ID:   "step",
