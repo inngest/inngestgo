@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -74,6 +75,10 @@ func TestClientLifecycle(t *testing.T) {
 		assert.Equal(t, ProcessExited, done.State)
 		require.NotNil(t, done.ExitCode)
 		assert.Equal(t, 0, *done.ExitCode)
+		require.NotNil(t, done.StartedAt)
+		require.NotNil(t, done.EndedAt)
+		assert.Equal(t, fakeNow, *done.StartedAt)
+		assert.Equal(t, fakeNow.Add(time.Second), *done.EndedAt)
 
 		require.NoError(t, p.Signal(ctx, SignalOpts{Signal: 15}))
 	})

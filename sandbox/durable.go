@@ -2,9 +2,11 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	inngesterrors "github.com/inngest/inngestgo/errors"
@@ -126,6 +128,48 @@ func fitOutput(stdout, stderr []byte) ([]byte, []byte, OutputInfo) {
 		OriginalBytes: &orig,
 		RetainedBytes: &kept,
 	}
+}
+
+func fitProcessOutput(out ProcessOutput) (ProcessOutput, error) {
+	const overhead = 128
+	used := overhead
+	kept := make([]OutputChunk, 0, len(out.Chunks))
+	for i := len(out.Chunks) - 1; i >= 0; i-- {
+		chunk := out.Chunks[i]
+		encoded, err := json.Marshal(chunk)
+		if err != nil {
+			return ProcessOutput{}, err
+		}
+		if used+len(encoded)+1 <= maxDurableOutputBytes {
+			kept = append(kept, chunk)
+			used += len(encoded) + 1
+			continue
+		}
+
+		out.Truncated = true
+		low, high := 0, len(chunk.Data)
+		for low < high {
+			mid := low + (high-low+1)/2
+			chunk.Data = out.Chunks[i].Data[len(out.Chunks[i].Data)-mid:]
+			encoded, err = json.Marshal(chunk)
+			if err != nil {
+				return ProcessOutput{}, err
+			}
+			if used+len(encoded)+1 <= maxDurableOutputBytes {
+				low = mid
+			} else {
+				high = mid - 1
+			}
+		}
+		if low > 0 {
+			chunk.Data = out.Chunks[i].Data[len(out.Chunks[i].Data)-low:]
+			kept = append(kept, chunk)
+		}
+		break
+	}
+	slices.Reverse(kept)
+	out.Chunks = kept
+	return out, nil
 }
 
 // DurableSandbox is a sandbox used from an Inngest function.  each method
@@ -456,13 +500,18 @@ func (p *DurableProcess) Wait(ctx context.Context, id string, opts WaitOpts) (*D
 	return &DurableProcess{info}, nil
 }
 
-// Output returns the retained output of the process as the step id.
+// Output returns the retained output of the process as the step id.  when
+// the step cannot save every chunk, it keeps the newest data and sets Truncated.
 func (p *DurableProcess) Output(ctx context.Context, id string, opts OutputOpts) (ProcessOutput, error) {
 	if err := normalizeTail(opts); err != nil {
 		return ProcessOutput{}, err
 	}
 	return durable(ctx, id, ActionProcessOutput, func(ctx context.Context, c *Client) (ProcessOutput, error) {
-		return c.process(p.ProcessInfo).Output(ctx, opts)
+		out, err := c.process(p.ProcessInfo).Output(ctx, opts)
+		if err != nil {
+			return ProcessOutput{}, err
+		}
+		return fitProcessOutput(out)
 	})
 }
 

@@ -116,6 +116,30 @@ func TestFinishedRunCheckpointsInBackground(t *testing.T) {
 	}
 }
 
+func TestRequestOwnerSandboxContext(t *testing.T) {
+	branch := "test-branch"
+	p := Setup(SetupOpts{Optional: OptionalSetupOpts{
+		SigningKey:         "signkey-test-primary",
+		SigningKeyFallback: "signkey-test-fallback",
+		BaseURL:            "http://sandbox.test",
+		Env:                &branch,
+	}})
+	wrap := &routeWrapper{}
+	newOwner := func() *requestOwner {
+		return newRequestOwner(p, wrap, httptest.NewRequest(http.MethodGet, "/test", nil), httptest.NewRecorder(), nil)
+	}
+	first := newOwner()
+	second := newOwner()
+	for _, owner := range []*requestOwner{first, second} {
+		require.Equal(t, "signkey-test-primary", owner.mgr.SigningKey())
+		require.Equal(t, "signkey-test-fallback", owner.mgr.SigningKeyFallback())
+		require.Equal(t, "http://sandbox.test", owner.mgr.APIBaseURL())
+		require.Equal(t, branch, owner.mgr.Request().CallCtx.Env)
+		require.Equal(t, owner.run.RunID.String(), owner.mgr.Request().CallCtx.RunID)
+	}
+	require.NotEqual(t, first.mgr.Request().CallCtx.RunID, second.mgr.Request().CallCtx.RunID)
+}
+
 func TestHandledStepErrorFinishesRun(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -341,8 +365,12 @@ func TestResumeRequiresSavedSteps(t *testing.T) {
 			p.api = api
 
 			handlerCalled := false
+			var managerRunID string
 			handler := p.HandleFunc(FnOpts{}, func(w http.ResponseWriter, r *http.Request) {
 				handlerCalled = true
+				mgr, ok := sdkrequest.Manager(r.Context())
+				require.True(t, ok)
+				managerRunID = mgr.Request().CallCtx.RunID
 				_, _ = step.Run(r.Context(), "a", func(ctx context.Context) (int, error) {
 					return 1, nil
 				})
@@ -364,6 +392,7 @@ func TestResumeRequiresSavedSteps(t *testing.T) {
 			require.Equal(t, tt.expectHandler, handlerCalled)
 			if tt.expectHandler {
 				require.Equal(t, runID, rec.Header().Get(headerRunID))
+				require.Equal(t, runID, managerRunID)
 			}
 
 			// a resume never creates a new run.  a new run checkpoints in a tracked

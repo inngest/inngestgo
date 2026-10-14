@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -201,7 +202,7 @@ func (t *transport) send(ctx context.Context, r request) (*http.Response, error)
 	resp, err := t.http.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			err = errors.Join(ctx.Err(), err)
 		}
 		return nil, r.transportFailure(err)
 	}
@@ -212,7 +213,11 @@ func (t *transport) send(ctx context.Context, r request) (*http.Response, error)
 		retry := req.Clone(ctx)
 		if req.GetBody != nil {
 			if retry.Body, err = req.GetBody(); err != nil {
-				return resp, nil
+				_ = resp.Body.Close()
+				if ctx.Err() != nil {
+					err = errors.Join(ctx.Err(), err)
+				}
+				return nil, r.transportFailure(err)
 			}
 		}
 		retry.Header.Set("Authorization", "Bearer "+t.fallbackKey)
@@ -220,7 +225,7 @@ func (t *transport) send(ctx context.Context, r request) (*http.Response, error)
 		resp, err = t.http.Do(retry)
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil, ctx.Err()
+				err = errors.Join(ctx.Err(), err)
 			}
 			return nil, r.transportFailure(err)
 		}
@@ -240,7 +245,7 @@ func (t *transport) do(ctx context.Context, r request) (*http.Response, error) {
 	}
 	if !ok {
 		defer func() { _ = resp.Body.Close() }()
-		return nil, t.responseError(r, resp)
+		return nil, t.responseError(ctx, r, resp)
 	}
 	return resp, nil
 }
@@ -259,18 +264,24 @@ func (t *transport) json(ctx context.Context, r request) (int, *envelope, error)
 	env := &envelope{}
 	if err := json.NewDecoder(resp.Body).Decode(env); err != nil {
 		if ctx.Err() != nil {
-			return 0, nil, ctx.Err()
+			err = errors.Join(ctx.Err(), err)
 		}
 		return 0, nil, r.transportFailure(err)
 	}
 	return resp.StatusCode, env, nil
 }
 
-func (t *transport) responseError(r request, resp *http.Response) error {
+func (t *transport) responseError(ctx context.Context, r request, resp *http.Response) error {
 	var parsed struct {
 		Errors []json.RawMessage `json:"errors"`
 	}
-	byt, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	byt, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		if ctx.Err() != nil {
+			err = errors.Join(ctx.Err(), err)
+		}
+		return r.transportFailure(err)
+	}
 	item := errorItem{Code: string(CodeInternalError), Message: fmt.Sprintf("Sandbox API returned HTTP %d", resp.StatusCode)}
 	var details []map[string]any
 	if json.Unmarshal(byt, &parsed) == nil && len(parsed.Errors) > 0 {

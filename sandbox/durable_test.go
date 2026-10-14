@@ -324,3 +324,25 @@ func TestFitOutput(t *testing.T) {
 		})
 	}
 }
+
+func TestFitProcessOutput(t *testing.T) {
+	small := ProcessOutput{Chunks: []OutputChunk{{Stream: Stdout, Data: []byte("ok")}}}
+	got, err := fitProcessOutput(small)
+	require.NoError(t, err)
+	assert.Equal(t, small, got)
+
+	large := ProcessOutput{Chunks: []OutputChunk{
+		{Stream: Stdout, Data: bytes.Repeat([]byte("a"), 1<<20)},
+		{Stream: Stderr, Data: bytes.Repeat([]byte("b"), 1<<20)},
+		{Stream: Stdout, Data: bytes.Repeat([]byte("c"), 1<<20)},
+	}}
+	got, err = fitProcessOutput(large)
+	require.NoError(t, err)
+	require.True(t, got.Truncated)
+	require.NotEmpty(t, got.Chunks)
+	assert.Equal(t, large.Chunks[2], got.Chunks[len(got.Chunks)-1])
+	assert.NotEqual(t, byte('a'), got.Chunks[0].Data[0])
+	encoded, err := json.Marshal(got)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(encoded), maxDurableOutputBytes)
+}

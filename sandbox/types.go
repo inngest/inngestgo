@@ -252,6 +252,9 @@ type OutputChunk struct {
 // ProcessOutput is the retained output of a process.
 type ProcessOutput struct {
 	Chunks []OutputChunk `json:"chunks"`
+	// Truncated reports that a durable step removed older chunks to fit its
+	// result limit.  direct client calls leave it false.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // LogsOpts configures a sandbox log stream.  Follow keeps the stream open for

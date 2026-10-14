@@ -302,7 +302,18 @@ func listQuery(cursor string, limit int) url.Values {
 // waitUntilRunning polls until the sandbox is RUNNING.  a retryable API
 // error does not end the wait, so a short outage does not fail a start.
 func (c *Client) waitUntilRunning(ctx context.Context, info SandboxInfo, timeout time.Duration, action Action) (*Sandbox, error) {
-	deadline := time.Now().Add(timeout)
+	pollCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	deadline, _ := pollCtx.Deadline()
+	timedOut := func() *Error {
+		return &Error{
+			Action:    action,
+			Code:      CodeStartTimedOut,
+			Message:   fmt.Sprintf("Sandbox did not reach RUNNING within %s", timeout),
+			SandboxID: info.ID,
+			Details:   []map[string]any{{"status": string(info.Status), "timeoutMs": timeout.Milliseconds()}},
+		}
+	}
 	for {
 		switch info.Status {
 		case StatusRunning:
@@ -324,20 +335,17 @@ func (c *Client) waitUntilRunning(ctx context.Context, info SandboxInfo, timeout
 
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			return nil, &Error{
-				Action:    action,
-				Code:      CodeStartTimedOut,
-				Message:   fmt.Sprintf("Sandbox did not reach RUNNING within %s", timeout),
-				SandboxID: info.ID,
-				Details:   []map[string]any{{"status": string(info.Status), "timeoutMs": timeout.Milliseconds()}},
-			}
+			return nil, pollError(ctx, timedOut())
 		}
-		if err := sleep(ctx, min(pollInterval, remaining)); err != nil {
-			return nil, err
+		if err := sleep(pollCtx, min(pollInterval, remaining)); err != nil {
+			return nil, pollError(ctx, timedOut())
 		}
 
-		next, err := c.get(ctx, info.ID, action)
+		next, err := c.get(pollCtx, info.ID, action)
 		if err != nil {
+			if pollCtx.Err() != nil {
+				return nil, pollError(ctx, timedOut())
+			}
 			if isRetryable(err) {
 				continue
 			}
@@ -349,7 +357,17 @@ func (c *Client) waitUntilRunning(ctx context.Context, info SandboxInfo, timeout
 
 // pollStatus waits for a pause or resume to reach target.
 func (c *Client) pollStatus(ctx context.Context, info SandboxInfo, target Status, action Action, timeout time.Duration) (*Sandbox, error) {
-	deadline := time.Now().Add(timeout)
+	pollCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	deadline, _ := pollCtx.Deadline()
+	timedOut := func() *Error {
+		return &Error{
+			Action:    action,
+			Code:      CodeStartTimedOut,
+			Message:   fmt.Sprintf("Sandbox did not reach %s within %s", target, timeout),
+			SandboxID: info.ID,
+		}
+	}
 	for info.Status != target {
 		if info.Status == StatusFailed || info.Status == StatusTerminated {
 			return nil, &Error{
@@ -361,18 +379,16 @@ func (c *Client) pollStatus(ctx context.Context, info SandboxInfo, target Status
 		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			return nil, &Error{
-				Action:    action,
-				Code:      CodeStartTimedOut,
-				Message:   fmt.Sprintf("Sandbox did not reach %s within %s", target, timeout),
-				SandboxID: info.ID,
-			}
+			return nil, pollError(ctx, timedOut())
 		}
-		if err := sleep(ctx, min(pollInterval, remaining)); err != nil {
-			return nil, err
+		if err := sleep(pollCtx, min(pollInterval, remaining)); err != nil {
+			return nil, pollError(ctx, timedOut())
 		}
-		next, err := c.get(ctx, info.ID, action)
+		next, err := c.get(pollCtx, info.ID, action)
 		if err != nil {
+			if pollCtx.Err() != nil {
+				return nil, pollError(ctx, timedOut())
+			}
 			return nil, err
 		}
 		if next.ID != info.ID || next.Name != info.Name {
@@ -412,7 +428,18 @@ func (c *Client) createSnapshot(ctx context.Context, sandboxID, name string) (Sn
 // waitUntilSnapshotReady polls until the snapshot is READY.  a retryable API
 // error does not end the wait.
 func (c *Client) waitUntilSnapshotReady(ctx context.Context, snap SnapshotInfo, timeout time.Duration) (SnapshotInfo, error) {
-	deadline := time.Now().Add(timeout)
+	pollCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	deadline, _ := pollCtx.Deadline()
+	timedOut := func() *Error {
+		return &Error{
+			Action:     ActionSnapshotWait,
+			Code:       CodeSnapshotWaitTimedOut,
+			Message:    fmt.Sprintf("Snapshot did not reach READY within %s", timeout),
+			SnapshotID: snap.ID,
+			Details:    []map[string]any{{"status": string(snap.Status), "timeoutMs": timeout.Milliseconds()}},
+		}
+	}
 	for {
 		switch snap.Status {
 		case SnapshotReady:
@@ -429,19 +456,16 @@ func (c *Client) waitUntilSnapshotReady(ctx context.Context, snap SnapshotInfo, 
 		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			return SnapshotInfo{}, &Error{
-				Action:     ActionSnapshotWait,
-				Code:       CodeSnapshotWaitTimedOut,
-				Message:    fmt.Sprintf("Snapshot did not reach READY within %s", timeout),
-				SnapshotID: snap.ID,
-				Details:    []map[string]any{{"status": string(snap.Status), "timeoutMs": timeout.Milliseconds()}},
-			}
+			return SnapshotInfo{}, pollError(ctx, timedOut())
 		}
-		if err := sleep(ctx, min(pollInterval, remaining)); err != nil {
-			return SnapshotInfo{}, err
+		if err := sleep(pollCtx, min(pollInterval, remaining)); err != nil {
+			return SnapshotInfo{}, pollError(ctx, timedOut())
 		}
-		next, err := c.getSnapshot(ctx, snap.ID, ActionSnapshotWait)
+		next, err := c.getSnapshot(pollCtx, snap.ID, ActionSnapshotWait)
 		if err != nil {
+			if pollCtx.Err() != nil {
+				return SnapshotInfo{}, pollError(ctx, timedOut())
+			}
 			if isRetryable(err) {
 				continue
 			}
@@ -449,6 +473,13 @@ func (c *Client) waitUntilSnapshotReady(ctx context.Context, snap SnapshotInfo, 
 		}
 		snap = next
 	}
+}
+
+func pollError(ctx context.Context, timeoutErr *Error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return timeoutErr
 }
 
 func (c *Client) deleteSnapshot(ctx context.Context, snapshotID string) error {
@@ -881,6 +912,12 @@ func (p *Process) wait(ctx context.Context, timeout time.Duration) (ProcessInfo,
 	}
 	info := p.ProcessInfo
 	info.State, info.ExitCode, info.TerminationSignal = final.State, final.ExitCode, final.TerminationSignal
+	if final.StartedAt != nil {
+		info.StartedAt = final.StartedAt
+	}
+	if final.EndedAt != nil {
+		info.EndedAt = final.EndedAt
+	}
 	return info, checkProcess(info)
 }
 

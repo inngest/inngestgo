@@ -275,7 +275,11 @@ func (f *fakeAPI) serveSandbox(w http.ResponseWriter, r *http.Request, key strin
 		if got := r.URL.Query().Get("timeout"); got != "30000ms" {
 			f.t.Errorf("wait timeout = %q", got)
 		}
-		writeData(w, 200, map[string]any{"id": parts[4], "state": "EXITED", "exitCode": 0})
+		writeData(w, 200, map[string]any{
+			"id": parts[4], "state": "EXITED", "exitCode": 0,
+			"startedAt": fakeNow.Format(time.RFC3339),
+			"endedAt":   fakeNow.Add(time.Second).Format(time.RFC3339),
+		})
 
 	case "GET /v2/sandboxes/{id}/processes/{id}/output":
 		writeData(w, 200, map[string]any{"chunks": []map[string]any{
