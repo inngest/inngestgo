@@ -22,6 +22,7 @@ import (
 	"github.com/inngest/inngestgo/internal/logger"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/middleware"
+	"github.com/inngest/inngestgo/pkg/env"
 	"github.com/inngest/inngestgo/step"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -366,7 +367,7 @@ func TestInvoke(t *testing.T) {
 		r.NoError(err)
 
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, c, mw, a, testKey, testKeyFallback, createRequest(t, input), nil)
+			actual, op, err := invoke(ctx, c, defaultAPIOrigin, mw, a, testKey, testKeyFallback, createRequest(t, input), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -401,7 +402,7 @@ func TestInvoke(t *testing.T) {
 		r.NoError(err)
 
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, c, mw, a, testKey, testKeyFallback, createBatchRequest(t, input, 5), nil)
+			actual, op, err := invoke(ctx, c, defaultAPIOrigin, mw, a, testKey, testKeyFallback, createBatchRequest(t, input, 5), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -437,7 +438,7 @@ func TestInvoke(t *testing.T) {
 		ctx := context.Background()
 
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, c, mw, a, testKey, testKeyFallback, createRequest(t, input), nil)
+			actual, op, err := invoke(ctx, c, defaultAPIOrigin, mw, a, testKey, testKeyFallback, createRequest(t, input), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -472,7 +473,7 @@ func TestInvoke(t *testing.T) {
 
 		ctx := context.Background()
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, c, mw, a, testKey, testKeyFallback, createRequest(t, input), nil)
+			actual, op, err := invoke(ctx, c, defaultAPIOrigin, mw, a, testKey, testKeyFallback, createRequest(t, input), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -510,7 +511,7 @@ func TestInvoke(t *testing.T) {
 
 		ctx := context.Background()
 		t.Run("it invokes the function with correct types", func(t *testing.T) {
-			actual, op, err := invoke(ctx, c, mw, a, testKey, testKeyFallback, createRequest(t, input), nil)
+			actual, op, err := invoke(ctx, c, defaultAPIOrigin, mw, a, testKey, testKeyFallback, createRequest(t, input), nil)
 			require.NoError(t, err)
 			require.Nil(t, op)
 			require.Equal(t, resp, actual)
@@ -556,7 +557,7 @@ func TestInvoke(t *testing.T) {
 		r.NoError(err)
 
 		actual, op, err := invoke(
-			ctx, c, mw, a, testKey, testKeyFallback,
+			ctx, c, defaultAPIOrigin, mw, a, testKey, testKeyFallback,
 			createRequest(t, EventA{Name: "my-event"}),
 			nil,
 		)
@@ -571,6 +572,120 @@ func TestInvoke(t *testing.T) {
 		r.Contains(err.Error(), "handler.go")
 		r.Contains(err.Error(), "handler_test.go")
 	})
+}
+
+func TestCheckpointUsesHandlerAPIBaseURL(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		clientURL  bool
+		apiBaseEnv bool
+	}{
+		{name: "client option", clientURL: true},
+		{name: "api base environment", apiBaseEnv: true},
+		{name: "base environment"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			paths := make(chan string, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				paths <- r.URL.Path
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			t.Setenv("INNGEST_DEV", "")
+			t.Setenv("INNGEST_API_BASE_URL", "")
+			t.Setenv("INNGEST_BASE_URL", "")
+			opts := ClientOpts{AppID: "checkpoint-url"}
+			switch {
+			case tc.clientURL:
+				opts.APIBaseURL = &server.URL
+			case tc.apiBaseEnv:
+				t.Setenv("INNGEST_API_BASE_URL", server.URL)
+			default:
+				t.Setenv("INNGEST_BASE_URL", server.URL)
+			}
+
+			client, err := NewClient(opts)
+			require.NoError(t, err)
+			fn, err := CreateFunction(
+				client,
+				FunctionOpts{ID: "checkpoint"},
+				EventTrigger("checkpoint/event", nil),
+				func(ctx context.Context, input Input[any]) (any, error) {
+					return step.Run(ctx, "step", func(ctx context.Context) (string, error) {
+						return "ok", nil
+					})
+				},
+			)
+			require.NoError(t, err)
+
+			result, ops, err := client.(*apiClient).h.InvokeFunction(
+				context.Background(), fn.FullyQualifiedID(), nil,
+				*createRequest(t, Event{Name: "checkpoint/event"}),
+			)
+			require.NoError(t, err)
+			require.Empty(t, ops)
+			require.Equal(t, "ok", result)
+			select {
+			case path := <-paths:
+				require.Equal(t, "/v1/checkpoint/run-id/async", path)
+			default:
+				t.Fatal("checkpoint request was not sent")
+			}
+		})
+	}
+}
+
+func TestHandlerAPIBaseURLUsesClientDev(t *testing.T) {
+	t.Setenv("INNGEST_DEV", "")
+	client, err := NewClient(ClientOpts{AppID: "dev-url", Dev: BoolPtr(true)})
+	require.NoError(t, err)
+	require.Equal(t, env.DevServerOrigin, client.(*apiClient).h.GetAPIBaseURL())
+}
+
+func TestInvokeCheckpointFailureReturnsPendingStep(t *testing.T) {
+	checkpointCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		checkpointCalls++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	c, err := NewClient(ClientOpts{AppID: "checkpoint-failure", APIBaseURL: &server.URL})
+	require.NoError(t, err)
+
+	secondStepRan := false
+	f, err := CreateFunction(
+		c,
+		FunctionOpts{ID: "checkpoint-failure"},
+		EventTrigger("test/checkpoint.failure", nil),
+		func(ctx context.Context, input Input[map[string]any]) (any, error) {
+			_, err := step.Run(ctx, "first", func(context.Context) (string, error) {
+				return "saved result", nil
+			})
+			if err != nil {
+				return nil, err
+			}
+			secondStepRan = true
+			_, err = step.Run(ctx, "second", func(context.Context) (string, error) {
+				return "second result", nil
+			})
+			return nil, err
+		},
+	)
+	require.NoError(t, err)
+
+	result, ops, err := invoke(
+		context.Background(), c, server.URL, middleware.New(), f, testKey, testKeyFallback,
+		createRequest(t, map[string]any{"name": "test/checkpoint.failure", "data": map[string]any{}}), nil,
+	)
+	require.NoError(t, err)
+	require.Nil(t, result)
+	require.False(t, secondStepRan)
+	require.Equal(t, 1, checkpointCalls)
+	require.Len(t, ops, 1)
+	require.Equal(t, enums.OpcodeStepRun, ops[0].Op)
+	require.JSONEq(t, `"saved result"`, string(ops[0].Data))
 }
 
 func TestServe(t *testing.T) {

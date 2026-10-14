@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/inngest/inngest/pkg/enums"
@@ -219,6 +220,8 @@ type requestCtxManager struct {
 	// checkpointer stores the reference to the invocation's checkpointer,
 	// allowing us to checkpoint step.runs and continue execution.,
 	checkpointer checkpoint.Checkpointer
+	// a failed background checkpoint leaves steps in the response buffer so the next step returns them before it runs user code.
+	checkpointFailed atomic.Bool
 
 	// t returns the time since the epoch since the request started.
 	t time.Time
@@ -273,6 +276,10 @@ func (r *requestCtxManager) AppendOp(ctx context.Context, op GeneratorOpcode) {
 		r.ops = append(r.ops, op)
 	}
 	r.opsLock.Unlock()
+	if r.checkpointFailed.Load() {
+		r.cancel()
+		panic(ControlHijack{})
+	}
 
 	// If we're planning multiple steps, append and continue on without any hijacking
 	// in every case.  Without this, we won't continue to plan the next set of parallel
@@ -329,7 +336,12 @@ func (r *requestCtxManager) AppendOp(ctx context.Context, op GeneratorOpcode) {
 				return
 			}
 			logger.Default().Warn("error checkpointing state, falling back to async response", "error", err)
+			r.checkpointFailed.Store(true)
 		})
+		if r.checkpointFailed.Load() {
+			r.cancel()
+			panic(ControlHijack{})
+		}
 	default:
 		// Do nothing else.
 	}
@@ -416,6 +428,11 @@ func (r *requestCtxManager) CloseCheckpointer() {
 }
 
 func (r *requestCtxManager) NewOp(op enums.Opcode, id string) UnhashedOp {
+	if r.checkpointFailed.Load() {
+		r.cancel()
+		panic(ControlHijack{})
+	}
+
 	r.l.Lock()
 	defer r.l.Unlock()
 
