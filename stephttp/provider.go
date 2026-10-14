@@ -244,7 +244,16 @@ type routeWrapper struct {
 // Inngest sends the request again.  the handler still runs.  its steps stop
 // before their funcs run, its request context is cancelled, and its writes are
 // dropped.
+//
+// behind Provider.Middleware or Provider.Handle, Start uses the existing
+// request owner and sets opts for the handler.  a second owner loads the run's
+// steps twice and copies the request body twice.
 func (p *provider) Start(w http.ResponseWriter, r *http.Request, opts FnOpts) (http.ResponseWriter, *http.Request, func()) {
+	if configure, ok := r.Context().Value(fnUpdateCtx).(func(func(*FnOpts))); ok {
+		configure(func(o *FnOpts) { *o = opts })
+		return w, r, func() {}
+	}
+
 	p.inflight.Add(1)
 
 	wrap := &routeWrapper{opts: opts, known: true, emptyID: p.startEmptyID}

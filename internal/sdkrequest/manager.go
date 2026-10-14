@@ -70,6 +70,12 @@ type InvocationManager interface {
 	// SigningKey returns the signing key used for this request.  This lets us
 	// retrieve creds for eg. publishing or API alls.
 	SigningKey() string
+	// SigningKeyFallback returns the fallback signing key for this request.
+	// API calls use it after the primary key is rejected.
+	SigningKeyFallback() string
+	// APIBaseURL returns the Inngest API URL for this request.  step tools
+	// that call the API, such as sandboxes, send requests to this URL.
+	APIBaseURL() string
 	// CallContext exposes the call context for middleware calls.
 	CallContext() middleware.CallContext
 	// StepMode returns how steps should be executed in this context
@@ -141,19 +147,21 @@ func NewManager(opts Opts) InvocationManager {
 	}
 
 	return &requestCtxManager{
-		fn:         opts.Fn,
-		cancel:     opts.Cancel,
-		request:    opts.Request,
-		indexes:    map[string]int{},
-		l:          &sync.RWMutex{},
-		opsLock:    &sync.Mutex{},
-		signingKey: opts.SigningKey,
-		seen:       map[string]struct{}{},
-		seenLock:   &sync.RWMutex{},
-		unseen:     &unseen,
-		mw:         opts.Middleware,
-		mode:       opts.Mode,
-		t:          time.Now(),
+		fn:                 opts.Fn,
+		cancel:             opts.Cancel,
+		request:            opts.Request,
+		indexes:            map[string]int{},
+		l:                  &sync.RWMutex{},
+		opsLock:            &sync.Mutex{},
+		signingKey:         opts.SigningKey,
+		signingKeyFallback: opts.SigningKeyFallback,
+		apiBaseURL:         opts.APIBaseURL,
+		seen:               map[string]struct{}{},
+		seenLock:           &sync.RWMutex{},
+		unseen:             &unseen,
+		mw:                 opts.Middleware,
+		mode:               opts.Mode,
+		t:                  time.Now(),
 		checkpointer: checkpoint.New(checkpoint.Opts{
 			RunID:              opts.Request.CallCtx.RunID,
 			FnID:               opts.Request.CallCtx.FunctionID,
@@ -181,7 +189,11 @@ type requestCtxManager struct {
 
 	fn fn.ServableFunction
 	// key is the signing key
-	signingKey string
+	signingKey         string
+	signingKeyFallback string
+	// apiBaseURL is the Inngest API URL.  it is empty when the caller did not
+	// set one.
+	apiBaseURL string
 	// cancel ends the context and prevents any other tools from running.
 	cancel func()
 	// err stores the error from any step ran.
@@ -216,6 +228,14 @@ type requestCtxManager struct {
 
 func (r *requestCtxManager) SigningKey() string {
 	return r.signingKey
+}
+
+func (r *requestCtxManager) SigningKeyFallback() string {
+	return r.signingKeyFallback
+}
+
+func (r *requestCtxManager) APIBaseURL() string {
+	return r.apiBaseURL
 }
 
 func (r *requestCtxManager) SetRequest(req *Request) {
