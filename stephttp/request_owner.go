@@ -37,6 +37,8 @@ func processRequest(p *provider, wrap *routeWrapper, r *http.Request, w http.Res
 // for Provider.Start, where the handler runs between begin and finish.
 func newRequestOwner(p *provider, wrap *routeWrapper, r *http.Request, w http.ResponseWriter, next http.HandlerFunc) *requestOwner {
 	cfg := p.resolveConfig(wrap.opts, r)
+	startTime := time.Now()
+	runID := ulid.MustNew(uint64(startTime.UnixMilli()), rand.Reader)
 
 	owner := &requestOwner{
 		r:        r,
@@ -44,27 +46,26 @@ func newRequestOwner(p *provider, wrap *routeWrapper, r *http.Request, w http.Re
 		next:     next,
 		provider: p,
 		mgr: sdkrequest.NewManager(sdkrequest.Opts{
-			SigningKey: p.opts.signingKey(),
-			Mode:       sdkrequest.StepModeManual,
-			APIBaseURL: env.APIServerURL(nil),
+			SigningKey:         p.opts.signingKey(),
+			SigningKeyFallback: p.opts.signingKeyFallback(),
+			Mode:               sdkrequest.StepModeManual,
+			APIBaseURL:         p.opts.baseURL(),
+			Request: &sdkrequest.Request{CallCtx: sdkrequest.CallCtx{
+				RunID: runID.String(),
+				Env:   p.opts.environment(),
+			}},
 		}),
 
 		wrapper:   wrap,
 		config:    &cfg,
 		known:     wrap.known,
-		startTime: time.Now(),
+		startTime: startTime,
+		run:       CheckpointRun{RunID: runID},
 	}
 	owner.mgr.SetFn(servableRestFn{cfg})
 	owner.w.onHeader = owner.setRunHeaders
 	owner.w.capture = owner.captureResponse
 	owner.w.maxBody = cfg.MaxResponseBodySize
-
-	owner.run = CheckpointRun{
-		RunID: ulid.MustNew(
-			uint64(owner.startTime.UnixMilli()),
-			rand.Reader,
-		),
-	}
 
 	return owner
 }
@@ -371,6 +372,7 @@ func (o *requestOwner) getExistingRun(ctx context.Context) (bool, error) {
 	}
 
 	o.run.RunID = runID
+	o.mgr.Request().CallCtx.RunID = runID.String()
 	o.run.Signature = o.r.Header.Get(headerSignature)
 
 	// XXX: Use V2 API when created.

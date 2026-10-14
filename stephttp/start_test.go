@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -294,6 +295,167 @@ func TestStartFailedResume(t *testing.T) {
 			require.Equal(t, tt.expectPanicLog, strings.Contains(logs.String(), "api handler panicked"))
 			require.Zero(t, p.inflight.Load())
 			require.Empty(t, api.called)
+		})
+	}
+}
+
+// countingAPI counts the calls that each request makes.
+type countingAPI struct {
+	newRuns  atomic.Int32
+	getSteps atomic.Int32
+	inputs   chan NewAPIRunData
+}
+
+func (c *countingAPI) CheckpointNewRun(ctx context.Context, runID ulid.ULID, input NewAPIRunData, steps ...sdkrequest.GeneratorOpcode) (*CheckpointRun, error) {
+	c.newRuns.Add(1)
+	c.inputs <- input
+	return &CheckpointRun{RunID: runID}, nil
+}
+
+func (c *countingAPI) CheckpointSteps(ctx context.Context, run CheckpointRun, steps []sdkrequest.GeneratorOpcode) error {
+	return nil
+}
+
+func (c *countingAPI) CheckpointResponse(ctx context.Context, run CheckpointRun, result APIResult) error {
+	return nil
+}
+
+func (c *countingAPI) GetSteps(ctx context.Context, runID ulid.ULID) (map[string]json.RawMessage, error) {
+	c.getSteps.Add(1)
+	return map[string]json.RawMessage{}, nil
+}
+
+func TestStartInsideWrapper(t *testing.T) {
+	const (
+		signingKey  = "signkey-test-12345678"
+		requestBody = `{"hello":"world"}`
+	)
+
+	tests := []struct {
+		name string
+		// wrapper wraps the handler that calls Start.  "middleware" uses
+		// Provider.Middleware, and "handle" uses Provider.HandleFunc.
+		wrapper   string
+		record    bool
+		opts      FnOpts
+		resume    bool
+		asyncStep bool
+
+		expectedStatus   int
+		expectedNewRuns  int32
+		expectedGetSteps int32
+		expectedStored   string
+	}{
+		{
+			name:            "new run behind Middleware",
+			wrapper:         "middleware",
+			opts:            FnOpts{ID: "inner"},
+			expectedStatus:  http.StatusOK,
+			expectedNewRuns: 1,
+			expectedStored:  requestBody,
+		},
+		{
+			name:            "new run behind Middleware that records bodies",
+			wrapper:         "middleware",
+			record:          true,
+			opts:            FnOpts{ID: "inner"},
+			expectedStatus:  http.StatusOK,
+			expectedNewRuns: 1,
+			expectedStored:  requestBody,
+		},
+		{
+			name:            "omitted body behind Middleware",
+			wrapper:         "middleware",
+			opts:            FnOpts{ID: "inner", OmitRequestBody: true},
+			expectedStatus:  http.StatusOK,
+			expectedNewRuns: 1,
+			expectedStored:  "",
+		},
+		{
+			name:            "async step behind Middleware",
+			wrapper:         "middleware",
+			opts:            FnOpts{ID: "inner"},
+			asyncStep:       true,
+			expectedStatus:  http.StatusSeeOther,
+			expectedNewRuns: 1,
+			expectedStored:  requestBody,
+		},
+		{
+			name:             "resume behind Middleware loads its steps once",
+			wrapper:          "middleware",
+			opts:             FnOpts{ID: "inner"},
+			resume:           true,
+			expectedStatus:   http.StatusPartialContent,
+			expectedGetSteps: 1,
+		},
+		{
+			name:            "new run inside HandleFunc",
+			wrapper:         "handle",
+			opts:            FnOpts{ID: "inner"},
+			expectedStatus:  http.StatusOK,
+			expectedNewRuns: 1,
+			expectedStored:  requestBody,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("INNGEST_DEV", "")
+
+			api := &countingAPI{inputs: make(chan NewAPIRunData, 2)}
+			p := Setup(SetupOpts{Optional: OptionalSetupOpts{SigningKey: signingKey}})
+			p.api = api
+
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w, r, end := p.Start(w, r, tt.opts)
+				defer end()
+
+				_, _ = io.ReadAll(r.Body)
+				if tt.asyncStep {
+					step.Sleep(r.Context(), "wait", time.Second)
+				}
+				_, _ = step.Run(r.Context(), "a", func(ctx context.Context) (int, error) {
+					return 1, nil
+				})
+				_, _ = w.Write([]byte("ok"))
+			})
+
+			var handler http.Handler
+			switch tt.wrapper {
+			case "middleware":
+				handler = p.Middleware(MiddlewareOpts{RecordRequestBodies: tt.record})(next)
+			case "handle":
+				handler = p.HandleFunc(FnOpts{ID: "outer"}, next)
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "/test", strings.NewReader(requestBody))
+			if tt.resume {
+				runID := ulid.Make().String()
+				sig, err := inngestgo.Sign(context.Background(), time.Now(), []byte(signingKey), []byte(runID))
+				require.NoError(t, err)
+				req.Header.Set(headerRunID, runID)
+				req.Header.Set(headerSignature, sig)
+			}
+
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			require.Equal(t, tt.expectedStatus, rec.Code)
+
+			if tt.expectedNewRuns > 0 {
+				select {
+				case input := <-api.inputs:
+					require.Equal(t, "inner", input.Fn)
+					require.Equal(t, tt.expectedStored, string(input.Body))
+				case <-time.After(5 * time.Second):
+					t.Fatal("checkpoint was not sent")
+				}
+				_, err := ulid.Parse(rec.Header().Get(headerRunID))
+				require.NoError(t, err)
+			}
+
+			require.Eventually(t, func() bool { return p.inflight.Load() == 0 }, 5*time.Second, time.Millisecond)
+			require.Equal(t, tt.expectedNewRuns, api.newRuns.Load())
+			require.Equal(t, tt.expectedGetSteps, api.getSteps.Load())
 		})
 	}
 }
