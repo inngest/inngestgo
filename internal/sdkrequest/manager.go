@@ -138,10 +138,8 @@ func NewManager(opts Opts) InvocationManager {
 		unseen.Add(k)
 	}
 
-	// If the step mode is StepModeYield but the function contains checkpoint config,
-	// enable checkpointing.
 	var checkpointConfig checkpoint.Config
-	if opts.Mode == StepModeYield && opts.Fn != nil && opts.Fn.Config().Checkpoint != nil {
+	if opts.Mode == StepModeYield && opts.Fn != nil && opts.Fn.Config().Checkpoint != nil && !opts.Fn.Config().Checkpoint.Disable {
 		opts.Mode = StepModeCheckpoint
 		checkpointConfig = *opts.Fn.Config().Checkpoint
 	}
