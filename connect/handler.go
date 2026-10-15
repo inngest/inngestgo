@@ -120,6 +120,10 @@ type Opts struct {
 
 	MaxWorkerConcurrency *int64
 
+	// Handler serves executor requests.  when it is nil, the FunctionInvoker
+	// map passed to Connect serves them.
+	Handler RequestHandler
+
 	// MessageReadLimit sets the max number of bytes to read for a single WebSocket message.
 	// By default (nil or 0), the connection has a message read limit of 10MB.
 	// Set to -1 to disable the limit.
@@ -515,11 +519,12 @@ var errGatewayDraining = errors.New("gateway is draining")
 
 func (h *connectHandler) processExecutorRequest(msg workerPoolMsg) {
 	defer h.workerPool.Done()
+	defer h.requestHandler().Done(msg.req)
 
 	// Always make sure the invoke finishes properly
 	processCtx := context.Background()
 
-	err := h.handleInvokeMessage(processCtx, msg.preparedConn, msg.msg)
+	err := h.handleInvokeMessage(processCtx, msg.preparedConn, msg.req)
 	// When we encounter an error, we cannot retry the connection from inside the goroutine.
 	// If we're dealing with connection loss, the next read loop will fail with the same error
 	// and handle the reconnection.

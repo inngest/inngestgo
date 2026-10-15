@@ -7,7 +7,7 @@ import (
 )
 
 type workerPoolMsg struct {
-	msg          *connectproto.ConnectMessage
+	req          *connectproto.GatewayExecutorRequestData
 	preparedConn *connection
 }
 

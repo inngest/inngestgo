@@ -135,7 +135,7 @@ func TestHandleInvokeMessageSkipsAckDuringClosing(t *testing.T) {
 
 	// Closing rejects new ownership claims, so queued pre-ACK work should skip
 	// without invoking the user function.
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		EnvId:          "env-id",
 		AppId:          "app-id",
@@ -143,7 +143,7 @@ func TestHandleInvokeMessageSkipsAckDuringClosing(t *testing.T) {
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	err := h.handleInvokeMessage(context.Background(), preparedConn, msg)
 	r.NoError(err)
@@ -212,7 +212,7 @@ func TestHandleInvokeMessageAttemptsReplyDuringClosingForAckedWork(t *testing.T)
 	}
 	activateTestConnection(t, preparedConn)
 
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		EnvId:          "env-id",
 		AppId:          "app-id",
@@ -220,7 +220,7 @@ func TestHandleInvokeMessageAttemptsReplyDuringClosingForAckedWork(t *testing.T)
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	done := make(chan error, 1)
 	go func() {
@@ -311,7 +311,7 @@ func TestHandleInvokeMessageBuffersClosingReplyWriteFailure(t *testing.T) {
 	}
 	activateTestConnection(t, preparedConn)
 
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		EnvId:          "env-id",
 		AppId:          "app-id",
@@ -319,7 +319,7 @@ func TestHandleInvokeMessageBuffersClosingReplyWriteFailure(t *testing.T) {
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	done := make(chan error, 1)
 	go func() {

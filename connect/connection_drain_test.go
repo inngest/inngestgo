@@ -382,7 +382,7 @@ func TestHandleInvokeMessageAttemptsReplyDuringDrainForAckedWork(t *testing.T) {
 	}
 	activateTestConnection(t, preparedConn)
 
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		EnvId:          "env-id",
 		AppId:          "app-id",
@@ -390,7 +390,7 @@ func TestHandleInvokeMessageAttemptsReplyDuringDrainForAckedWork(t *testing.T) {
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	done := make(chan error, 1)
 	go func() {
@@ -481,7 +481,7 @@ func TestHandleInvokeMessageBuffersDrainingReplyWriteFailure(t *testing.T) {
 	}
 	activateTestConnection(t, preparedConn)
 
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		EnvId:          "env-id",
 		AppId:          "app-id",
@@ -489,7 +489,7 @@ func TestHandleInvokeMessageBuffersDrainingReplyWriteFailure(t *testing.T) {
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	done := make(chan error, 1)
 	go func() {

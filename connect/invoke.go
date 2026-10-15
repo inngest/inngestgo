@@ -2,17 +2,13 @@ package connect
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/inngest/inngest/pkg/connect/wsproto"
-	"github.com/inngest/inngest/pkg/enums"
 	"github.com/inngest/inngest/pkg/publicerr"
 	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
-	sdkerrors "github.com/inngest/inngestgo/errors"
-	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -26,8 +22,8 @@ const (
 // duplicate execution.
 var errConnectionRetired = errors.New("connection retired")
 
-func (h *connectHandler) handleInvokeMessage(ctx context.Context, preparedConn *connection, msg *connectproto.ConnectMessage) error {
-	resp, err := h.connectInvoke(ctx, preparedConn, msg)
+func (h *connectHandler) handleInvokeMessage(ctx context.Context, preparedConn *connection, req *connectproto.GatewayExecutorRequestData) error {
+	resp, err := h.connectInvoke(ctx, preparedConn, req)
 	if err != nil {
 		if errors.Is(err, errConnectionRetired) {
 			// This is a pre-ACK skip. Once ACK succeeds, connectInvoke invokes
@@ -64,18 +60,9 @@ func (h *connectHandler) handleInvokeMessage(ctx context.Context, preparedConn *
 	return h.writeReply(ctx, preparedConn, resp, responseMessage)
 }
 
-// connectInvoke is the counterpart to invoke for connect
-func (h *connectHandler) connectInvoke(ctx context.Context, preparedConn *connection, msg *connectproto.ConnectMessage) (*connectproto.SDKResponse, error) {
-	body := connectproto.GatewayExecutorRequestData{}
-	if err := proto.Unmarshal(msg.Payload, &body); err != nil {
-		// TODO Should we send this back to the gateway?
-		h.logger.Error("error decoding gateway request data", "error", err)
-		return nil, fmt.Errorf("invalid gateway message data: %w", err)
-	}
-
-	if body.AppName == "" {
-		return nil, fmt.Errorf("missing app name in executor request")
-	}
+// connectInvoke ACKs the request, extends its lease while the request handler
+// serves it, and returns the reply.
+func (h *connectHandler) connectInvoke(ctx context.Context, preparedConn *connection, body *connectproto.GatewayExecutorRequestData) (*connectproto.SDKResponse, error) {
 	logAttrs := []any{
 		"request_id", body.RequestId,
 		"run_id", body.RunId,
@@ -84,24 +71,8 @@ func (h *connectHandler) connectInvoke(ctx context.Context, preparedConn *connec
 	}
 	logAttrs = append(logAttrs, preparedConn.logAttrs()...)
 	l := h.logger.With(logAttrs...)
-
-	invoker, ok := h.invokers[body.AppName]
-	if !ok {
-		return nil, fmt.Errorf("no invoker for app name %q", body.AppName)
-	}
-
-	// Note: This still uses JSON
-	// TODO Replace with Protobuf
-	var request sdkrequest.Request
-	if err := json.Unmarshal(body.RequestPayload, &request); err != nil {
-		// TODO Should we send this back to the gateway? Previously this was a status code 400 public error with "malformed input"
-		l.Error("error decoding sdk request", "error", err)
-		return nil, fmt.Errorf("invalid SDK request payload: %w", err)
-	}
-	request.CallCtx.RequestID = body.RequestId
-	request.CallCtx.JobID = body.JobId
-	if request.CallCtx.JobID != "" {
-		l = l.With("job_id", request.CallCtx.JobID)
+	if body.JobId != "" {
+		l = l.With("job_id", body.JobId)
 	}
 
 	ackPayload, err := proto.Marshal(&connectproto.WorkerRequestAckData{
@@ -126,11 +97,6 @@ func (h *connectHandler) connectInvoke(ctx context.Context, preparedConn *connec
 
 	// TODO Should we wait for a gateway response before starting to process? What if the gateway fails acking and we start too early?
 	// This should not happen but could lead to double processing of the same message
-
-	var stepId *string
-	if body.StepId != nil && *body.StepId != "step" {
-		stepId = body.StepId
-	}
 
 	// Set initial lease ID
 	h.workerPool.inProgressLeasesLock.Lock()
@@ -199,123 +165,10 @@ func (h *connectHandler) connectInvoke(ctx context.Context, preparedConn *connec
 		}
 	}()
 
-	// Invoke function, always complete regardless of connection cancellation once
-	// the request has been acknowledged.
-	var (
-		resp any
-		ops  []sdkrequest.GeneratorOpcode
-	)
-	if request.UsesAPI() {
-		loadOpts := sdkrequest.LoadFromAPIOpts{
-			APIBaseURL:        h.opts.APIBaseURL,
-			AuthToken:         string(h.opts.HashedSigningKey),
-			AuthTokenFallback: string(h.opts.HashedSigningKeyFallback),
-		}
-		if h.apiClient != nil {
-			loadOpts.HTTPClient = &h.apiClient.client
-		}
-		err = sdkrequest.LoadFromAPI(context.Background(), &request, loadOpts)
-		if err != nil {
-			err = fmt.Errorf("error loading function state from API: %w", err)
-		}
-	}
-	if err == nil {
-		resp, ops, err = invoker.InvokeFunction(context.Background(), body.FunctionSlug, stepId, request)
-	}
-
-	// NOTE: When triggering step errors, we should have an OpcodeStepError
-	// within ops alongside an error.  We can safely ignore that error, as it's
-	// only used for checking whether the step used a NoRetryError or RetryAtError
-	//
-	// For that reason, we check those values first.
-	noRetry := sdkerrors.IsNoRetryError(err)
-	retryAt := sdkerrors.GetRetryAtTime(err)
-	if len(ops) == 1 && ops[0].Op == enums.OpcodeStepError {
-		// Now we've handled error types we can ignore step
-		// errors safely.
-		err = nil
-	}
-
-	// Now that we've handled the OpcodeStepError, if we *still* ahve
-	// a StepError kind returned from a function we must have an unhandled
-	// step error.  This is a NonRetryableError, as the most likely code is:
-	//
-	// 	_, err := step.Run(ctx, func() (any, error) { return fmt.Errorf("") })
-	// 	if err != nil {
-	// 	     return err
-	// 	}
-	if sdkerrors.IsStepError(err) {
-		err = fmt.Errorf("unhandled step error: %s", err)
-		noRetry = true
-	}
-
-	// These may be added even for 2xx codes with step errors.
-	var retryAfterVal *string
-	if retryAt != nil {
-		formatted := retryAt.Format(time.RFC3339)
-		retryAfterVal = &formatted
-	}
-
+	resp, err := h.requestHandler().Serve(ctx, body)
 	if err != nil {
-		l.Error("error calling function", "error", err)
-		return &connectproto.SDKResponse{
-			RequestId:      body.RequestId,
-			AccountId:      body.AccountId,
-			EnvId:          body.EnvId,
-			AppId:          body.AppId,
-			Status:         connectproto.SDKResponseStatus_ERROR,
-			Body:           []byte(fmt.Sprintf("error calling function: %s", err.Error())),
-			NoRetry:        noRetry,
-			RetryAfter:     retryAfterVal,
-			SdkVersion:     fmt.Sprintf("%s:v%s", h.opts.SDKLanguage, h.opts.SDKVersion),
-			RequestVersion: 0, // Go SDK currently only supports v0
-			SystemTraceCtx: body.SystemTraceCtx,
-			UserTraceCtx:   body.UserTraceCtx,
-			RunId:          body.RunId,
-		}, nil
+		return nil, err
 	}
 
-	if len(ops) > 0 {
-		// Note: This still uses JSON
-		// TODO Replace with Protobuf
-		serializedOps, err := json.Marshal(ops)
-		if err != nil {
-			return nil, fmt.Errorf("could not serialize ops: %w", err)
-		}
-
-		// Return the function opcode returned here so that we can re-invoke this
-		// function and manage state appropriately.  Any opcode here takes precedence
-		// over function return values as the function has not yet finished.
-		return &connectproto.SDKResponse{
-			RequestId:      body.RequestId,
-			EnvId:          body.EnvId,
-			AppId:          body.AppId,
-			Status:         connectproto.SDKResponseStatus_NOT_COMPLETED,
-			Body:           serializedOps,
-			NoRetry:        noRetry,
-			RetryAfter:     retryAfterVal,
-			SystemTraceCtx: body.SystemTraceCtx,
-			UserTraceCtx:   body.UserTraceCtx,
-		}, nil
-	}
-
-	// Note: This still uses JSON
-	// TODO Replace with Protobuf
-	serializedResp, err := json.Marshal(resp)
-	if err != nil {
-		return nil, fmt.Errorf("could not serialize resp: %w", err)
-	}
-
-	// Return the function response.
-	return &connectproto.SDKResponse{
-		RequestId:      body.RequestId,
-		EnvId:          body.EnvId,
-		AppId:          body.AppId,
-		Status:         connectproto.SDKResponseStatus_DONE,
-		Body:           serializedResp,
-		NoRetry:        noRetry,
-		RetryAfter:     retryAfterVal,
-		SystemTraceCtx: body.SystemTraceCtx,
-		UserTraceCtx:   body.UserTraceCtx,
-	}, nil
+	return newSDKResponse(body, resp), nil
 }

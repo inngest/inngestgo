@@ -425,14 +425,13 @@ func TestConnectInvokeUsesProtoRequestAndJobIDs(t *testing.T) {
 		},
 	})
 	r.NoError(err)
-	msgPayload, err := proto.Marshal(&connectproto.GatewayExecutorRequestData{
+	req := &connectproto.GatewayExecutorRequestData{
 		RequestId:      requestID,
 		JobId:          jobID,
 		AppName:        "app",
 		FunctionSlug:   "fn",
 		RequestPayload: requestPayload,
-	})
-	r.NoError(err)
+	}
 
 	invoker := &captureInvoker{}
 	h := &connectHandler{
@@ -450,9 +449,7 @@ func TestConnectInvokeUsesProtoRequestAndJobIDs(t *testing.T) {
 		extendLeaseInterval: time.Hour,
 	}
 	activateTestConnection(t, preparedConn)
-	resp, err := h.connectInvoke(context.Background(), preparedConn, &connectproto.ConnectMessage{
-		Payload: msgPayload,
-	})
+	resp, err := h.connectInvoke(context.Background(), preparedConn, req)
 	r.NoError(err)
 	r.Equal(requestID, resp.RequestId)
 	r.Equal(requestID, invoker.request.CallCtx.RequestID)
@@ -516,14 +513,13 @@ func TestConnectInvokeHydratesUseAPIRequest(t *testing.T) {
 		},
 	})
 	r.NoError(err)
-	msgPayload, err := proto.Marshal(&connectproto.GatewayExecutorRequestData{
+	req := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		AppName:        "app",
 		FunctionSlug:   "fn",
 		RequestPayload: requestPayload,
 		LeaseId:        "lease-id",
-	})
-	r.NoError(err)
+	}
 
 	invoker := &captureInvoker{}
 	apiClient := newWorkerApiClient(apiServer.URL, nil)
@@ -551,9 +547,7 @@ func TestConnectInvokeHydratesUseAPIRequest(t *testing.T) {
 	}
 	activateTestConnection(t, preparedConn)
 
-	resp, err := h.connectInvoke(context.Background(), preparedConn, &connectproto.ConnectMessage{
-		Payload: msgPayload,
-	})
+	resp, err := h.connectInvoke(context.Background(), preparedConn, req)
 	r.NoError(err)
 	r.Equal(connectproto.SDKResponseStatus_DONE, resp.Status)
 	r.EqualValues(2, apiCalls.Load())
@@ -1024,7 +1018,7 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 		},
 	}
 
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		AccountId:      "account-id",
 		EnvId:          "env-id",
@@ -1033,7 +1027,7 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	preparedConn := &connection{
 		ws:                  clientConn,
@@ -1233,7 +1227,7 @@ func TestHandleInvokeMessageReturnsErrorWhenConnectionClosesBeforeAck(t *testing
 		},
 	}
 
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		AccountId:      "account-id",
 		EnvId:          "env-id",
@@ -1242,7 +1236,7 @@ func TestHandleInvokeMessageReturnsErrorWhenConnectionClosesBeforeAck(t *testing
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	preparedConn := &connection{
 		ws:                  clientConn,
@@ -1278,7 +1272,7 @@ func TestHandleInvokeMessageSkipsQueuedRequestForRetiredConnection(t *testing.T)
 		messageBuffer: newMessageBuffer(apiClient, slog.Default()),
 	}
 
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		EnvId:          "env-id",
 		AppId:          "app-id",
@@ -1286,7 +1280,7 @@ func TestHandleInvokeMessageSkipsQueuedRequestForRetiredConnection(t *testing.T)
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	preparedConn := &connection{
 		connectionId:        "old-connection",
@@ -1356,7 +1350,7 @@ func TestHandleInvokeMessageRetiresConnectionAfterAckWriteFailure(t *testing.T) 
 	}
 	activateTestConnection(t, preparedConn)
 
-	firstMsg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	firstMsg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id-1",
 		AccountId:      "account-id",
 		EnvId:          "env-id",
@@ -1365,7 +1359,7 @@ func TestHandleInvokeMessageRetiresConnectionAfterAckWriteFailure(t *testing.T) 
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	err = h.handleInvokeMessage(context.Background(), preparedConn, firstMsg)
 	r.Error(err)
@@ -1373,7 +1367,7 @@ func TestHandleInvokeMessageRetiresConnectionAfterAckWriteFailure(t *testing.T) 
 	r.Equal(connPhaseRetired, preparedConn.phase())
 	r.False(invoker.called.Load())
 
-	secondMsg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	secondMsg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id-2",
 		AccountId:      "account-id",
 		EnvId:          "env-id",
@@ -1382,7 +1376,7 @@ func TestHandleInvokeMessageRetiresConnectionAfterAckWriteFailure(t *testing.T) 
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	err = h.handleInvokeMessage(context.Background(), preparedConn, secondMsg)
 	r.NoError(err)
@@ -1501,18 +1495,6 @@ func (b *blockingTestInvoker) InvokeFunction(ctx context.Context, slug string, s
 		return nil, nil, ctx.Err()
 	case <-b.release:
 		return map[string]string{"ok": "true"}, nil, nil
-	}
-}
-
-func mustExecutorRequestMessage(t *testing.T, data *connectproto.GatewayExecutorRequestData) *connectproto.ConnectMessage {
-	t.Helper()
-
-	payload, err := proto.Marshal(data)
-	require.NoError(t, err)
-
-	return &connectproto.ConnectMessage{
-		Kind:    connectproto.GatewayMessageType_GATEWAY_EXECUTOR_REQUEST,
-		Payload: payload,
 	}
 }
 

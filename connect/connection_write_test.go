@@ -137,7 +137,7 @@ func TestHandleInvokeMessageSkipsAckWhenPhaseDisallowsAck(t *testing.T) {
 	r.NoError(preparedConn.markActive("test"))
 	r.NoError(preparedConn.beginDrain("test"))
 
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		EnvId:          "env-id",
 		AppId:          "app-id",
@@ -145,7 +145,7 @@ func TestHandleInvokeMessageSkipsAckWhenPhaseDisallowsAck(t *testing.T) {
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	err := h.handleInvokeMessage(context.Background(), preparedConn, msg)
 	r.NoError(err)
@@ -210,7 +210,7 @@ func TestHandleInvokeMessageBuffersReplyWhenPhaseDisallowsReply(t *testing.T) {
 	activateTestConnection(t, preparedConn)
 	r.True(preparedConn.canWriteRequestAck())
 
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		EnvId:          "env-id",
 		AppId:          "app-id",
@@ -218,7 +218,7 @@ func TestHandleInvokeMessageBuffersReplyWhenPhaseDisallowsReply(t *testing.T) {
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	done := make(chan error, 1)
 	go func() {
@@ -298,7 +298,7 @@ func TestHandleInvokeMessageBuffersReplyWriteFailureWithoutRetiringConnection(t 
 	r.NoError(preparedConn.transition(connPhaseHandshaking, "test"))
 	r.NoError(preparedConn.markActive("test"))
 
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		EnvId:          "env-id",
 		AppId:          "app-id",
@@ -306,7 +306,7 @@ func TestHandleInvokeMessageBuffersReplyWriteFailureWithoutRetiringConnection(t 
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	done := make(chan error, 1)
 	go func() {
@@ -450,7 +450,7 @@ func TestLeaseExtensionWriteIsSkippedWhenPhaseDisallowsExtendLease(t *testing.T)
 	r.NoError(preparedConn.transition(connPhaseHandshaking, "test"))
 	r.NoError(preparedConn.markActive("test"))
 
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		EnvId:          "env-id",
 		AppId:          "app-id",
@@ -458,7 +458,7 @@ func TestLeaseExtensionWriteIsSkippedWhenPhaseDisallowsExtendLease(t *testing.T)
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	done := make(chan error, 1)
 	go func() {
@@ -560,7 +560,7 @@ func TestLeaseExtensionContinuesForOwnedWorkDuringDrainOrClose(t *testing.T) {
 			r.NoError(preparedConn.transition(connPhaseHandshaking, "test"))
 			r.NoError(preparedConn.markActive("test"))
 
-			msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+			msg := &connectproto.GatewayExecutorRequestData{
 				RequestId:      "request-id",
 				AccountId:      "account-id",
 				EnvId:          "env-id",
@@ -569,7 +569,7 @@ func TestLeaseExtensionContinuesForOwnedWorkDuringDrainOrClose(t *testing.T) {
 				FunctionSlug:   "test-fn",
 				RequestPayload: mustJSON(t, sdkrequest.Request{}),
 				LeaseId:        "lease-id",
-			})
+			}
 
 			done := make(chan error, 1)
 			go func() {
