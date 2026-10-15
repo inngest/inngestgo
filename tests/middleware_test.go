@@ -419,27 +419,17 @@ func TestClientMiddleware(t *testing.T) {
 		r.EventuallyWithT(func(ct *assert.CollectT) {
 			a := assert.New(ct)
 			a.Equal([]string{
-				// First request.
 				"mw: TransformInput",
 				"mw: BeforeExecution",
 				"fn: top",
 				"a: running",
 				"mw: AfterExecution",
 				"mw: TransformOutput",
-
-				// Second request.
-				"mw: TransformInput",
-				"fn: top",
 				"mw: BeforeExecution",
 				"fn: between steps",
 				"b: running",
 				"mw: AfterExecution",
 				"mw: TransformOutput",
-
-				// Third request.
-				"mw: TransformInput",
-				"fn: top",
-				"fn: between steps",
 				"mw: BeforeExecution",
 				"fn: bottom",
 				"mw: AfterExecution",
