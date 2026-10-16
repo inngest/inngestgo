@@ -1,4 +1,4 @@
-package connect
+package connectworker
 
 import (
 	"context"
@@ -18,8 +18,6 @@ import (
 	"github.com/coder/websocket"
 	"github.com/inngest/inngest/pkg/syscode"
 	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
-	"github.com/inngest/inngestgo/internal/fn"
-	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/inngest/inngestgo/internal/types"
 	"github.com/pbnjay/memory"
 	"golang.org/x/sync/errgroup"
@@ -54,8 +52,13 @@ type WorkerConnection interface {
 	Close() error
 }
 
-// Connect
-func Connect(ctx context.Context, opts Opts, invokers map[string]FunctionInvoker, logger *slog.Logger) (WorkerConnection, error) {
+// Connect opens a worker connection to the gateway and keeps it open until
+// Close.  opts.Handler serves every executor request.
+func Connect(ctx context.Context, opts Opts, logger *slog.Logger) (WorkerConnection, error) {
+	if opts.Handler == nil {
+		return nil, fmt.Errorf("request handler is required")
+	}
+
 	apiClient := newWorkerApiClient(opts.APIBaseURL, opts.Env)
 
 	// Once the worker is running, it can only be stopped by calling Close()
@@ -65,7 +68,7 @@ func Connect(ctx context.Context, opts Opts, invokers map[string]FunctionInvoker
 
 	ch := &connectHandler{
 		logger:                 l,
-		invokers:               invokers,
+		handler:                opts.Handler,
 		opts:                   opts,
 		notifyConnectDoneChan:  make(chan connectReport, 1),
 		notifyConnectedChan:    make(chan struct{}),
@@ -85,11 +88,17 @@ func Connect(ctx context.Context, opts Opts, invokers map[string]FunctionInvoker
 		workerPoolSize = min(int(*opts.MaxWorkerConcurrency), maxWorkerPoolSize)
 	}
 
-	wp := NewWorkerPool(ctx, workerPoolSize, ch.processExecutorRequest)
+	// the pool runs until the handler closes, not until ctx is done.  a
+	// request that the read loop admits must reach a worker, or its Done never
+	// runs and workerPool.Wait in the shutdown path never returns.
+	poolCtx, stopWorkerPool := context.WithCancel(context.Background())
+	wp := NewWorkerPool(poolCtx, workerPoolSize, ch.processExecutorRequest)
 	ch.workerPool = wp
+	ch.stopWorkerPool = stopWorkerPool
 
 	conn, err := ch.Connect(ctx)
 	if err != nil {
+		stopWorkerPool()
 		l.Error("could not establish connection", "error", err)
 		return nil, fmt.Errorf("could not establish connection: %w", err)
 	}
@@ -97,21 +106,14 @@ func Connect(ctx context.Context, opts Opts, invokers map[string]FunctionInvoker
 	return conn, nil
 }
 
-type FunctionInvoker interface {
-	InvokeFunction(ctx context.Context, slug string, stepId *string, request sdkrequest.Request) (any, []sdkrequest.GeneratorOpcode, error)
-}
-
-type ConnectApp struct {
-	AppName    string
-	Functions  []fn.SyncConfig
-	AppVersion *string
-}
-
 // Opts represents required options for creating a persistent connection for communicating
 // with an Inngest server.
 type Opts struct {
-	Env  *string
-	Apps []ConnectApp
+	Env *string
+
+	// Apps go into the handshake unchanged.  each Functions field is the JSON
+	// array of function configs that the gateway syncs for that app.
+	Apps []*connectproto.AppConfiguration
 
 	Capabilities types.Capabilities
 
@@ -120,8 +122,7 @@ type Opts struct {
 
 	MaxWorkerConcurrency *int64
 
-	// Handler serves executor requests.  when it is nil, the FunctionInvoker
-	// map passed to Connect serves them.
+	// Handler serves every executor request.  Connect fails when it is nil.
 	Handler RequestHandler
 
 	// MessageReadLimit sets the max number of bytes to read for a single WebSocket message.
@@ -150,7 +151,7 @@ type Opts struct {
 type connectHandler struct {
 	opts Opts
 
-	invokers map[string]FunctionInvoker
+	handler RequestHandler
 
 	logger *slog.Logger
 
@@ -180,6 +181,7 @@ type connectHandler struct {
 	workerCtx       context.Context
 	cancelWorkerCtx context.CancelFunc
 	gracefulCloseEg errgroup.Group
+	stopWorkerPool  context.CancelFunc
 	auth            authContext
 	closed          atomic.Bool
 
@@ -210,35 +212,7 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 	numCpuCores := runtime.NumCPU()
 	totalMem := memory.TotalMemory()
 
-	apps := make([]*connectproto.AppConfiguration, len(h.opts.Apps))
-	appSlugs := make(map[string]map[string][]string)
-	for i, app := range h.opts.Apps {
-		functionSlugs := make(map[string][]string)
-		for _, function := range app.Functions {
-			stepUrls := make([]string, len(function.Steps))
-			j := 0
-			for _, step := range function.Steps {
-				stepUrls[j] = step.Runtime["url"].(string)
-				j++
-			}
-
-			functionSlugs[function.Slug] = stepUrls
-		}
-		appSlugs[app.AppName] = functionSlugs
-
-		marshaledFns, err := json.Marshal(app.Functions)
-		if err != nil {
-			return nil, fmt.Errorf("failed to serialize connect config: %w", err)
-		}
-
-		apps[i] = &connectproto.AppConfiguration{
-			AppName:    app.AppName,
-			AppVersion: app.AppVersion,
-			Functions:  marshaledFns,
-		}
-	}
-
-	l.Debug("using provided functions", "slugs", appSlugs)
+	apps := h.opts.Apps
 
 	marshaledCapabilities, err := json.Marshal(h.opts.Capabilities)
 	if err != nil {
@@ -460,6 +434,10 @@ func (h *connectHandler) Connect(ctx context.Context) (WorkerConnection, error) 
 		// Always send out buffered messages using API.
 		h.flushBufferedMessages("connect handler closing")
 
+		if h.stopWorkerPool != nil {
+			h.stopWorkerPool()
+		}
+
 		l.Debug("connect handler done")
 		return nil
 	})
@@ -519,7 +497,7 @@ var errGatewayDraining = errors.New("gateway is draining")
 
 func (h *connectHandler) processExecutorRequest(msg workerPoolMsg) {
 	defer h.workerPool.Done()
-	defer h.requestHandler().Done(msg.req)
+	defer h.handler.Done(msg.req)
 
 	// Always make sure the invoke finishes properly
 	processCtx := context.Background()

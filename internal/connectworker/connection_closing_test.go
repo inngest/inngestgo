@@ -1,4 +1,4 @@
-package connect
+package connectworker
 
 import (
 	"bytes"
@@ -110,7 +110,7 @@ func TestHandleInvokeMessageSkipsAckDuringClosing(t *testing.T) {
 	r := require.New(t)
 	var logOutput bytes.Buffer
 
-	invoker := &blockingTestInvoker{
+	invoker := &blockingTestHandler{
 		release: make(chan struct{}),
 	}
 	logger := slog.New(slog.NewTextHandler(&logOutput, &slog.HandlerOptions{
@@ -121,9 +121,7 @@ func TestHandleInvokeMessageSkipsAckDuringClosing(t *testing.T) {
 			SDKLanguage: "go",
 			SDKVersion:  "test",
 		},
-		invokers: map[string]FunctionInvoker{
-			"test-app": invoker,
-		},
+		handler:       invoker,
 		logger:        logger,
 		messageBuffer: newMessageBuffer(newWorkerApiClient("", nil), logger),
 	}
@@ -185,7 +183,7 @@ func TestHandleInvokeMessageAttemptsReplyDuringClosingForAckedWork(t *testing.T)
 	defer func() { _ = clientConn.CloseNow() }()
 
 	release := make(chan struct{})
-	invoker := &blockingTestInvoker{
+	invoker := &blockingTestHandler{
 		release: release,
 	}
 	logger := slog.New(slog.DiscardHandler)
@@ -194,9 +192,7 @@ func TestHandleInvokeMessageAttemptsReplyDuringClosingForAckedWork(t *testing.T)
 			SDKLanguage: "go",
 			SDKVersion:  "test",
 		},
-		invokers: map[string]FunctionInvoker{
-			"test-app": invoker,
-		},
+		handler:       invoker,
 		logger:        logger,
 		messageBuffer: newMessageBuffer(newWorkerApiClient("", nil), logger),
 		workerPool: &workerPool{
@@ -284,7 +280,7 @@ func TestHandleInvokeMessageBuffersClosingReplyWriteFailure(t *testing.T) {
 	defer func() { _ = clientConn.CloseNow() }()
 
 	release := make(chan struct{})
-	invoker := &blockingTestInvoker{
+	invoker := &blockingTestHandler{
 		release: release,
 	}
 	logger := slog.New(slog.DiscardHandler)
@@ -293,9 +289,7 @@ func TestHandleInvokeMessageBuffersClosingReplyWriteFailure(t *testing.T) {
 			SDKLanguage: "go",
 			SDKVersion:  "test",
 		},
-		invokers: map[string]FunctionInvoker{
-			"test-app": invoker,
-		},
+		handler:       invoker,
 		logger:        logger,
 		messageBuffer: newMessageBuffer(newWorkerApiClient("", nil), logger),
 		workerPool: &workerPool{

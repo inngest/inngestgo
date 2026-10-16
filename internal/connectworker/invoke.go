@@ -1,4 +1,4 @@
-package connect
+package connectworker
 
 import (
 	"context"
@@ -165,7 +165,7 @@ func (h *connectHandler) connectInvoke(ctx context.Context, preparedConn *connec
 		}
 	}()
 
-	resp, err := h.requestHandler().Serve(ctx, body)
+	resp, err := h.handler.Serve(ctx, body)
 	if err != nil {
 		return nil, err
 	}

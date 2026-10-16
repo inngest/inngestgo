@@ -1,4 +1,4 @@
-package connect
+package connectworker
 
 import (
 	"context"
@@ -123,8 +123,8 @@ func TestReceiveExecutorRequest(t *testing.T) {
 			handler := &fakeRequestHandler{admitErr: tt.admitErr}
 			queued := make(chan workerPoolMsg, 1)
 			h := &connectHandler{
-				opts:   Opts{Handler: handler},
-				logger: slog.New(slog.DiscardHandler),
+				handler: handler,
+				logger:  slog.New(slog.DiscardHandler),
 			}
 			h.workerPool = NewWorkerPool(t.Context(), 1, func(msg workerPoolMsg) {
 				queued <- msg
@@ -177,7 +177,7 @@ func TestProcessExecutorRequestUsesRequestHandler(t *testing.T) {
 	}
 	logger := slog.New(slog.DiscardHandler)
 	h := &connectHandler{
-		opts:          Opts{Handler: handler},
+		handler:       handler,
 		logger:        logger,
 		messageBuffer: newMessageBuffer(newWorkerApiClient("", nil), logger),
 		workerPool: &workerPool{
@@ -272,7 +272,7 @@ func TestProcessExecutorRequestCallsDoneWithoutServe(t *testing.T) {
 			handler := &fakeRequestHandler{serveErr: tt.serveErr}
 			logger := slog.New(slog.DiscardHandler)
 			h := &connectHandler{
-				opts:          Opts{Handler: handler},
+				handler:       handler,
 				logger:        logger,
 				messageBuffer: newMessageBuffer(newWorkerApiClient("", nil), logger),
 				workerPool: &workerPool{

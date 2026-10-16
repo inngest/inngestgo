@@ -1,4 +1,4 @@
-package connect
+package connectworker
 
 import (
 	"context"
@@ -355,7 +355,7 @@ func TestHandleInvokeMessageAttemptsReplyDuringDrainForAckedWork(t *testing.T) {
 	defer func() { _ = clientConn.CloseNow() }()
 
 	release := make(chan struct{})
-	invoker := &blockingTestInvoker{
+	invoker := &blockingTestHandler{
 		release: release,
 	}
 	logger := slog.New(slog.DiscardHandler)
@@ -364,9 +364,7 @@ func TestHandleInvokeMessageAttemptsReplyDuringDrainForAckedWork(t *testing.T) {
 			SDKLanguage: "go",
 			SDKVersion:  "test",
 		},
-		invokers: map[string]FunctionInvoker{
-			"test-app": invoker,
-		},
+		handler:       invoker,
 		logger:        logger,
 		messageBuffer: newMessageBuffer(newWorkerApiClient("", nil), logger),
 		workerPool: &workerPool{
@@ -454,7 +452,7 @@ func TestHandleInvokeMessageBuffersDrainingReplyWriteFailure(t *testing.T) {
 	defer func() { _ = clientConn.CloseNow() }()
 
 	release := make(chan struct{})
-	invoker := &blockingTestInvoker{
+	invoker := &blockingTestHandler{
 		release: release,
 	}
 	logger := slog.New(slog.DiscardHandler)
@@ -463,9 +461,7 @@ func TestHandleInvokeMessageBuffersDrainingReplyWriteFailure(t *testing.T) {
 			SDKLanguage: "go",
 			SDKVersion:  "test",
 		},
-		invokers: map[string]FunctionInvoker{
-			"test-app": invoker,
-		},
+		handler:       invoker,
 		logger:        logger,
 		messageBuffer: newMessageBuffer(newWorkerApiClient("", nil), logger),
 		workerPool: &workerPool{

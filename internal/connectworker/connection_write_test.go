@@ -1,4 +1,4 @@
-package connect
+package connectworker
 
 import (
 	"bytes"
@@ -111,7 +111,7 @@ func TestHandleInvokeMessageSkipsAckWhenPhaseDisallowsAck(t *testing.T) {
 	r := require.New(t)
 	var logOutput bytes.Buffer
 
-	invoker := &blockingTestInvoker{
+	invoker := &blockingTestHandler{
 		release: make(chan struct{}),
 	}
 	logger := slog.New(slog.NewTextHandler(&logOutput, &slog.HandlerOptions{
@@ -123,9 +123,7 @@ func TestHandleInvokeMessageSkipsAckWhenPhaseDisallowsAck(t *testing.T) {
 			SDKLanguage: "go",
 			SDKVersion:  "test",
 		},
-		invokers: map[string]FunctionInvoker{
-			"test-app": invoker,
-		},
+		handler:       invoker,
 		logger:        logger,
 		messageBuffer: newMessageBuffer(apiClient, logger),
 	}
@@ -185,15 +183,13 @@ func TestHandleInvokeMessageBuffersReplyWhenPhaseDisallowsReply(t *testing.T) {
 	defer func() { _ = clientConn.CloseNow() }()
 
 	release := make(chan struct{})
-	invoker := &blockingTestInvoker{
+	invoker := &blockingTestHandler{
 		release: release,
 	}
 	logger := slog.New(slog.DiscardHandler)
 	apiClient := newWorkerApiClient("", nil)
 	h := &connectHandler{
-		invokers: map[string]FunctionInvoker{
-			"test-app": invoker,
-		},
+		handler:       invoker,
 		logger:        logger,
 		messageBuffer: newMessageBuffer(apiClient, logger),
 		workerPool: &workerPool{
@@ -275,15 +271,13 @@ func TestHandleInvokeMessageBuffersReplyWriteFailureWithoutRetiringConnection(t 
 	defer func() { _ = clientConn.CloseNow() }()
 
 	release := make(chan struct{})
-	invoker := &blockingTestInvoker{
+	invoker := &blockingTestHandler{
 		release: release,
 	}
 	logger := slog.New(slog.DiscardHandler)
 	apiClient := newWorkerApiClient("", nil)
 	h := &connectHandler{
-		invokers: map[string]FunctionInvoker{
-			"test-app": invoker,
-		},
+		handler:       invoker,
 		logger:        logger,
 		messageBuffer: newMessageBuffer(apiClient, logger),
 		workerPool: &workerPool{
@@ -430,15 +424,13 @@ func TestLeaseExtensionWriteIsSkippedWhenPhaseDisallowsExtendLease(t *testing.T)
 	defer func() { _ = clientConn.CloseNow() }()
 
 	release := make(chan struct{})
-	invoker := &blockingTestInvoker{
+	invoker := &blockingTestHandler{
 		release: release,
 	}
 	logger := slog.New(slog.DiscardHandler)
 	h := &connectHandler{
-		logger: logger,
-		invokers: map[string]FunctionInvoker{
-			"test-app": invoker,
-		},
+		logger:  logger,
+		handler: invoker,
 		workerPool: &workerPool{
 			inProgressLeases:     map[string]string{},
 			inProgressLeasesLock: sync.Mutex{},
@@ -540,15 +532,13 @@ func TestLeaseExtensionContinuesForOwnedWorkDuringDrainOrClose(t *testing.T) {
 			defer func() { _ = clientConn.CloseNow() }()
 
 			release := make(chan struct{})
-			invoker := &blockingTestInvoker{
+			invoker := &blockingTestHandler{
 				release: release,
 			}
 			logger := slog.New(slog.DiscardHandler)
 			h := &connectHandler{
-				logger: logger,
-				invokers: map[string]FunctionInvoker{
-					"test-app": invoker,
-				},
+				logger:  logger,
+				handler: invoker,
 				workerPool: &workerPool{
 					inProgressLeases:     map[string]string{},
 					inProgressLeasesLock: sync.Mutex{},

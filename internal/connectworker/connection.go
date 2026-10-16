@@ -1,4 +1,4 @@
-package connect
+package connectworker
 
 import (
 	"context"
@@ -495,7 +495,7 @@ func (h *connectHandler) receiveExecutorRequest(l *slog.Logger, preparedConn *co
 		return
 	}
 
-	if err := h.requestHandler().Admit(req); err != nil {
+	if err := h.handler.Admit(req); err != nil {
 		l.Error("failed to handle sdk request", "err", err, "request_id", req.RequestId, "run_id", req.RunId)
 		return
 	}
