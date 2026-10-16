@@ -67,8 +67,10 @@ type inBandSyncResponse struct {
 
 // syncApp sends a signed in-band sync request to the app and reads its
 // function configs.  the response stays in the daemon.  if it went to the API,
-// the app would sync as an HTTP app.
-func syncApp(ctx context.Context, client *http.Client, appURL string, keys signingKeys) (*syncedApp, error) {
+// the app would sync as an HTTP app.  the response sets the URL of each request
+// the daemon forwards, so it must carry a valid signature unless allowUnsigned
+// is set.  a JS app in dev mode does not sign it.
+func syncApp(ctx context.Context, client *http.Client, appURL string, keys signingKeys, allowUnsigned bool) (*syncedApp, error) {
 	body, err := json.Marshal(map[string]string{"url": appURL})
 	if err != nil {
 		return nil, err
@@ -104,8 +106,13 @@ func syncApp(ctx context.Context, client *http.Client, appURL string, keys signi
 	if kind := resp.Header.Get(headerSyncKind); kind != syncKindInBand {
 		return nil, fmt.Errorf("app did not answer with an in-band sync (%s %q).  set INNGEST_ALLOW_IN_BAND_SYNC=1 or upgrade the SDK", headerSyncKind, kind)
 	}
-	if sig := resp.Header.Get(headerSignature); sig != "" && !keys.validResponse(ctx, sig, respBody) {
-		return nil, fmt.Errorf("sync response signature does not match the signing key")
+	switch sig := resp.Header.Get(headerSignature); {
+	case sig != "":
+		if !keys.validResponse(ctx, sig, respBody) {
+			return nil, fmt.Errorf("sync response signature does not match the signing key")
+		}
+	case !allowUnsigned:
+		return nil, fmt.Errorf("sync response has no %s header.  the app must not run in dev mode unless Dev is set", headerSignature)
 	}
 
 	var parsed inBandSyncResponse

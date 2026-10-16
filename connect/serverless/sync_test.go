@@ -85,7 +85,7 @@ func TestSyncAppWithGoSDK(t *testing.T) {
 	defer server.Close()
 
 	appURL := server.URL + "/api/inngest"
-	app, err := syncApp(context.Background(), server.Client(), appURL, signingKeys{primary: testSigningKey})
+	app, err := syncApp(context.Background(), server.Client(), appURL, signingKeys{primary: testSigningKey}, false)
 	r.NoError(err)
 
 	r.Equal(testAppID, app.ID)
@@ -99,11 +99,27 @@ func TestSyncAppWithGoSDK(t *testing.T) {
 }
 
 func TestSyncAppErrors(t *testing.T) {
+	unsigned := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(headerSyncKind, syncKindInBand)
+		_, _ = w.Write([]byte(`{"app_id":"app","functions":[]}`))
+	}
+
 	tests := []struct {
-		name    string
-		handler http.HandlerFunc
-		wantErr string
+		name          string
+		handler       http.HandlerFunc
+		allowUnsigned bool
+		wantErr       string
 	}{
+		{
+			name:    "unsigned response",
+			handler: unsigned,
+			wantErr: "sync response has no X-Inngest-Signature header",
+		},
+		{
+			name:          "unsigned response in dev",
+			handler:       unsigned,
+			allowUnsigned: true,
+		},
 		{
 			name: "out-of-band sync",
 			handler: func(w http.ResponseWriter, _ *http.Request) {
@@ -134,7 +150,11 @@ func TestSyncAppErrors(t *testing.T) {
 			server := httptest.NewServer(tt.handler)
 			defer server.Close()
 
-			_, err := syncApp(context.Background(), server.Client(), server.URL, signingKeys{primary: testSigningKey})
+			_, err := syncApp(context.Background(), server.Client(), server.URL, signingKeys{primary: testSigningKey}, tt.allowUnsigned)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
 			require.ErrorContains(t, err, tt.wantErr)
 		})
 	}

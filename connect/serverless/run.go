@@ -107,7 +107,7 @@ func boot(ctx context.Context, cfg Config, keys signingKeys) (*syncedApp, error)
 	if err := waitReady(bootCtx, client, cfg.AppURL, keys); err != nil {
 		return nil, err
 	}
-	return syncApp(bootCtx, client, cfg.AppURL, keys)
+	return syncApp(bootCtx, client, cfg.AppURL, keys, cfg.Dev)
 }
 
 func connectApp(ctx context.Context, cfg Config, app *syncedApp, keys signingKeys, adm *admission) (connectworker.WorkerConnection, error) {

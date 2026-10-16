@@ -277,7 +277,7 @@ func testForwarderRunsGoFunction(t *testing.T, streaming bool) {
 	defer server.Close()
 
 	keys := signingKeys{primary: testSigningKey}
-	app, err := syncApp(context.Background(), server.Client(), server.URL+"/api/inngest", keys)
+	app, err := syncApp(context.Background(), server.Client(), server.URL+"/api/inngest", keys, false)
 	require.NoError(t, err)
 
 	for _, tt := range tests {
