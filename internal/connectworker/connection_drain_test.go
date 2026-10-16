@@ -1,4 +1,4 @@
-package connect
+package connectworker
 
 import (
 	"context"
@@ -355,7 +355,7 @@ func TestHandleInvokeMessageAttemptsReplyDuringDrainForAckedWork(t *testing.T) {
 	defer func() { _ = clientConn.CloseNow() }()
 
 	release := make(chan struct{})
-	invoker := &blockingTestInvoker{
+	invoker := &blockingTestHandler{
 		release: release,
 	}
 	logger := slog.New(slog.DiscardHandler)
@@ -364,9 +364,7 @@ func TestHandleInvokeMessageAttemptsReplyDuringDrainForAckedWork(t *testing.T) {
 			SDKLanguage: "go",
 			SDKVersion:  "test",
 		},
-		invokers: map[string]FunctionInvoker{
-			"test-app": invoker,
-		},
+		handler:       invoker,
 		logger:        logger,
 		messageBuffer: newMessageBuffer(newWorkerApiClient("", nil), logger),
 		workerPool: &workerPool{
@@ -382,7 +380,7 @@ func TestHandleInvokeMessageAttemptsReplyDuringDrainForAckedWork(t *testing.T) {
 	}
 	activateTestConnection(t, preparedConn)
 
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		EnvId:          "env-id",
 		AppId:          "app-id",
@@ -390,7 +388,7 @@ func TestHandleInvokeMessageAttemptsReplyDuringDrainForAckedWork(t *testing.T) {
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	done := make(chan error, 1)
 	go func() {
@@ -454,7 +452,7 @@ func TestHandleInvokeMessageBuffersDrainingReplyWriteFailure(t *testing.T) {
 	defer func() { _ = clientConn.CloseNow() }()
 
 	release := make(chan struct{})
-	invoker := &blockingTestInvoker{
+	invoker := &blockingTestHandler{
 		release: release,
 	}
 	logger := slog.New(slog.DiscardHandler)
@@ -463,9 +461,7 @@ func TestHandleInvokeMessageBuffersDrainingReplyWriteFailure(t *testing.T) {
 			SDKLanguage: "go",
 			SDKVersion:  "test",
 		},
-		invokers: map[string]FunctionInvoker{
-			"test-app": invoker,
-		},
+		handler:       invoker,
 		logger:        logger,
 		messageBuffer: newMessageBuffer(newWorkerApiClient("", nil), logger),
 		workerPool: &workerPool{
@@ -481,7 +477,7 @@ func TestHandleInvokeMessageBuffersDrainingReplyWriteFailure(t *testing.T) {
 	}
 	activateTestConnection(t, preparedConn)
 
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		EnvId:          "env-id",
 		AppId:          "app-id",
@@ -489,7 +485,7 @@ func TestHandleInvokeMessageBuffersDrainingReplyWriteFailure(t *testing.T) {
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	done := make(chan error, 1)
 	go func() {

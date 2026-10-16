@@ -1,4 +1,4 @@
-package connect
+package connectworker
 
 import (
 	"bytes"
@@ -18,9 +18,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/inngest/inngest/pkg/connect/wsproto"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -381,189 +379,6 @@ func TestCloseTransitionsThroughClosing(t *testing.T) {
 		t.Fatal("timed out waiting for Close")
 	}
 	r.Equal(ConnectionStateClosed, h.State())
-}
-
-func TestConnectInvokeUsesProtoRequestAndJobIDs(t *testing.T) {
-	r := require.New(t)
-	requestID := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-	jobID := "job-123"
-
-	accepted := make(chan *websocket.Conn, 1)
-	done := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
-			InsecureSkipVerify: true,
-		})
-		r.NoError(err)
-		accepted <- conn
-		<-done
-		_ = conn.CloseNow()
-	}))
-	defer server.Close()
-	defer close(done)
-
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
-	clientConn, _, err := websocket.Dial(context.Background(), wsURL, nil)
-	r.NoError(err)
-	defer func() { _ = clientConn.CloseNow() }()
-	serverConn := <-accepted
-
-	ackCh := make(chan connectproto.ConnectMessage, 1)
-	errCh := make(chan error, 1)
-	go func() {
-		var ack connectproto.ConnectMessage
-		errCh <- wsproto.Read(context.Background(), serverConn, &ack)
-		ackCh <- ack
-	}()
-
-	requestPayload, err := json.Marshal(sdkrequest.Request{
-		Event: []byte(`{"name":"test/connect.request.ids","data":{}}`),
-		Steps: map[string]json.RawMessage{},
-		CallCtx: sdkrequest.CallCtx{
-			RequestID: "body-request-id",
-			JobID:     "body-job-id",
-		},
-	})
-	r.NoError(err)
-	msgPayload, err := proto.Marshal(&connectproto.GatewayExecutorRequestData{
-		RequestId:      requestID,
-		JobId:          jobID,
-		AppName:        "app",
-		FunctionSlug:   "fn",
-		RequestPayload: requestPayload,
-	})
-	r.NoError(err)
-
-	invoker := &captureInvoker{}
-	h := &connectHandler{
-		logger: slog.New(slog.DiscardHandler),
-		invokers: map[string]FunctionInvoker{
-			"app": invoker,
-		},
-		workerPool: &workerPool{
-			inProgressLeases:     map[string]string{},
-			inProgressLeasesLock: sync.Mutex{},
-		},
-	}
-	preparedConn := &connection{
-		ws:                  clientConn,
-		extendLeaseInterval: time.Hour,
-	}
-	activateTestConnection(t, preparedConn)
-	resp, err := h.connectInvoke(context.Background(), preparedConn, &connectproto.ConnectMessage{
-		Payload: msgPayload,
-	})
-	r.NoError(err)
-	r.Equal(requestID, resp.RequestId)
-	r.Equal(requestID, invoker.request.CallCtx.RequestID)
-	r.Equal(jobID, invoker.request.CallCtx.JobID)
-
-	r.NoError(<-errCh)
-	r.Equal(connectproto.GatewayMessageType_WORKER_REQUEST_ACK, (<-ackCh).Kind)
-}
-
-func TestConnectInvokeHydratesUseAPIRequest(t *testing.T) {
-	r := require.New(t)
-	var apiCalls atomic.Int32
-	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		assert.Equal(t, "Bearer primary", req.Header.Get("Authorization"))
-		apiCalls.Add(1)
-
-		switch req.URL.Path {
-		case "/v0/runs/run-id/batch":
-			_, _ = w.Write([]byte(`[{"name":"one"},{"name":"two"}]`))
-		case "/v0/runs/run-id/actions":
-			_, _ = w.Write([]byte(`{"step-id":{"value":true}}`))
-		default:
-			http.NotFound(w, req)
-		}
-	}))
-	defer apiServer.Close()
-
-	accepted := make(chan *websocket.Conn, 1)
-	done := make(chan struct{})
-	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
-			InsecureSkipVerify: true,
-		})
-		r.NoError(err)
-		accepted <- conn
-		<-done
-		_ = conn.CloseNow()
-	}))
-	defer wsServer.Close()
-	defer close(done)
-
-	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
-	clientConn, _, err := websocket.Dial(context.Background(), wsURL, nil)
-	r.NoError(err)
-	defer func() { _ = clientConn.CloseNow() }()
-	serverConn := <-accepted
-
-	ackCh := make(chan connectproto.ConnectMessage, 1)
-	errCh := make(chan error, 1)
-	go func() {
-		var ack connectproto.ConnectMessage
-		errCh <- wsproto.Read(context.Background(), serverConn, &ack)
-		ackCh <- ack
-	}()
-
-	requestPayload, err := json.Marshal(sdkrequest.Request{
-		Event: []byte(`{"name":"one"}`),
-		CallCtx: sdkrequest.CallCtx{
-			RunID:  "run-id",
-			UseAPI: true,
-		},
-	})
-	r.NoError(err)
-	msgPayload, err := proto.Marshal(&connectproto.GatewayExecutorRequestData{
-		RequestId:      "request-id",
-		AppName:        "app",
-		FunctionSlug:   "fn",
-		RequestPayload: requestPayload,
-		LeaseId:        "lease-id",
-	})
-	r.NoError(err)
-
-	invoker := &captureInvoker{}
-	apiClient := newWorkerApiClient(apiServer.URL, nil)
-	h := &connectHandler{
-		opts: Opts{
-			APIBaseURL:               apiServer.URL,
-			HashedSigningKey:         []byte("primary"),
-			HashedSigningKeyFallback: []byte("fallback"),
-			SDKLanguage:              "go",
-			SDKVersion:               "test",
-		},
-		logger:    slog.New(slog.DiscardHandler),
-		apiClient: apiClient,
-		invokers: map[string]FunctionInvoker{
-			"app": invoker,
-		},
-		workerPool: &workerPool{
-			inProgressLeases:     map[string]string{},
-			inProgressLeasesLock: sync.Mutex{},
-		},
-	}
-	preparedConn := &connection{
-		ws:                  clientConn,
-		extendLeaseInterval: time.Hour,
-	}
-	activateTestConnection(t, preparedConn)
-
-	resp, err := h.connectInvoke(context.Background(), preparedConn, &connectproto.ConnectMessage{
-		Payload: msgPayload,
-	})
-	r.NoError(err)
-	r.Equal(connectproto.SDKResponseStatus_DONE, resp.Status)
-	r.EqualValues(2, apiCalls.Load())
-	r.Len(invoker.request.Events, 2)
-	assert.JSONEq(t, `{"name":"two"}`, string(invoker.request.Events[1]))
-	r.Contains(invoker.request.Steps, "step-id")
-	assert.JSONEq(t, `{"value":true}`, string(invoker.request.Steps["step-id"]))
-
-	r.NoError(<-errCh)
-	r.Equal(connectproto.GatewayMessageType_WORKER_REQUEST_ACK, (<-ackCh).Kind)
 }
 
 func TestMessageReadLimit(t *testing.T) {
@@ -1004,7 +819,7 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 	defer func() { _ = clientConn.CloseNow() }()
 
 	apiClient := newWorkerApiClient("", nil)
-	invoker := &blockingTestInvoker{
+	invoker := &blockingTestHandler{
 		release: invokerRelease,
 	}
 	logger := slog.New(slog.DiscardHandler)
@@ -1013,9 +828,7 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 			SDKLanguage: "go",
 			SDKVersion:  "test",
 		},
-		invokers: map[string]FunctionInvoker{
-			"test-app": invoker,
-		},
+		handler:       invoker,
 		logger:        logger,
 		messageBuffer: newMessageBuffer(apiClient, logger),
 		workerPool: &workerPool{
@@ -1024,7 +837,7 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 		},
 	}
 
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		AccountId:      "account-id",
 		EnvId:          "env-id",
@@ -1033,7 +846,7 @@ func TestHandleInvokeMessageBuffersReplyWhenConnectionClosesAfterAck(t *testing.
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	preparedConn := &connection{
 		ws:                  clientConn,
@@ -1213,7 +1026,7 @@ func TestHandleInvokeMessageReturnsErrorWhenConnectionClosesBeforeAck(t *testing
 	apiClient := newWorkerApiClient("", nil)
 	invokerRelease := make(chan struct{})
 	close(invokerRelease)
-	invoker := &blockingTestInvoker{
+	invoker := &blockingTestHandler{
 		release: invokerRelease,
 	}
 	logger := slog.New(slog.NewTextHandler(&logOutput, nil))
@@ -1222,9 +1035,7 @@ func TestHandleInvokeMessageReturnsErrorWhenConnectionClosesBeforeAck(t *testing
 			SDKLanguage: "go",
 			SDKVersion:  "test",
 		},
-		invokers: map[string]FunctionInvoker{
-			"test-app": invoker,
-		},
+		handler:       invoker,
 		logger:        logger,
 		messageBuffer: newMessageBuffer(apiClient, logger),
 		workerPool: &workerPool{
@@ -1233,7 +1044,7 @@ func TestHandleInvokeMessageReturnsErrorWhenConnectionClosesBeforeAck(t *testing
 		},
 	}
 
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		AccountId:      "account-id",
 		EnvId:          "env-id",
@@ -1242,7 +1053,7 @@ func TestHandleInvokeMessageReturnsErrorWhenConnectionClosesBeforeAck(t *testing
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	preparedConn := &connection{
 		ws:                  clientConn,
@@ -1267,18 +1078,16 @@ func TestHandleInvokeMessageSkipsQueuedRequestForRetiredConnection(t *testing.T)
 	r := require.New(t)
 
 	apiClient := newWorkerApiClient("", nil)
-	invoker := &blockingTestInvoker{
+	invoker := &blockingTestHandler{
 		release: make(chan struct{}),
 	}
 	h := &connectHandler{
-		invokers: map[string]FunctionInvoker{
-			"test-app": invoker,
-		},
+		handler:       invoker,
 		logger:        slog.Default(),
 		messageBuffer: newMessageBuffer(apiClient, slog.Default()),
 	}
 
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		EnvId:          "env-id",
 		AppId:          "app-id",
@@ -1286,7 +1095,7 @@ func TestHandleInvokeMessageSkipsQueuedRequestForRetiredConnection(t *testing.T)
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	preparedConn := &connection{
 		connectionId:        "old-connection",
@@ -1329,7 +1138,7 @@ func TestHandleInvokeMessageRetiresConnectionAfterAckWriteFailure(t *testing.T) 
 	apiClient := newWorkerApiClient("", nil)
 	invokerRelease := make(chan struct{})
 	close(invokerRelease)
-	invoker := &blockingTestInvoker{
+	invoker := &blockingTestHandler{
 		release: invokerRelease,
 	}
 	logger := slog.New(slog.DiscardHandler)
@@ -1338,9 +1147,7 @@ func TestHandleInvokeMessageRetiresConnectionAfterAckWriteFailure(t *testing.T) 
 			SDKLanguage: "go",
 			SDKVersion:  "test",
 		},
-		invokers: map[string]FunctionInvoker{
-			"test-app": invoker,
-		},
+		handler:       invoker,
 		logger:        logger,
 		messageBuffer: newMessageBuffer(apiClient, logger),
 		workerPool: &workerPool{
@@ -1356,7 +1163,7 @@ func TestHandleInvokeMessageRetiresConnectionAfterAckWriteFailure(t *testing.T) 
 	}
 	activateTestConnection(t, preparedConn)
 
-	firstMsg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	firstMsg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id-1",
 		AccountId:      "account-id",
 		EnvId:          "env-id",
@@ -1365,7 +1172,7 @@ func TestHandleInvokeMessageRetiresConnectionAfterAckWriteFailure(t *testing.T) 
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	err = h.handleInvokeMessage(context.Background(), preparedConn, firstMsg)
 	r.Error(err)
@@ -1373,7 +1180,7 @@ func TestHandleInvokeMessageRetiresConnectionAfterAckWriteFailure(t *testing.T) 
 	r.Equal(connPhaseRetired, preparedConn.phase())
 	r.False(invoker.called.Load())
 
-	secondMsg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	secondMsg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id-2",
 		AccountId:      "account-id",
 		EnvId:          "env-id",
@@ -1382,7 +1189,7 @@ func TestHandleInvokeMessageRetiresConnectionAfterAckWriteFailure(t *testing.T) 
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	err = h.handleInvokeMessage(context.Background(), preparedConn, secondMsg)
 	r.NoError(err)
@@ -1489,33 +1296,6 @@ func TestConnectNoDeadlockWhenContextCancelledDuringInitialConnection(t *testing
 	}
 }
 
-type blockingTestInvoker struct {
-	release <-chan struct{}
-	called  atomic.Bool
-}
-
-func (b *blockingTestInvoker) InvokeFunction(ctx context.Context, slug string, stepId *string, request sdkrequest.Request) (any, []sdkrequest.GeneratorOpcode, error) {
-	b.called.Store(true)
-	select {
-	case <-ctx.Done():
-		return nil, nil, ctx.Err()
-	case <-b.release:
-		return map[string]string{"ok": "true"}, nil, nil
-	}
-}
-
-func mustExecutorRequestMessage(t *testing.T, data *connectproto.GatewayExecutorRequestData) *connectproto.ConnectMessage {
-	t.Helper()
-
-	payload, err := proto.Marshal(data)
-	require.NoError(t, err)
-
-	return &connectproto.ConnectMessage{
-		Kind:    connectproto.GatewayMessageType_GATEWAY_EXECUTOR_REQUEST,
-		Payload: payload,
-	}
-}
-
 func mustJSON(t *testing.T, v any) []byte {
 	t.Helper()
 
@@ -1577,16 +1357,24 @@ func waitForLogSignal(t *testing.T, seen <-chan struct{}, pattern string) {
 	}
 }
 
-type captureInvoker struct {
-	request sdkrequest.Request
+// blockingTestHandler admits every request and blocks in Serve until release
+// is closed.
+type blockingTestHandler struct {
+	release <-chan struct{}
+	called  atomic.Bool
 }
 
-func (c *captureInvoker) InvokeFunction(
-	ctx context.Context,
-	slug string,
-	stepId *string,
-	request sdkrequest.Request,
-) (any, []sdkrequest.GeneratorOpcode, error) {
-	c.request = request
-	return map[string]bool{"ok": true}, nil, nil
+func (b *blockingTestHandler) Admit(*connectproto.GatewayExecutorRequestData) error {
+	return nil
 }
+
+func (b *blockingTestHandler) Serve(context.Context, *connectproto.GatewayExecutorRequestData) (Response, error) {
+	b.called.Store(true)
+	<-b.release
+	return Response{
+		Status: connectproto.SDKResponseStatus_DONE,
+		Body:   []byte(`{"ok":"true"}`),
+	}, nil
+}
+
+func (b *blockingTestHandler) Done(*connectproto.GatewayExecutorRequestData) {}

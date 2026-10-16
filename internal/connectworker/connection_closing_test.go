@@ -1,4 +1,4 @@
-package connect
+package connectworker
 
 import (
 	"bytes"
@@ -110,7 +110,7 @@ func TestHandleInvokeMessageSkipsAckDuringClosing(t *testing.T) {
 	r := require.New(t)
 	var logOutput bytes.Buffer
 
-	invoker := &blockingTestInvoker{
+	invoker := &blockingTestHandler{
 		release: make(chan struct{}),
 	}
 	logger := slog.New(slog.NewTextHandler(&logOutput, &slog.HandlerOptions{
@@ -121,9 +121,7 @@ func TestHandleInvokeMessageSkipsAckDuringClosing(t *testing.T) {
 			SDKLanguage: "go",
 			SDKVersion:  "test",
 		},
-		invokers: map[string]FunctionInvoker{
-			"test-app": invoker,
-		},
+		handler:       invoker,
 		logger:        logger,
 		messageBuffer: newMessageBuffer(newWorkerApiClient("", nil), logger),
 	}
@@ -135,7 +133,7 @@ func TestHandleInvokeMessageSkipsAckDuringClosing(t *testing.T) {
 
 	// Closing rejects new ownership claims, so queued pre-ACK work should skip
 	// without invoking the user function.
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		EnvId:          "env-id",
 		AppId:          "app-id",
@@ -143,7 +141,7 @@ func TestHandleInvokeMessageSkipsAckDuringClosing(t *testing.T) {
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	err := h.handleInvokeMessage(context.Background(), preparedConn, msg)
 	r.NoError(err)
@@ -185,7 +183,7 @@ func TestHandleInvokeMessageAttemptsReplyDuringClosingForAckedWork(t *testing.T)
 	defer func() { _ = clientConn.CloseNow() }()
 
 	release := make(chan struct{})
-	invoker := &blockingTestInvoker{
+	invoker := &blockingTestHandler{
 		release: release,
 	}
 	logger := slog.New(slog.DiscardHandler)
@@ -194,9 +192,7 @@ func TestHandleInvokeMessageAttemptsReplyDuringClosingForAckedWork(t *testing.T)
 			SDKLanguage: "go",
 			SDKVersion:  "test",
 		},
-		invokers: map[string]FunctionInvoker{
-			"test-app": invoker,
-		},
+		handler:       invoker,
 		logger:        logger,
 		messageBuffer: newMessageBuffer(newWorkerApiClient("", nil), logger),
 		workerPool: &workerPool{
@@ -212,7 +208,7 @@ func TestHandleInvokeMessageAttemptsReplyDuringClosingForAckedWork(t *testing.T)
 	}
 	activateTestConnection(t, preparedConn)
 
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		EnvId:          "env-id",
 		AppId:          "app-id",
@@ -220,7 +216,7 @@ func TestHandleInvokeMessageAttemptsReplyDuringClosingForAckedWork(t *testing.T)
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	done := make(chan error, 1)
 	go func() {
@@ -284,7 +280,7 @@ func TestHandleInvokeMessageBuffersClosingReplyWriteFailure(t *testing.T) {
 	defer func() { _ = clientConn.CloseNow() }()
 
 	release := make(chan struct{})
-	invoker := &blockingTestInvoker{
+	invoker := &blockingTestHandler{
 		release: release,
 	}
 	logger := slog.New(slog.DiscardHandler)
@@ -293,9 +289,7 @@ func TestHandleInvokeMessageBuffersClosingReplyWriteFailure(t *testing.T) {
 			SDKLanguage: "go",
 			SDKVersion:  "test",
 		},
-		invokers: map[string]FunctionInvoker{
-			"test-app": invoker,
-		},
+		handler:       invoker,
 		logger:        logger,
 		messageBuffer: newMessageBuffer(newWorkerApiClient("", nil), logger),
 		workerPool: &workerPool{
@@ -311,7 +305,7 @@ func TestHandleInvokeMessageBuffersClosingReplyWriteFailure(t *testing.T) {
 	}
 	activateTestConnection(t, preparedConn)
 
-	msg := mustExecutorRequestMessage(t, &connectproto.GatewayExecutorRequestData{
+	msg := &connectproto.GatewayExecutorRequestData{
 		RequestId:      "request-id",
 		EnvId:          "env-id",
 		AppId:          "app-id",
@@ -319,7 +313,7 @@ func TestHandleInvokeMessageBuffersClosingReplyWriteFailure(t *testing.T) {
 		FunctionSlug:   "test-fn",
 		RequestPayload: mustJSON(t, sdkrequest.Request{}),
 		LeaseId:        "lease-id",
-	})
+	}
 
 	done := make(chan error, 1)
 	go func() {
