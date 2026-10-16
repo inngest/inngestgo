@@ -130,8 +130,11 @@ func connectApp(ctx context.Context, cfg Config, app *syncedApp, keys signingKey
 	}
 
 	// the worker outlives ctx, so canceling ctx drains it through Close and
-	// does not cut off a reconnect.
-	return connectworker.Connect(context.WithoutCancel(ctx), connectworker.Opts{
+	// does not cut off a reconnect.  canceling ctx before the first connection
+	// opens stops the attempt, so Run does not wait for the 30s connect timeout.
+	workerCtx, cancelWorker := context.WithCancel(context.WithoutCancel(ctx))
+	stopCancel := context.AfterFunc(ctx, cancelWorker)
+	conn, err := connectworker.Connect(workerCtx, connectworker.Opts{
 		Env: env,
 		Apps: []*connectproto.AppConfiguration{{
 			AppName:    app.ID,
@@ -156,6 +159,15 @@ func connectApp(ctx context.Context, cfg Config, app *syncedApp, keys signingKey
 			logger:    cfg.Logger,
 		},
 	}, cfg.Logger)
+	if !stopCancel() {
+		// ctx ended while the worker connected.  the worker context is
+		// canceled, so a reconnect fails.  Close stops the worker.
+		if conn != nil {
+			_ = conn.Close()
+		}
+		return nil, fmt.Errorf("canceled while connecting: %w", ctx.Err())
+	}
+	return conn, err
 }
 
 // waitForExit blocks until ctx ends, the worker is idle for the idle timeout,

@@ -3,6 +3,7 @@ package serverless
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -70,6 +71,30 @@ func TestMapResponse(t *testing.T) {
 				Body:           []byte(`[{"op":"Step"}]`),
 				SDKVersion:     "js:v3.40.0",
 				RequestVersion: 1,
+			},
+		},
+		{
+			name:   "201 Go stream keeps a string result",
+			status: 201,
+			header: newHeader(headerSDK, "go:v0.20.0"),
+			body:   `{"status":200,"body":"true","headers":null,"noRetry":false,"retryAt":null}`,
+			want: connectworker.Response{
+				Status:     connectproto.SDKResponseStatus_DONE,
+				Body:       []byte(`"true"`),
+				SDKVersion: "go:v0.20.0",
+			},
+		},
+		{
+			name:   "201 Go stream carries retry settings",
+			status: 201,
+			header: newHeader(headerSDK, "go:v0.20.0"),
+			body:   `{"status":500,"body":"boom","headers":null,"noRetry":true,"retryAt":"2026-10-16T00:00:00Z"}`,
+			want: connectworker.Response{
+				Status:     connectproto.SDKResponseStatus_ERROR,
+				Body:       []byte(`"boom"`),
+				SDKVersion: "go:v0.20.0",
+				NoRetry:    true,
+				RetryAfter: &retryAfter,
 			},
 		},
 		{
@@ -212,6 +237,14 @@ func TestForwarderServeAppUnreachable(t *testing.T) {
 // reads the opcodes from each 206 and sends the step results back in the next
 // request, until the function returns 200.
 func TestForwarderRunsGoFunction(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		t.Run(fmt.Sprintf("streaming=%t", streaming), func(t *testing.T) {
+			testForwarderRunsGoFunction(t, streaming)
+		})
+	}
+}
+
+func testForwarderRunsGoFunction(t *testing.T, streaming bool) {
 	tests := []struct {
 		name       string
 		slug       string
@@ -238,7 +271,7 @@ func TestForwarderRunsGoFunction(t *testing.T) {
 		},
 	}
 
-	h, err := newGoApp()
+	h, err := newGoAppWith(streaming)
 	require.NoError(t, err)
 	server := httptest.NewServer(h)
 	defer server.Close()

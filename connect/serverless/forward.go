@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
+	"time"
 
 	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
 	"github.com/inngest/inngestgo/internal/connectworker"
@@ -127,12 +129,15 @@ func (f *forwarder) newRequest(ctx context.Context, req *connectproto.GatewayExe
 }
 
 // streamResponse is the body of a 201 reply.  an app that streams its reply
-// sends 201 at once and puts the real status, headers, and body in here.
+// sends 201 at once and puts the real status, headers, and body in here.  the
+// Go SDK sends NoRetry and RetryAt here in place of the retry headers.
 type streamResponse struct {
 	Error      *string           `json:"error"`
 	StatusCode int               `json:"status"`
 	Body       json.RawMessage   `json:"body"`
 	Headers    map[string]string `json:"headers"`
+	NoRetry    bool              `json:"noRetry"`
+	RetryAt    *time.Time        `json:"retryAt"`
 }
 
 // mapResponse turns the app's HTTP reply into the connect reply, as the
@@ -149,8 +154,11 @@ func mapResponse(status int, header http.Header, body []byte) connectworker.Resp
 
 		status = stream.StatusCode
 		body = stream.Body
-		// a string body can arrive JSON encoded twice.
-		if len(body) > 1 && body[0] == '"' && body[len(body)-1] == '"' {
+		// the JS SDK sends its JSON body as a string, so it arrives JSON encoded
+		// twice.  the Go SDK sends the function's value as is, and a function
+		// that returns the string "true" must not reach the executor as true.
+		isGo := strings.HasPrefix(header.Get(headerSDK), "go:")
+		if !isGo && len(body) > 1 && body[0] == '"' && body[len(body)-1] == '"' {
 			var s string
 			if err := json.Unmarshal(body, &s); err == nil {
 				body = []byte(s)
@@ -160,6 +168,12 @@ func mapResponse(status int, header http.Header, body []byte) connectworker.Resp
 		header = header.Clone()
 		for k, v := range stream.Headers {
 			header.Set(k, v)
+		}
+		if stream.NoRetry {
+			header.Set(headerNoRetry, "true")
+		}
+		if stream.RetryAt != nil {
+			header.Set(headerRetryAfter, stream.RetryAt.Format(time.RFC3339))
 		}
 	}
 

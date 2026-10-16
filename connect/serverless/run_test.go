@@ -3,6 +3,7 @@ package serverless
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -90,6 +91,34 @@ func TestRunFailsWhenAppNeverAnswers(t *testing.T) {
 	start := time.Now()
 	err := Run(context.Background(), cfg)
 	r.ErrorContains(err, "app not ready")
+	r.Less(time.Since(start), 5*time.Second)
+}
+
+func TestRunStopsConnectingWhenCanceled(t *testing.T) {
+	r := require.New(t)
+
+	h, err := newGoApp()
+	r.NoError(err)
+	app := httptest.NewServer(h)
+	defer app.Close()
+
+	// the API never answers the connect start request.
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		<-req.Context().Done()
+	}))
+	defer api.Close()
+
+	cfg := validConfig()
+	cfg.AppURL = app.URL + "/api/inngest"
+	cfg.APIBaseURL = api.URL
+	cfg.Logger = discardLogger()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(500*time.Millisecond, cancel)
+
+	start := time.Now()
+	err = Run(ctx, cfg)
+	r.Error(err)
 	r.Less(time.Since(start), 5*time.Second)
 }
 

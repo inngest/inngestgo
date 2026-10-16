@@ -26,11 +26,18 @@ const (
 // "ab".  it does not checkpoint, so each step ends the request with a 206 and
 // the test drives the next request as the executor does.
 func newGoApp() (http.Handler, error) {
+	return newGoAppWith(false)
+}
+
+// newGoAppWith is newGoApp.  with streaming, the app replies 201 at once and
+// puts the real reply in the body.
+func newGoAppWith(streaming bool) (http.Handler, error) {
 	key := testSigningKey
 	c, err := inngestgo.NewClient(inngestgo.ClientOpts{
-		AppID:      testAppID,
-		SigningKey: &key,
-		Logger:     slog.New(slog.DiscardHandler),
+		AppID:        testAppID,
+		SigningKey:   &key,
+		Logger:       slog.New(slog.DiscardHandler),
+		UseStreaming: streaming,
 	})
 	if err != nil {
 		return nil, err
