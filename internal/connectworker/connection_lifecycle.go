@@ -91,6 +91,12 @@ func (c *connection) phase() connPhase {
 	return c.lifecycle.phase
 }
 
+// closedForWrites reports whether the connection is Retired or Closed.
+func (c *connection) closedForWrites() bool {
+	p := c.phase()
+	return p == connPhaseRetired || p == connPhaseClosed
+}
+
 func (c *connection) markActive(reason string, attrs ...any) error {
 	return c.transition(connPhaseActive, reason, attrs...)
 }
