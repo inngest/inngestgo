@@ -50,6 +50,11 @@ func Run(ctx context.Context, cfg Config) error {
 	adm := newAdmission(cfg.Multiplex, cfg.MaxRequests, deadline)
 	conn, err := connectApp(ctx, cfg, synced, keys, adm)
 	if err != nil {
+		// ctx can end after the gateway connects and the worker accepts a
+		// request.  without this wait the caller stops the app while that
+		// request runs, and the queue retries it.
+		adm.drain()
+		waitInFlight(ctx, adm, cfg.DrainTimeout, maxRequestDuration)
 		return err
 	}
 
