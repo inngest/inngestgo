@@ -717,6 +717,7 @@ func (h *handler) outOfBandSync(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("error performing registration request: %w", err)
 	}
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode > 299 {
 		body := map[string]any{}
 		byt, _ := io.ReadAll(resp.Body)
