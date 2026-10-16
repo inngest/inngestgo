@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/inngest/inngest/pkg/connect/wsproto"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -995,9 +996,85 @@ func TestHandleConnectionGracefulShutdownPausesDrainsAndFlushes(t *testing.T) {
 
 	select {
 	case <-pauseSeen:
-	default:
-		t.Log("worker pause write was attempted but not observed by the server")
+	case <-time.After(time.Second):
+		t.Fatal("server did not receive WORKER_PAUSE")
 	}
+}
+
+// TestHandleConnectionGracefulShutdownReadsReplyAcks checks that the read
+// loop keeps running after shutdown starts.  a reply ACK that arrives while
+// in-flight work drains clears the pending reply, so it is not sent again
+// through the API.
+func TestHandleConnectionGracefulShutdownReadsReplyAcks(t *testing.T) {
+	r := require.New(t)
+
+	clientConn, serverConn := newTestWebsocketPair(t)
+	logger := slog.New(slog.DiscardHandler)
+	h := &connectHandler{
+		logger:        logger,
+		messageBuffer: newMessageBuffer(newWorkerApiClient("", nil), logger),
+		workerPool: &workerPool{
+			inProgressLeases: map[string]string{},
+		},
+	}
+	// one request is still in flight when shutdown starts.
+	h.workerPool.inProgress.Add(1)
+	h.messageBuffer.addPending(context.Background(), &connectproto.SDKResponse{RequestId: "request-id"}, time.Hour)
+
+	preparedConn := &connection{
+		ws:                  clientConn,
+		connectionId:        "connection-id",
+		heartbeatInterval:   time.Hour,
+		extendLeaseInterval: time.Hour,
+	}
+	activateTestConnection(t, preparedConn)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- h.handleConnection(ctx, connectionEstablishData{}, preparedConn)
+	}()
+	cancel()
+
+	readCtx, cancelRead := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelRead()
+	var pause connectproto.ConnectMessage
+	r.NoError(wsReadProto(readCtx, serverConn, &pause))
+	r.Equal(connectproto.GatewayMessageType_WORKER_PAUSE, pause.Kind)
+
+	ackPayload, err := proto.Marshal(&connectproto.WorkerReplyAckData{RequestId: "request-id"})
+	r.NoError(err)
+	r.NoError(wsproto.Write(readCtx, serverConn, &connectproto.ConnectMessage{
+		Kind:    connectproto.GatewayMessageType_WORKER_REPLY_ACK,
+		Payload: ackPayload,
+	}))
+
+	// keep reading like a gateway, so the websocket close handshake completes.
+	go func() {
+		for {
+			var msg connectproto.ConnectMessage
+			if wsReadProto(context.Background(), serverConn, &msg) != nil {
+				return
+			}
+		}
+	}()
+
+	r.Eventually(func() bool {
+		h.messageBuffer.lock.Lock()
+		defer h.messageBuffer.lock.Unlock()
+		return len(h.messageBuffer.pendingAck) == 0
+	}, 2*time.Second, 10*time.Millisecond, "reply ACK was not handled during shutdown")
+
+	h.workerPool.Done()
+	select {
+	case err := <-done:
+		r.NoError(err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("handleConnection did not return after the pool drained")
+	}
+	r.Equal(connPhaseClosed, preparedConn.phase())
+	r.False(h.messageBuffer.hasMessages())
 }
 
 func TestHandleInvokeMessageReturnsErrorWhenConnectionClosesBeforeAck(t *testing.T) {
@@ -1378,3 +1455,79 @@ func (b *blockingTestHandler) Serve(context.Context, *connectproto.GatewayExecut
 }
 
 func (b *blockingTestHandler) Done(*connectproto.GatewayExecutorRequestData) {}
+
+// TestHandleConnectionGracefulShutdownKeepsHeartbeats checks that worker
+// heartbeats continue after WORKER_PAUSE.  the gateway closes a connection
+// after 5 missed heartbeats, which would cut off requests that still run.
+func TestHandleConnectionGracefulShutdownKeepsHeartbeats(t *testing.T) {
+	r := require.New(t)
+
+	clientConn, serverConn := newTestWebsocketPair(t)
+	logger := slog.New(slog.DiscardHandler)
+	h := &connectHandler{
+		logger:        logger,
+		messageBuffer: newMessageBuffer(newWorkerApiClient("", nil), logger),
+		workerPool: &workerPool{
+			inProgressLeases: map[string]string{},
+		},
+	}
+	// one request is still in flight when shutdown starts.
+	h.workerPool.inProgress.Add(1)
+
+	preparedConn := &connection{
+		ws:                  clientConn,
+		connectionId:        "connection-id",
+		heartbeatInterval:   20 * time.Millisecond,
+		extendLeaseInterval: time.Hour,
+	}
+	activateTestConnection(t, preparedConn)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- h.handleConnection(ctx, connectionEstablishData{}, preparedConn)
+	}()
+	cancel()
+
+	// read like a gateway, and count the heartbeats that arrive after the
+	// pause.
+	heartbeatsAfterPause := make(chan struct{}, 16)
+	go func() {
+		paused := false
+		for {
+			var msg connectproto.ConnectMessage
+			if wsReadProto(context.Background(), serverConn, &msg) != nil {
+				return
+			}
+			switch msg.Kind {
+			case connectproto.GatewayMessageType_WORKER_PAUSE:
+				paused = true
+			case connectproto.GatewayMessageType_WORKER_HEARTBEAT:
+				if paused {
+					select {
+					case heartbeatsAfterPause <- struct{}{}:
+					default:
+					}
+				}
+			}
+		}
+	}()
+
+	for i := 0; i < 3; i++ {
+		select {
+		case <-heartbeatsAfterPause:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("got %d heartbeats after WORKER_PAUSE, want 3", i)
+		}
+	}
+	r.Equal(connPhaseClosing, preparedConn.phase())
+
+	h.workerPool.Done()
+	select {
+	case err := <-done:
+		r.NoError(err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("handleConnection did not return after the pool drained")
+	}
+}
