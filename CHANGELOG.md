@@ -1,8 +1,19 @@
+## [v0.16.6] - 2026-10-17
+
+### 🚀 Features
+
+- *(compute)* Add api for sandboxes (#268)
+- *(functions)* Default to checkpointing after every step (#270)
+
+### 🚜 Refactor
+
+- *(connect)* Add new RequestHandler iface for inbound fn reqs (#271)
 ## [v0.16.5] - 2026-10-02
 
 ### ⚙️ Miscellaneous Tasks
 
 - *(stephttp)* Remove err from start
+- *(release)* V0.16.5 (#266)
 ## [v0.16.4] - 2026-10-02
 
 ### 🚀 Features
