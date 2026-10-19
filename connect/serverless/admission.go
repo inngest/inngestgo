@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// drainingBit is set in admission.state once the daemon stops taking
+// drainingBit is set in admission.state once the worker stops taking
 // requests.  the low bits keep counting the requests still in flight.
 const drainingBit = uint64(1) << 63
 
@@ -131,7 +131,7 @@ func (a *admission) draining() bool {
 	return a.state.Load()&drainingBit != 0
 }
 
-// idleFor returns how long the daemon has had no request in flight.  it is
+// idleFor returns how long the worker has had no request in flight.  it is
 // zero while a request runs.
 func (a *admission) idleFor(now time.Time) time.Duration {
 	if a.inFlight() > 0 {

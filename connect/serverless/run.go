@@ -1,9 +1,9 @@
 // Package serverless connects a running serve() app to Inngest as a connect
-// worker.  it reads the app's function configs with an in-band sync, connects
-// to the gateway, and forwards each request to the app over HTTP.  it stops
-// after an idle period.
+// worker.  it reads the app's function configs with an in-band sync request,
+// connects to the gateway, which registers the functions, and forwards each
+// request to the app over HTTP.  it stops after an idle period.
 //
-// Run, Sync, and Config are the package's whole API.  the caller starts the
+// Run, Introspect, and Config are the package's whole API.  the caller starts the
 // app, finds its address, and stops it after Run returns.
 package serverless
 
@@ -24,8 +24,8 @@ import (
 // the idle timeout, after MaxLifetime or MaxRequests once in-flight requests
 // finish or 2h pass, or once ctx ends and in-flight requests finish or
 // DrainTimeout passes.  the caller cancels ctx on SIGTERM and when the app exits.  Run
-// returns an error when the app does not answer its sync or the worker cannot
-// connect.
+// returns an error when the app does not return its function configs or the
+// worker cannot connect.
 func Run(ctx context.Context, cfg Config) error {
 	cfg = cfg.withDefaults()
 	if err := cfg.validate(); err != nil {
@@ -33,6 +33,9 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	if cfg.APIBaseURL == "" {
 		return fmt.Errorf("missing API base URL")
+	}
+	if cfg.InstanceID == "" {
+		return fmt.Errorf("missing instance ID")
 	}
 	l := cfg.Logger
 	keys := signingKeys{primary: cfg.SigningKey, fallback: cfg.SigningKeyFallback}
@@ -42,14 +45,14 @@ func Run(ctx context.Context, cfg Config) error {
 		deadline = time.Now().Add(cfg.MaxLifetime)
 	}
 
-	synced, err := boot(ctx, cfg, keys)
+	app, err := boot(ctx, cfg, keys)
 	if err != nil {
 		return err
 	}
-	l.Info("app synced", "app_id", synced.ID, "functions", len(synced.stepURLs))
+	l.Info("read app config", "app_id", app.ID, "functions", len(app.stepURLs))
 
 	adm := newAdmission(cfg.Multiplex, cfg.MaxRequests, deadline)
-	conn, err := connectApp(ctx, cfg, synced, keys, adm)
+	conn, err := connectApp(ctx, cfg, app, keys, adm)
 	if err != nil {
 		// ctx can end after the gateway connects and the worker accepts a
 		// request.  without this wait the caller stops the app while that
@@ -73,37 +76,38 @@ func Run(ctx context.Context, cfg Config) error {
 	return nil
 }
 
-// Sync waits for the app at cfg.AppURL, syncs it, and returns its function
-// configs as JSON, with each step URL changed to the connect host.  the JSON
+// Introspect waits for the app at cfg.AppURL, reads its function configs, and
+// returns them as JSON, with each step URL changed to the connect host.  it
+// does not register the app with Inngest.  the JSON
 // object has app_id, app_version, sdk_language, sdk_version, functions, and
 // feature_observations when the app sends them.
-func Sync(ctx context.Context, cfg Config) (json.RawMessage, error) {
+func Introspect(ctx context.Context, cfg Config) (json.RawMessage, error) {
 	cfg = cfg.withDefaults()
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
 
-	synced, err := boot(ctx, cfg, signingKeys{primary: cfg.SigningKey, fallback: cfg.SigningKeyFallback})
+	app, err := boot(ctx, cfg, signingKeys{primary: cfg.SigningKey, fallback: cfg.SigningKeyFallback})
 	if err != nil {
 		return nil, err
 	}
 	var observations json.RawMessage
-	if synced.FeatureObservations != nil {
-		if observations, err = protojson.Marshal(synced.FeatureObservations); err != nil {
+	if app.FeatureObservations != nil {
+		if observations, err = protojson.Marshal(app.FeatureObservations); err != nil {
 			return nil, err
 		}
 	}
 	return json.Marshal(introspection{
-		AppID:               synced.ID,
-		AppVersion:          synced.Version,
-		SDKLanguage:         synced.SDK.Language,
-		SDKVersion:          synced.SDK.Version,
-		Functions:           synced.Functions,
+		AppID:               app.ID,
+		AppVersion:          app.Version,
+		SDKLanguage:         app.SDK.Language,
+		SDKVersion:          app.SDK.Version,
+		Functions:           app.Functions,
 		FeatureObservations: observations,
 	})
 }
 
-// introspection is the JSON that Sync returns.
+// introspection is the JSON that Introspect returns.
 type introspection struct {
 	AppID       string          `json:"app_id"`
 	AppVersion  *string         `json:"app_version,omitempty"`
@@ -114,8 +118,8 @@ type introspection struct {
 	FeatureObservations json.RawMessage `json:"feature_observations,omitempty"`
 }
 
-// boot waits for the app to answer and then syncs it.
-func boot(ctx context.Context, cfg Config, keys signingKeys) (*syncedApp, error) {
+// boot waits for the app to answer and then reads its function configs.
+func boot(ctx context.Context, cfg Config, keys signingKeys) (*appConfig, error) {
 	bootCtx, cancel := context.WithTimeout(ctx, cfg.BootTimeout)
 	defer cancel()
 
@@ -123,26 +127,23 @@ func boot(ctx context.Context, cfg Config, keys signingKeys) (*syncedApp, error)
 	if err := waitReady(bootCtx, client, cfg.AppURL, keys); err != nil {
 		return nil, err
 	}
-	return syncApp(bootCtx, client, cfg.AppURL, keys, cfg.Dev)
+	return readAppConfig(bootCtx, client, cfg.AppURL, keys, cfg.Dev)
 }
 
-func connectApp(ctx context.Context, cfg Config, app *syncedApp, keys signingKeys, adm *admission) (connectworker.WorkerConnection, error) {
+func connectApp(ctx context.Context, cfg Config, app *appConfig, keys signingKeys, adm *admission) (connectworker.WorkerConnection, error) {
 	hashed, hashedFallback, err := keys.hashed()
 	if err != nil {
 		return nil, err
 	}
 
-	caps := app.Capability
+	caps := app.Capabilities
 	caps.Connect = types.ConnectV1
 	platform := platformName
 	maxConcurrency := int64(cfg.Multiplex)
 
-	var env, instanceID *string
+	var env *string
 	if cfg.Env != "" {
 		env = &cfg.Env
-	}
-	if cfg.InstanceID != "" {
-		instanceID = &cfg.InstanceID
 	}
 
 	// the worker outlives ctx, so canceling ctx drains it through Close and
@@ -164,7 +165,7 @@ func connectApp(ctx context.Context, cfg Config, app *syncedApp, keys signingKey
 		MaxWorkerConcurrency:     &maxConcurrency,
 		APIBaseURL:               cfg.APIBaseURL,
 		IsDev:                    cfg.Dev,
-		InstanceID:               instanceID,
+		InstanceID:               &cfg.InstanceID,
 		Platform:                 &platform,
 		SDKVersion:               app.SDK.Version,
 		SDKLanguage:              app.SDK.Language,

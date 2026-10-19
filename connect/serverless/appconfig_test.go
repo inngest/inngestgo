@@ -78,7 +78,7 @@ func TestRewriteStepURLs(t *testing.T) {
 	}
 }
 
-func TestSyncAppWithGoSDK(t *testing.T) {
+func TestReadAppConfigWithGoSDK(t *testing.T) {
 	r := require.New(t)
 
 	h, err := newGoApp()
@@ -87,7 +87,7 @@ func TestSyncAppWithGoSDK(t *testing.T) {
 	defer server.Close()
 
 	appURL := server.URL + "/api/inngest"
-	app, err := syncApp(context.Background(), server.Client(), appURL, signingKeys{primary: testSigningKey}, false)
+	app, err := readAppConfig(context.Background(), server.Client(), appURL, signingKeys{primary: testSigningKey}, false)
 	r.NoError(err)
 
 	r.Equal(testAppID, app.ID)
@@ -95,7 +95,7 @@ func TestSyncAppWithGoSDK(t *testing.T) {
 	r.Contains(app.stepURLs, testFnSlug)
 	r.Contains(app.stepURLs[testFnSlug], server.URL)
 
-	var fns []syncedFn
+	var fns []fnConfig
 	r.NoError(json.Unmarshal(app.Functions, &fns))
 	requireConnectStepURLs(t, fns)
 }
@@ -128,7 +128,7 @@ func newJSApp(observations string) http.HandlerFunc {
 	}
 }
 
-func TestSyncAppFeatureObservations(t *testing.T) {
+func TestReadAppConfigFeatureObservations(t *testing.T) {
 	tests := []struct {
 		name         string
 		observations string
@@ -165,7 +165,7 @@ func TestSyncAppFeatureObservations(t *testing.T) {
 			server := httptest.NewServer(newJSApp(tt.observations))
 			defer server.Close()
 
-			app, err := syncApp(context.Background(), server.Client(), server.URL, signingKeys{primary: testSigningKey}, true)
+			app, err := readAppConfig(context.Background(), server.Client(), server.URL, signingKeys{primary: testSigningKey}, true)
 			if tt.wantErr != "" {
 				r.ErrorContains(err, tt.wantErr)
 				return
@@ -176,7 +176,7 @@ func TestSyncAppFeatureObservations(t *testing.T) {
 	}
 }
 
-func TestSyncAppErrors(t *testing.T) {
+func TestReadAppConfigErrors(t *testing.T) {
 	unsigned := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set(headerSyncKind, syncKindInBand)
 		_, _ = w.Write([]byte(`{"app_id":"app","functions":[]}`))
@@ -228,7 +228,7 @@ func TestSyncAppErrors(t *testing.T) {
 			server := httptest.NewServer(tt.handler)
 			defer server.Close()
 
-			_, err := syncApp(context.Background(), server.Client(), server.URL, signingKeys{primary: testSigningKey}, tt.allowUnsigned)
+			_, err := readAppConfig(context.Background(), server.Client(), server.URL, signingKeys{primary: testSigningKey}, tt.allowUnsigned)
 			if tt.wantErr == "" {
 				require.NoError(t, err)
 				return

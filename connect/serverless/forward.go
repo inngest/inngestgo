@@ -19,8 +19,8 @@ import (
 )
 
 var (
-	errDraining   = errors.New("daemon is draining")
-	errAtCapacity = errors.New("daemon is at capacity")
+	errDraining   = errors.New("worker is draining")
+	errAtCapacity = errors.New("worker is at capacity")
 )
 
 // forwarder serves each executor request by posting it to the app over HTTP,

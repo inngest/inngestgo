@@ -73,9 +73,9 @@ func forkApp(t *testing.T) forkedApp {
 	}
 }
 
-// TestSyncForkedApp syncs an app that runs in its own process and binds its
-// port after Sync starts.
-func TestSyncForkedApp(t *testing.T) {
+// TestIntrospectForkedApp reads the config of an app that runs in its own
+// process and binds its port after Introspect starts.
+func TestIntrospectForkedApp(t *testing.T) {
 	r := require.New(t)
 
 	app := forkApp(t)
@@ -84,22 +84,22 @@ func TestSyncForkedApp(t *testing.T) {
 	cfg.BootTimeout = 30 * time.Second
 	cfg.Logger = discardLogger()
 
-	byt, err := Sync(context.Background(), cfg)
+	byt, err := Introspect(context.Background(), cfg)
 	r.NoError(err)
 
 	var out struct {
 		AppID     string     `json:"app_id"`
-		Functions []syncedFn `json:"functions"`
+		Functions []fnConfig `json:"functions"`
 	}
-	r.NoError(json.Unmarshal(byt, &out), "sync output: %s", byt)
+	r.NoError(json.Unmarshal(byt, &out), "introspect output: %s", byt)
 	r.Equal(testAppID, out.AppID)
 	requireConnectStepURLs(t, out.Functions)
 }
 
-// TestSyncStopsWhenAppExits checks the caller contract.  the caller cancels
-// ctx when the app process exits, and Sync returns at once instead of
+// TestIntrospectStopsWhenAppExits checks the caller contract.  the caller cancels
+// ctx when the app process exits, and Introspect returns at once instead of
 // waiting out the boot timeout.
-func TestSyncStopsWhenAppExits(t *testing.T) {
+func TestIntrospectStopsWhenAppExits(t *testing.T) {
 	r := require.New(t)
 
 	app := forkApp(t)
@@ -117,11 +117,11 @@ func TestSyncStopsWhenAppExits(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := Sync(ctx, cfg)
+		_, err := Introspect(ctx, cfg)
 		done <- err
 	}()
 
-	// the app is still waiting to bind, so Sync is polling when it dies.
+	// the app is still waiting to bind, so Introspect is polling when it dies.
 	time.Sleep(forkedAppBindDelay / 5)
 	r.NoError(app.cmd.Process.Kill())
 
@@ -129,6 +129,6 @@ func TestSyncStopsWhenAppExits(t *testing.T) {
 	case err := <-done:
 		r.ErrorContains(err, "app not ready")
 	case <-time.After(10 * time.Second):
-		t.Fatal("Sync did not return after the app exited")
+		t.Fatal("Introspect did not return after the app exited")
 	}
 }

@@ -15,8 +15,9 @@ import (
 )
 
 // TestServerlessRun serves an app through connect/serverless against the dev
-// server.  the worker syncs the app over connect, serves runs that the dev
-// server sends over the gateway, and returns once it is idle.
+// server.  the gateway registers the app's functions when the worker connects.
+// the worker serves runs that the dev server sends over the gateway, and
+// returns once it is idle.
 func TestServerlessRun(t *testing.T) {
 	r := require.New(t)
 	devEnv(t)
@@ -98,8 +99,9 @@ func TestServerlessRun(t *testing.T) {
 		t.Run(tt.fn, func(t *testing.T) {
 			r := require.New(t)
 
-			// the dev server only starts a run once the worker has synced the
-			// app, so send again until the function records a run.
+			// the dev server only starts a run once the gateway has registered
+			// the app's functions, so send again until the function records a
+			// run.
 			r.EventuallyWithT(func(ct *assert.CollectT) {
 				select {
 				case <-workerDone:

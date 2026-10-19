@@ -285,10 +285,10 @@ func TestForwarderServeAppUnreachable(t *testing.T) {
 	r.False(resp.NoRetry)
 }
 
-// TestForwarderRunsGoFunction syncs a Go serve() app and runs each function
-// to completion through the forwarder.  the test plays the executor.  it
-// reads the opcodes from each 206 and sends the step results back in the next
-// request, until the function returns 200.
+// TestForwarderRunsGoFunction reads a Go serve() app's config and runs each
+// function to completion through the forwarder.  the test plays the executor.
+// it reads the opcodes from each 206 and sends the step results back in the
+// next request, until the function returns 200.
 func TestForwarderRunsGoFunction(t *testing.T) {
 	for _, streaming := range []bool{false, true} {
 		t.Run(fmt.Sprintf("streaming=%t", streaming), func(t *testing.T) {
@@ -330,7 +330,7 @@ func testForwarderRunsGoFunction(t *testing.T, streaming bool) {
 	defer server.Close()
 
 	keys := signingKeys{primary: testSigningKey}
-	app, err := syncApp(context.Background(), server.Client(), server.URL+"/api/inngest", keys, false)
+	app, err := readAppConfig(context.Background(), server.Client(), server.URL+"/api/inngest", keys, false)
 	require.NoError(t, err)
 
 	for _, tt := range tests {

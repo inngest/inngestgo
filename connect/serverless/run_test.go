@@ -18,6 +18,7 @@ func validConfig() Config {
 		IdleTimeout: defaultIdleTimeout,
 		SigningKey:  testSigningKey,
 		APIBaseURL:  "https://api.inngest.com",
+		InstanceID:  "workload-1",
 	}
 }
 
@@ -53,7 +54,7 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
-func TestSyncReturnsRewrittenConfigs(t *testing.T) {
+func TestIntrospectReturnsRewrittenConfigs(t *testing.T) {
 	r := require.New(t)
 
 	h, err := newGoApp()
@@ -65,22 +66,22 @@ func TestSyncReturnsRewrittenConfigs(t *testing.T) {
 	cfg.AppURL = server.URL + "/api/inngest"
 	cfg.Logger = discardLogger()
 
-	byt, err := Sync(context.Background(), cfg)
+	byt, err := Introspect(context.Background(), cfg)
 	r.NoError(err)
 
 	var out struct {
 		AppID       string     `json:"app_id"`
 		SDKLanguage string     `json:"sdk_language"`
-		Functions   []syncedFn `json:"functions"`
+		Functions   []fnConfig `json:"functions"`
 	}
-	r.NoError(json.Unmarshal(byt, &out), "sync output: %s", byt)
+	r.NoError(json.Unmarshal(byt, &out), "introspect output: %s", byt)
 	r.Equal(testAppID, out.AppID)
 	r.Equal("go", out.SDKLanguage)
 	requireConnectStepURLs(t, out.Functions)
 	r.NotContains(string(byt), "feature_observations")
 }
 
-func TestSyncReturnsFeatureObservations(t *testing.T) {
+func TestIntrospectReturnsFeatureObservations(t *testing.T) {
 	r := require.New(t)
 
 	server := httptest.NewServer(newJSApp(jsFeatureObservations))
@@ -92,13 +93,13 @@ func TestSyncReturnsFeatureObservations(t *testing.T) {
 	cfg.Dev = true
 	cfg.Logger = discardLogger()
 
-	byt, err := Sync(context.Background(), cfg)
+	byt, err := Introspect(context.Background(), cfg)
 	r.NoError(err)
 
 	var out struct {
 		FeatureObservations json.RawMessage `json:"feature_observations"`
 	}
-	r.NoError(json.Unmarshal(byt, &out), "sync output: %s", byt)
+	r.NoError(json.Unmarshal(byt, &out), "introspect output: %s", byt)
 	r.JSONEq(`{
 		"aiMetadataExtraction": {
 			"readinessReason": "AI_METADATA_EXTRACTION_READINESS_REASON_READY",
@@ -148,6 +149,12 @@ func TestRunStopsConnectingWhenCanceled(t *testing.T) {
 	err = Run(ctx, cfg)
 	r.Error(err)
 	r.Less(time.Since(start), 5*time.Second)
+}
+
+func TestRunNeedsInstanceID(t *testing.T) {
+	cfg := validConfig()
+	cfg.InstanceID = ""
+	require.EqualError(t, Run(context.Background(), cfg), "missing instance ID")
 }
 
 func TestRunNeedsAPIBaseURL(t *testing.T) {

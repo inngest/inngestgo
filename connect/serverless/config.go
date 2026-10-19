@@ -26,7 +26,7 @@ const (
 	platformName = "inngest-serverless"
 )
 
-// Config holds the settings for Run and Sync.
+// Config holds the settings for Run and Introspect.
 type Config struct {
 	// AppURL is the app's serve endpoint, such as
 	// http://127.0.0.1:3000/api/inngest.  the sync request sends it to the
@@ -43,27 +43,29 @@ type Config struct {
 	// APIBaseURL is the Inngest API that the worker connects through.  Run
 	// fails without it.
 	APIBaseURL string
-	// InstanceID is a stable ID for this worker.  the gateway routes no more
-	// than Multiplex requests to workers that share it.
+	// InstanceID identifies this worker, such as its workload ID.  the
+	// gateway routes no more than Multiplex requests to all workers that
+	// share one InstanceID, so each worker needs its own.  Run fails without
+	// it.
 	InstanceID string
-	// Dev connects to the dev server.  a Go app still needs SigningKey to
-	// answer the sync.
+	// Dev marks a worker that connects to the dev server at APIBaseURL.  it
+	// allows an empty SigningKey and an unsigned config response from the
+	// app.  a Go app still needs SigningKey to return its function configs.
 	Dev bool
 
 	// Multiplex is the number of requests that run at once, 1 to 255.
 	Multiplex int
 
-	// MaxLifetime is the maximum lifetime of the function.  once this limit
-	// is reached, the worker will drain (not allowing new reqs) and wait up
-	// to 2h for all in-progress steps to finish before shutting down.
-	// defaults to 30m.
+	// MaxLifetime is the longest the worker runs, from the call to Run.  once
+	// it passes, the worker drains (admits no new requests), waits up to 2h
+	// for in-flight requests to finish, and Run returns.  defaults to 30m.
 	MaxLifetime time.Duration
-	// MaxRequests limits the maximum number of requests that the app will
-	// serve before shutting down.  the drain then waits up to 2h for
-	// in-progress steps.  0 means no limit.
+	// MaxRequests is the most requests the worker admits.  after the last
+	// one, the worker drains, waits up to 2h for in-flight requests to
+	// finish, and Run returns.  0 means no limit.
 	MaxRequests int
 
-	// BootTimeout limits the time until the app answers its sync.
+	// BootTimeout limits the time until the app returns its function configs.
 	BootTimeout time.Duration
 	// IdleTimeout is the time that the serverless function stays listening
 	// from when the last step/SDK function ran.

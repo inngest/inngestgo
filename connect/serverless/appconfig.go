@@ -37,12 +37,13 @@ const (
 	connectStepHost = "connect"
 )
 
-// syncedApp is what the daemon learns from the app's in-band sync.
-type syncedApp struct {
-	ID         string
-	Version    *string
-	SDK        sdkInfo
-	Capability types.Capabilities
+// appConfig is what the worker reads from the app's reply to the in-band sync
+// request.
+type appConfig struct {
+	ID           string
+	Version      *string
+	SDK          sdkInfo
+	Capabilities types.Capabilities
 
 	// Functions is the JSON array of function configs with each step URL
 	// changed to the connect host.
@@ -64,7 +65,7 @@ type sdkInfo struct {
 }
 
 // inBandSyncResponse holds the fields of an in-band sync response that the
-// daemon uses.  the Go and JS SDKs both send these.
+// worker uses.  the Go and JS SDKs both send these.
 type inBandSyncResponse struct {
 	AppID        string             `json:"app_id"`
 	AppVersion   *string            `json:"appVersion"`
@@ -76,12 +77,14 @@ type inBandSyncResponse struct {
 	FeatureObservations json.RawMessage `json:"featureObservations"`
 }
 
-// syncApp sends a signed in-band sync request to the app and reads its
-// function configs.  the response stays in the daemon.  if it went to the API,
-// the app would sync as an HTTP app.  the response sets the URL of each request
-// the daemon forwards, so it must carry a valid signature unless allowUnsigned
-// is set.  a JS app in dev mode does not sign it.
-func syncApp(ctx context.Context, client *http.Client, appURL string, keys signingKeys, allowUnsigned bool) (*syncedApp, error) {
+// readAppConfig sends a signed in-band sync request to the app and reads its
+// function configs.  it registers nothing.  the gateway registers the
+// functions when the worker connects.  the response stays in the worker.  if
+// it went to the API, the app would register as an HTTP app.  the response
+// sets the URL of each request the worker forwards, so it must carry a valid
+// signature unless allowUnsigned is set.  a JS app in dev mode does not sign
+// it.
+func readAppConfig(ctx context.Context, client *http.Client, appURL string, keys signingKeys, allowUnsigned bool) (*appConfig, error) {
 	body, err := json.Marshal(map[string]string{"url": appURL})
 	if err != nil {
 		return nil, err
@@ -143,11 +146,11 @@ func syncApp(ctx context.Context, client *http.Client, appURL string, keys signi
 		return nil, fmt.Errorf("could not decode feature observations: %w", err)
 	}
 
-	return &syncedApp{
+	return &appConfig{
 		ID:                  parsed.AppID,
 		Version:             parsed.AppVersion,
 		SDK:                 sdkInfo{Language: parsed.SDKLanguage, Version: parsed.SDKVersion},
-		Capability:          parsed.Capabilities,
+		Capabilities:        parsed.Capabilities,
 		Functions:           fns,
 		FeatureObservations: observations,
 		stepURLs:            stepURLs,

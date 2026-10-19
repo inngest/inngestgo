@@ -9,7 +9,7 @@ import (
 	"github.com/inngest/inngestgo/internal/signingkey"
 )
 
-// signingKeys are the plaintext signing keys.  the daemon signs each request
+// signingKeys are the plaintext signing keys.  the worker signs each request
 // it sends to the app with the primary key, and the app checks it with the
 // same key from its own env.
 type signingKeys struct {

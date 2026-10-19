@@ -86,17 +86,17 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-// syncedFn holds the parts of a synced function config that tests check.
-type syncedFn struct {
+// fnConfig holds the parts of a function config that tests check.
+type fnConfig struct {
 	ID    string `json:"id"`
 	Steps map[string]struct {
 		Runtime map[string]any `json:"runtime"`
 	} `json:"steps"`
 }
 
-// requireConnectStepURLs checks that both test functions synced with their
+// requireConnectStepURLs checks that both test functions have their
 // step URL on the connect host.
-func requireConnectStepURLs(t *testing.T, fns []syncedFn) {
+func requireConnectStepURLs(t *testing.T, fns []fnConfig) {
 	t.Helper()
 	got := map[string]any{}
 	for _, f := range fns {
