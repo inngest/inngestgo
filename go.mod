@@ -1,21 +1,21 @@
 module github.com/inngest/inngestgo
 
-go 1.25.9
+go 1.26.4
 
 require (
-	github.com/coder/websocket v1.8.12
+	github.com/coder/websocket v1.8.14
 	github.com/fatih/structs v1.1.0
 	github.com/google/uuid v1.6.0
 	github.com/gosimple/slug v1.12.0
 	github.com/gowebpki/jcs v1.0.0
-	github.com/inngest/inngest v1.19.3
+	github.com/inngest/inngest v1.46.0
 	github.com/lmittmann/tint v1.1.0
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/sashabaranov/go-openai v1.35.6
 	github.com/stretchr/testify v1.11.1
 	github.com/xhit/go-str2duration/v2 v2.1.0
-	golang.org/x/sync v0.20.0
+	golang.org/x/sync v0.21.0
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -27,9 +27,9 @@ require (
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
 	google.golang.org/grpc v1.82.1 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect

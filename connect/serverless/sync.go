@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/url"
 
+	sdkfeatureobs "github.com/inngest/inngest/proto/gen/sdk_feature_observations/v1"
 	"github.com/inngest/inngestgo/internal/types"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 const (
@@ -25,6 +27,8 @@ const (
 	headerJobID       = "x-inngest-job-id"
 	headerStepID      = "X-Inngest-Step-ID"
 	headerAccountID   = "account-id"
+	headerTraceParent = "traceparent"
+	headerTraceState  = "tracestate"
 
 	syncKindInBand = "in_band"
 
@@ -43,6 +47,11 @@ type syncedApp struct {
 	// Functions is the JSON array of function configs with each step URL
 	// changed to the connect host.
 	Functions json.RawMessage
+
+	// FeatureObservations tells the gateway which optional SDK features the
+	// app set up, such as AI metadata and extended traces.  it is nil when the
+	// app sends none.  the Go SDK sends none.
+	FeatureObservations *sdkfeatureobs.FeatureObservations
 
 	// stepURLs holds the app's own step URL for each function slug.  the
 	// forwarder posts requests for that function to it.
@@ -63,6 +72,8 @@ type inBandSyncResponse struct {
 	Functions    []json.RawMessage  `json:"functions"`
 	SDKLanguage  string             `json:"sdk_language"`
 	SDKVersion   string             `json:"sdk_version"`
+	// FeatureObservations is protobuf JSON for sdkfeatureobs.FeatureObservations.
+	FeatureObservations json.RawMessage `json:"featureObservations"`
 }
 
 // syncApp sends a signed in-band sync request to the app and reads its
@@ -127,15 +138,35 @@ func syncApp(ctx context.Context, client *http.Client, appURL string, keys signi
 	if err != nil {
 		return nil, err
 	}
+	observations, err := decodeFeatureObservations(parsed.FeatureObservations)
+	if err != nil {
+		return nil, fmt.Errorf("could not decode feature observations: %w", err)
+	}
 
 	return &syncedApp{
-		ID:         parsed.AppID,
-		Version:    parsed.AppVersion,
-		SDK:        sdkInfo{Language: parsed.SDKLanguage, Version: parsed.SDKVersion},
-		Capability: parsed.Capabilities,
-		Functions:  fns,
-		stepURLs:   stepURLs,
+		ID:                  parsed.AppID,
+		Version:             parsed.AppVersion,
+		SDK:                 sdkInfo{Language: parsed.SDKLanguage, Version: parsed.SDKVersion},
+		Capability:          parsed.Capabilities,
+		Functions:           fns,
+		FeatureObservations: observations,
+		stepURLs:            stepURLs,
 	}, nil
+}
+
+// decodeFeatureObservations reads the featureObservations object of a sync
+// response as the API does for an HTTP app.  it drops fields that the vendored
+// proto does not have, so a newer SDK does not fail the sync.
+func decodeFeatureObservations(raw json.RawMessage) (*sdkfeatureobs.FeatureObservations, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil, nil
+	}
+	observations := &sdkfeatureobs.FeatureObservations{}
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(raw, observations); err != nil {
+		return nil, err
+	}
+	return observations, nil
 }
 
 // rewriteStepURLs changes each step URL to the connect host and keeps the

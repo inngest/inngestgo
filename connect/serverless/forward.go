@@ -125,7 +125,29 @@ func (f *forwarder) newRequest(ctx context.Context, req *connectproto.GatewayExe
 	if req.JobId != "" {
 		h.Set(headerJobID, req.JobId)
 	}
+	if err := setTraceHeaders(h, req.UserTraceCtx); err != nil {
+		f.logger.Debug("could not decode user trace context", "request_id", req.RequestId, "error", err)
+	}
 	return httpReq, nil
+}
+
+// setTraceHeaders sets traceparent and tracestate from the JSON map that the
+// gateway sends as UserTraceCtx.  the HTTP executor sends the same headers.
+// without them, spans that the app makes do not attach to the run.
+func setTraceHeaders(h http.Header, userTraceCtx []byte) error {
+	if len(userTraceCtx) == 0 {
+		return nil
+	}
+	var carrier map[string]string
+	if err := json.Unmarshal(userTraceCtx, &carrier); err != nil {
+		return err
+	}
+	for _, k := range []string{headerTraceParent, headerTraceState} {
+		if v := carrier[k]; v != "" {
+			h.Set(k, v)
+		}
+	}
+	return nil
 }
 
 // streamResponse is the body of a 201 reply.  an app that streams its reply

@@ -201,6 +201,7 @@ func TestForwarderServeSendsExecutorRequest(t *testing.T) {
 		RequestPayload: []byte(`{"event":{"name":"test/echo"},"ctx":{"run_id":"run-id"}}`),
 		RunId:          "run-id",
 		JobId:          "job-id",
+		UserTraceCtx:   []byte(`{"traceparent":"00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01","tracestate":"inngest@app=app"}`),
 	})
 	r.NoError(err)
 	r.Equal(connectproto.SDKResponseStatus_DONE, resp.Status)
@@ -213,7 +214,59 @@ func TestForwarderServeSendsExecutorRequest(t *testing.T) {
 	r.Equal("request-id", got.header.Get(headerRequestID))
 	r.Equal("job-id", got.header.Get(headerJobID))
 	r.Equal("step", got.header.Get(headerStepID))
+	r.Equal("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01", got.header.Get(headerTraceParent))
+	r.Equal("inngest@app=app", got.header.Get(headerTraceState))
 	r.Equal("account-id", got.header.Get(headerAccountID))
+}
+
+func TestSetTraceHeaders(t *testing.T) {
+	const traceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+	tests := []struct {
+		name         string
+		userTraceCtx string
+		want         http.Header
+		wantErr      bool
+	}{
+		{
+			name:         "both headers",
+			userTraceCtx: `{"traceparent":"` + traceparent + `","tracestate":"inngest@app=app"}`,
+			want:         newHeader(headerTraceParent, traceparent, headerTraceState, "inngest@app=app"),
+		},
+		{
+			name:         "traceparent only",
+			userTraceCtx: `{"traceparent":"` + traceparent + `"}`,
+			want:         newHeader(headerTraceParent, traceparent),
+		},
+		{
+			name:         "other keys are not headers",
+			userTraceCtx: `{"traceparent":"` + traceparent + `","baggage":"k=v"}`,
+			want:         newHeader(headerTraceParent, traceparent),
+		},
+		{
+			name: "empty",
+			want: http.Header{},
+		},
+		{
+			name:         "bad JSON",
+			userTraceCtx: `{"traceparent":`,
+			want:         http.Header{},
+			wantErr:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := require.New(t)
+			h := http.Header{}
+			err := setTraceHeaders(h, []byte(tt.userTraceCtx))
+			if tt.wantErr {
+				r.Error(err)
+			} else {
+				r.NoError(err)
+			}
+			r.Equal(tt.want, h)
+		})
+	}
 }
 
 func TestForwarderServeAppUnreachable(t *testing.T) {

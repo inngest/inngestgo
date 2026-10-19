@@ -7,8 +7,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	sdkfeatureobs "github.com/inngest/inngest/proto/gen/sdk_feature_observations/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestRewriteStepURLs(t *testing.T) {
@@ -96,6 +98,82 @@ func TestSyncAppWithGoSDK(t *testing.T) {
 	var fns []syncedFn
 	r.NoError(json.Unmarshal(app.Functions, &fns))
 	requireConnectStepURLs(t, fns)
+}
+
+// jsFeatureObservations is the featureObservations object a JS app sends in
+// its sync response.  ts-proto writes enum names, not numbers.  futureFeature
+// is a field the vendored proto does not have.
+const jsFeatureObservations = `{
+	"aiMetadataExtraction": {
+		"readinessReason": "AI_METADATA_EXTRACTION_READINESS_REASON_READY",
+		"otelSetup": {"providerFound": true}
+	},
+	"futureFeature": {"enabled": true}
+}`
+
+// newJSApp answers the readiness GET and an in-band sync PUT as a JS app in
+// dev mode does, with an unsigned sync response that has observations.
+func newJSApp(observations string) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set(headerSDK, "js:v3.40.0")
+		if req.Method != http.MethodPut {
+			return
+		}
+		w.Header().Set(headerSyncKind, syncKindInBand)
+		body := `{"app_id":"app","sdk_language":"js","sdk_version":"3.40.0","functions":[]`
+		if observations != "" {
+			body += `,"featureObservations":` + observations
+		}
+		_, _ = w.Write([]byte(body + `}`))
+	}
+}
+
+func TestSyncAppFeatureObservations(t *testing.T) {
+	tests := []struct {
+		name         string
+		observations string
+		want         *sdkfeatureobs.FeatureObservations
+		wantErr      string
+	}{
+		{
+			name: "absent",
+		},
+		{
+			name:         "null",
+			observations: `null`,
+		},
+		{
+			name:         "JS observations drop unknown fields",
+			observations: jsFeatureObservations,
+			want: &sdkfeatureobs.FeatureObservations{
+				AiMetadataExtraction: &sdkfeatureobs.AIMetadataExtraction{
+					ReadinessReason: sdkfeatureobs.AIMetadataExtractionReadinessReason_AI_METADATA_EXTRACTION_READINESS_REASON_READY,
+					OtelSetup:       &sdkfeatureobs.OTelSetup{ProviderFound: true},
+				},
+			},
+		},
+		{
+			name:         "not an object",
+			observations: `"ready"`,
+			wantErr:      "could not decode feature observations",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := require.New(t)
+			server := httptest.NewServer(newJSApp(tt.observations))
+			defer server.Close()
+
+			app, err := syncApp(context.Background(), server.Client(), server.URL, signingKeys{primary: testSigningKey}, true)
+			if tt.wantErr != "" {
+				r.ErrorContains(err, tt.wantErr)
+				return
+			}
+			r.NoError(err)
+			r.True(proto.Equal(tt.want, app.FeatureObservations), "got %v", app.FeatureObservations)
+		})
+	}
 }
 
 func TestSyncAppErrors(t *testing.T) {

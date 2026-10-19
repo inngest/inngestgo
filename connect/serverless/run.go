@@ -17,6 +17,7 @@ import (
 	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
 	"github.com/inngest/inngestgo/internal/connectworker"
 	"github.com/inngest/inngestgo/internal/types"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // Run serves the app at cfg.AppURL as a connect worker.  it returns nil after
@@ -74,7 +75,8 @@ func Run(ctx context.Context, cfg Config) error {
 
 // Sync waits for the app at cfg.AppURL, syncs it, and returns its function
 // configs as JSON, with each step URL changed to the connect host.  the JSON
-// object has app_id, app_version, sdk_language, sdk_version, and functions.
+// object has app_id, app_version, sdk_language, sdk_version, functions, and
+// feature_observations when the app sends them.
 func Sync(ctx context.Context, cfg Config) (json.RawMessage, error) {
 	cfg = cfg.withDefaults()
 	if err := cfg.validate(); err != nil {
@@ -85,12 +87,19 @@ func Sync(ctx context.Context, cfg Config) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
+	var observations json.RawMessage
+	if synced.FeatureObservations != nil {
+		if observations, err = protojson.Marshal(synced.FeatureObservations); err != nil {
+			return nil, err
+		}
+	}
 	return json.Marshal(introspection{
-		AppID:       synced.ID,
-		AppVersion:  synced.Version,
-		SDKLanguage: synced.SDK.Language,
-		SDKVersion:  synced.SDK.Version,
-		Functions:   synced.Functions,
+		AppID:               synced.ID,
+		AppVersion:          synced.Version,
+		SDKLanguage:         synced.SDK.Language,
+		SDKVersion:          synced.SDK.Version,
+		Functions:           synced.Functions,
+		FeatureObservations: observations,
 	})
 }
 
@@ -101,6 +110,8 @@ type introspection struct {
 	SDKLanguage string          `json:"sdk_language"`
 	SDKVersion  string          `json:"sdk_version"`
 	Functions   json.RawMessage `json:"functions"`
+	// FeatureObservations is protobuf JSON for sdkfeatureobs.FeatureObservations.
+	FeatureObservations json.RawMessage `json:"feature_observations,omitempty"`
 }
 
 // boot waits for the app to answer and then syncs it.
@@ -142,9 +153,10 @@ func connectApp(ctx context.Context, cfg Config, app *syncedApp, keys signingKey
 	conn, err := connectworker.Connect(workerCtx, connectworker.Opts{
 		Env: env,
 		Apps: []*connectproto.AppConfiguration{{
-			AppName:    app.ID,
-			AppVersion: app.Version,
-			Functions:  app.Functions,
+			AppName:             app.ID,
+			AppVersion:          app.Version,
+			Functions:           app.Functions,
+			FeatureObservations: app.FeatureObservations,
 		}},
 		Capabilities:             caps,
 		HashedSigningKey:         hashed,

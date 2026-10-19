@@ -77,6 +77,34 @@ func TestSyncReturnsRewrittenConfigs(t *testing.T) {
 	r.Equal(testAppID, out.AppID)
 	r.Equal("go", out.SDKLanguage)
 	requireConnectStepURLs(t, out.Functions)
+	r.NotContains(string(byt), "feature_observations")
+}
+
+func TestSyncReturnsFeatureObservations(t *testing.T) {
+	r := require.New(t)
+
+	server := httptest.NewServer(newJSApp(jsFeatureObservations))
+	defer server.Close()
+
+	// a JS app in dev mode does not sign its sync response.
+	cfg := validConfig()
+	cfg.AppURL = server.URL
+	cfg.Dev = true
+	cfg.Logger = discardLogger()
+
+	byt, err := Sync(context.Background(), cfg)
+	r.NoError(err)
+
+	var out struct {
+		FeatureObservations json.RawMessage `json:"feature_observations"`
+	}
+	r.NoError(json.Unmarshal(byt, &out), "sync output: %s", byt)
+	r.JSONEq(`{
+		"aiMetadataExtraction": {
+			"readinessReason": "AI_METADATA_EXTRACTION_READINESS_REASON_READY",
+			"otelSetup": {"providerFound": true}
+		}
+	}`, string(out.FeatureObservations))
 }
 
 func TestRunFailsWhenAppNeverAnswers(t *testing.T) {
