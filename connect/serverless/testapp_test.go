@@ -2,6 +2,7 @@ package serverless
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -106,4 +107,12 @@ func requireConnectStepURLs(t *testing.T, fns []fnConfig) {
 		testFnSlug:    "ws://connect?fnId=" + testFnSlug + "&step=step",
 		testStepsSlug: "ws://connect?fnId=" + testStepsSlug + "&step=step",
 	}, got)
+}
+
+// decodeFunctions decodes a JSON array of function configs.
+func decodeFunctions(t *testing.T, raw json.RawMessage) []fnConfig {
+	t.Helper()
+	var fns []fnConfig
+	require.NoError(t, json.Unmarshal(raw, &fns), "functions: %s", raw)
+	return fns
 }

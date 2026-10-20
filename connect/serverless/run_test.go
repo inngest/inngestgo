@@ -2,7 +2,6 @@ package serverless
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -66,19 +65,13 @@ func TestIntrospectReturnsRewrittenConfigs(t *testing.T) {
 	cfg.AppURL = server.URL + "/api/inngest"
 	cfg.Logger = discardLogger()
 
-	byt, err := Introspect(context.Background(), cfg)
+	out, err := Introspect(context.Background(), cfg)
 	r.NoError(err)
 
-	var out struct {
-		AppID       string     `json:"app_id"`
-		SDKLanguage string     `json:"sdk_language"`
-		Functions   []fnConfig `json:"functions"`
-	}
-	r.NoError(json.Unmarshal(byt, &out), "introspect output: %s", byt)
 	r.Equal(testAppID, out.AppID)
 	r.Equal("go", out.SDKLanguage)
-	requireConnectStepURLs(t, out.Functions)
-	r.NotContains(string(byt), "feature_observations")
+	requireConnectStepURLs(t, decodeFunctions(t, out.Functions))
+	r.Nil(out.FeatureObservations)
 }
 
 func TestIntrospectReturnsFeatureObservations(t *testing.T) {
@@ -93,13 +86,9 @@ func TestIntrospectReturnsFeatureObservations(t *testing.T) {
 	cfg.Dev = true
 	cfg.Logger = discardLogger()
 
-	byt, err := Introspect(context.Background(), cfg)
+	out, err := Introspect(context.Background(), cfg)
 	r.NoError(err)
 
-	var out struct {
-		FeatureObservations json.RawMessage `json:"feature_observations"`
-	}
-	r.NoError(json.Unmarshal(byt, &out), "introspect output: %s", byt)
 	r.JSONEq(`{
 		"aiMetadataExtraction": {
 			"readinessReason": "AI_METADATA_EXTRACTION_READINESS_REASON_READY",

@@ -2,7 +2,6 @@ package serverless
 
 import (
 	"context"
-	"encoding/json"
 	"net"
 	"net/http"
 	"os"
@@ -84,16 +83,11 @@ func TestIntrospectForkedApp(t *testing.T) {
 	cfg.BootTimeout = 30 * time.Second
 	cfg.Logger = discardLogger()
 
-	byt, err := Introspect(context.Background(), cfg)
+	out, err := Introspect(context.Background(), cfg)
 	r.NoError(err)
 
-	var out struct {
-		AppID     string     `json:"app_id"`
-		Functions []fnConfig `json:"functions"`
-	}
-	r.NoError(json.Unmarshal(byt, &out), "introspect output: %s", byt)
 	r.Equal(testAppID, out.AppID)
-	requireConnectStepURLs(t, out.Functions)
+	requireConnectStepURLs(t, decodeFunctions(t, out.Functions))
 }
 
 // TestIntrospectStopsWhenAppExits checks the caller contract.  the caller cancels

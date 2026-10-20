@@ -3,13 +3,12 @@
 // connects to the gateway, which registers the functions, and forwards each
 // request to the app over HTTP.  it stops after an idle period.
 //
-// Run, Introspect, and Config are the package's whole API.  the caller starts the
+// Run, Introspect, Config, and Introspection are the package's whole API.  the caller starts the
 // app, finds its address, and stops it after Run returns.
 package serverless
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -17,7 +16,6 @@ import (
 	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
 	"github.com/inngest/inngestgo/internal/connectworker"
 	"github.com/inngest/inngestgo/internal/types"
-	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // Run serves the app at cfg.AppURL as a connect worker.  it returns nil after
@@ -74,48 +72,6 @@ func Run(ctx context.Context, cfg Config) error {
 		l.Warn("returning with requests in flight", "in_flight", n)
 	}
 	return nil
-}
-
-// Introspect waits for the app at cfg.AppURL, reads its function configs, and
-// returns them as JSON, with each step URL changed to the connect host.  it
-// does not register the app with Inngest.  the JSON
-// object has app_id, app_version, sdk_language, sdk_version, functions, and
-// feature_observations when the app sends them.
-func Introspect(ctx context.Context, cfg Config) (json.RawMessage, error) {
-	cfg = cfg.withDefaults()
-	if err := cfg.validate(); err != nil {
-		return nil, err
-	}
-
-	app, err := boot(ctx, cfg, signingKeys{primary: cfg.SigningKey, fallback: cfg.SigningKeyFallback})
-	if err != nil {
-		return nil, err
-	}
-	var observations json.RawMessage
-	if app.FeatureObservations != nil {
-		if observations, err = protojson.Marshal(app.FeatureObservations); err != nil {
-			return nil, err
-		}
-	}
-	return json.Marshal(introspection{
-		AppID:               app.ID,
-		AppVersion:          app.Version,
-		SDKLanguage:         app.SDK.Language,
-		SDKVersion:          app.SDK.Version,
-		Functions:           app.Functions,
-		FeatureObservations: observations,
-	})
-}
-
-// introspection is the JSON that Introspect returns.
-type introspection struct {
-	AppID       string          `json:"app_id"`
-	AppVersion  *string         `json:"app_version,omitempty"`
-	SDKLanguage string          `json:"sdk_language"`
-	SDKVersion  string          `json:"sdk_version"`
-	Functions   json.RawMessage `json:"functions"`
-	// FeatureObservations is protobuf JSON for sdkfeatureobs.FeatureObservations.
-	FeatureObservations json.RawMessage `json:"feature_observations,omitempty"`
 }
 
 // boot waits for the app to answer and then reads its function configs.
