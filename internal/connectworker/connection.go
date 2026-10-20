@@ -252,12 +252,18 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 		}
 	}
 
+	// heartbeats do not stop when ctx ends.  the gateway closes a connection
+	// after 5 missed worker heartbeats, so a graceful close that waits for
+	// long requests keeps sending them.  the loop ends once the phase
+	// forbids heartbeats, after a gateway drain or once the connection closes.
+	heartbeatCtx, stopHeartbeats := context.WithCancel(context.Background())
+	defer stopHeartbeats()
 	go func() {
 		heartbeatTicker := time.NewTicker(preparedConn.heartbeatInterval)
 		defer heartbeatTicker.Stop()
 		for {
 			select {
-			case <-backgroundCtx.Done():
+			case <-heartbeatCtx.Done():
 				return
 			case <-heartbeatTicker.C:
 				if !preparedConn.canWriteHeartbeat() {
@@ -276,7 +282,11 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 		}
 	}()
 
-	readerLifetimeContext, cancelReaderLifetimeContext := context.WithCancel(ctx)
+	// the read ctx does not come from ctx.  canceling a read ctx closes the
+	// websocket, so a shutdown that canceled it could not send WORKER_PAUSE or
+	// read reply ACKs for in-flight work.  only a missed gateway heartbeat
+	// cancels it.
+	readerLifetimeContext, cancelReaderLifetimeContext := context.WithCancel(context.Background())
 	defer cancelReaderLifetimeContext()
 
 	heartbeatReceived := make(chan struct{}, 1)
@@ -320,11 +330,15 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 		for {
 			var msg connectproto.ConnectMessage
 
-			// The context will be canceled for two reasons only:
-			// - Parent context was canceled (user requested graceful shutdown)
-			// - Gateway heartbeat was missed (unexpected connection loss)
+			// the read ends with an error after a missed gateway heartbeat,
+			// after a lost connection, or once graceful shutdown closes the
+			// websocket.
 			err := wsproto.Read(readerLifetimeContext, preparedConn.ws, &msg)
 			if err != nil {
+				if preparedConn.closedForWrites() {
+					l.Debug("read loop ended after the connection closed", "err", err)
+					return err
+				}
 				l.Error("failed to read message", "err", err, "reader_context_error", readerLifetimeContext.Err())
 
 				// The connection may still be active, but for some reason we couldn't read the message
@@ -372,10 +386,22 @@ func (h *connectHandler) handleConnection(ctx context.Context, data connectionEs
 
 	l.Debug("waiting for read loop to end")
 
+	readDone := make(chan error, 1)
+	go func() { readDone <- eg.Wait() }()
+
+	// graceful shutdown starts when ctx ends, with the read loop still
+	// running.  it keeps handling reply ACKs and lease ACKs until the worker
+	// pool drains and closeNormal ends the read.
+	var readErr error
+	select {
+	case readErr = <-readDone:
+	case <-ctx.Done():
+	}
+
 	// When the read loop exits before local shutdown, the websocket generation
 	// is no longer a reliable writer. Gateway drain is the one exception: it
 	// keeps this generation in Draining while a replacement connects.
-	if err := eg.Wait(); err != nil && ctx.Err() == nil {
+	if err := readErr; err != nil && ctx.Err() == nil {
 		if errors.Is(err, errGatewayDraining) {
 			// Gateway is draining this generation. Establish a replacement on
 			// a different gateway before retiring and closing the old transport

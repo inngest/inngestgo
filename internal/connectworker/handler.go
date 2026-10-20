@@ -125,6 +125,12 @@ type Opts struct {
 	// Handler serves every executor request.  Connect fails when it is nil.
 	Handler RequestHandler
 
+	// PrepareConnect changes the WORKER_CONNECT message of each connection
+	// attempt, reconnects included, before the worker sends it.  the gateway
+	// syncs the apps in that message.  an error fails that attempt, and the
+	// worker retries.  nil sends the message as built.
+	PrepareConnect func(req *connectproto.WorkerConnectRequestData) error
+
 	// MessageReadLimit sets the max number of bytes to read for a single WebSocket message.
 	// By default (nil or 0), the connection has a message read limit of 10MB.
 	// Set to -1 to disable the limit.

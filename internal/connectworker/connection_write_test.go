@@ -32,7 +32,7 @@ func TestConnectionWritePolicyByPhase(t *testing.T) {
 		{name: "handshaking", phase: connPhaseHandshaking},
 		{name: "active", phase: connPhaseActive, heartbeat: true, requestAck: true, reply: true, extendLease: true, pause: true},
 		{name: "draining", phase: connPhaseDraining, reply: true, extendLease: true},
-		{name: "closing", phase: connPhaseClosing, reply: true, extendLease: true, pause: true},
+		{name: "closing", phase: connPhaseClosing, heartbeat: true, reply: true, extendLease: true, pause: true},
 		{name: "retired", phase: connPhaseRetired},
 		{name: "closed", phase: connPhaseClosed},
 	}
