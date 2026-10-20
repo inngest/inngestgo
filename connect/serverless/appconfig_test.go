@@ -113,6 +113,10 @@ const jsFeatureObservations = `{
 
 // newJSApp answers the readiness GET and an in-band sync PUT as a JS app in
 // dev mode does, with an unsigned sync response that has observations.
+// jsCapabilities is a JS app's capabilities object.  future_feature is not in
+// types.Capabilities, so it shows that the object passes through unchanged.
+const jsCapabilities = `{"in_band_sync":"v1","trust_probe":"v1","future_feature":"v2"}`
+
 func newJSApp(observations string) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set(headerSDK, "js:v3.40.0")
@@ -120,7 +124,7 @@ func newJSApp(observations string) http.HandlerFunc {
 			return
 		}
 		w.Header().Set(headerSyncKind, syncKindInBand)
-		body := `{"app_id":"app","sdk_language":"js","sdk_version":"3.40.0","functions":[]`
+		body := `{"app_id":"app","sdk_language":"js","sdk_version":"3.40.0","functions":[],"capabilities":` + jsCapabilities
 		if observations != "" {
 			body += `,"featureObservations":` + observations
 		}

@@ -71,6 +71,7 @@ func TestIntrospectReturnsRewrittenConfigs(t *testing.T) {
 	r.Equal(testAppID, out.AppID)
 	r.Equal("go", out.SDKLanguage)
 	requireConnectStepURLs(t, decodeFunctions(t, out.Functions))
+	r.Nil(out.Capabilities)
 	r.Nil(out.FeatureObservations)
 }
 
@@ -95,6 +96,23 @@ func TestIntrospectReturnsFeatureObservations(t *testing.T) {
 			"otelSetup": {"providerFound": true}
 		}
 	}`, string(out.FeatureObservations))
+}
+
+func TestIntrospectReturnsCapabilities(t *testing.T) {
+	r := require.New(t)
+
+	server := httptest.NewServer(newJSApp(""))
+	defer server.Close()
+
+	// a JS app in dev mode does not sign its sync response.
+	cfg := validConfig()
+	cfg.AppURL = server.URL
+	cfg.Dev = true
+	cfg.Logger = discardLogger()
+
+	out, err := Introspect(context.Background(), cfg)
+	r.NoError(err)
+	r.JSONEq(jsCapabilities, string(out.Capabilities))
 }
 
 func TestRunFailsWhenAppNeverAnswers(t *testing.T) {

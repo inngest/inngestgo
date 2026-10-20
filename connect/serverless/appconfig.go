@@ -44,6 +44,9 @@ type appConfig struct {
 	Version      *string
 	SDK          sdkInfo
 	Capabilities types.Capabilities
+	// RawCapabilities is the capabilities object as the app sent it.  it is
+	// nil when the app sends none.  the Go SDK sends none.
+	RawCapabilities json.RawMessage
 
 	// Functions is the JSON array of function configs with each step URL
 	// changed to the connect host.
@@ -67,12 +70,12 @@ type sdkInfo struct {
 // inBandSyncResponse holds the fields of an in-band sync response that the
 // worker uses.  the Go and JS SDKs both send these.
 type inBandSyncResponse struct {
-	AppID        string             `json:"app_id"`
-	AppVersion   *string            `json:"appVersion"`
-	Capabilities types.Capabilities `json:"capabilities"`
-	Functions    []json.RawMessage  `json:"functions"`
-	SDKLanguage  string             `json:"sdk_language"`
-	SDKVersion   string             `json:"sdk_version"`
+	AppID        string            `json:"app_id"`
+	AppVersion   *string           `json:"appVersion"`
+	Capabilities json.RawMessage   `json:"capabilities"`
+	Functions    []json.RawMessage `json:"functions"`
+	SDKLanguage  string            `json:"sdk_language"`
+	SDKVersion   string            `json:"sdk_version"`
 	// FeatureObservations is protobuf JSON for sdkfeatureobs.FeatureObservations.
 	FeatureObservations json.RawMessage `json:"featureObservations"`
 }
@@ -141,6 +144,10 @@ func readAppConfig(ctx context.Context, client *http.Client, appURL string, keys
 	if err != nil {
 		return nil, err
 	}
+	caps, rawCaps, err := decodeCapabilities(parsed.Capabilities)
+	if err != nil {
+		return nil, fmt.Errorf("could not decode capabilities: %w", err)
+	}
 	observations, err := decodeFeatureObservations(parsed.FeatureObservations)
 	if err != nil {
 		return nil, fmt.Errorf("could not decode feature observations: %w", err)
@@ -150,11 +157,27 @@ func readAppConfig(ctx context.Context, client *http.Client, appURL string, keys
 		ID:                  parsed.AppID,
 		Version:             parsed.AppVersion,
 		SDK:                 sdkInfo{Language: parsed.SDKLanguage, Version: parsed.SDKVersion},
-		Capabilities:        parsed.Capabilities,
+		Capabilities:        caps,
+		RawCapabilities:     rawCaps,
 		Functions:           fns,
 		FeatureObservations: observations,
 		stepURLs:            stepURLs,
 	}, nil
+}
+
+// decodeCapabilities reads the capabilities object of a sync response.  it
+// returns the fields that the handshake sends, and the object as the app sent
+// it, which keeps capabilities that types.Capabilities does not model.
+func decodeCapabilities(raw json.RawMessage) (types.Capabilities, json.RawMessage, error) {
+	var caps types.Capabilities
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return caps, nil, nil
+	}
+	if err := json.Unmarshal(raw, &caps); err != nil {
+		return caps, nil, err
+	}
+	return caps, raw, nil
 }
 
 // decodeFeatureObservations reads the featureObservations object of a sync

@@ -15,6 +15,12 @@ type Introspection struct {
 	SDKLanguage string  `json:"sdk_language"`
 	SDKVersion  string  `json:"sdk_version"`
 
+	// Capabilities is the app's capabilities object as the app sent it, such
+	// as {"in_band_sync":"v1","trust_probe":"v1"}.  it is nil when the app
+	// sends none.  the Go SDK sends none.  the worker adds "connect":"v1" when
+	// it sends the capabilities in the connect handshake.
+	Capabilities json.RawMessage `json:"capabilities,omitempty"`
+
 	// Functions is the JSON array of function configs, with each step URL
 	// changed to the connect host.  fields that the Go SDK does not model
 	// pass through unchanged.
@@ -51,6 +57,7 @@ func Introspect(ctx context.Context, cfg Config) (*Introspection, error) {
 		AppVersion:          app.Version,
 		SDKLanguage:         app.SDK.Language,
 		SDKVersion:          app.SDK.Version,
+		Capabilities:        app.RawCapabilities,
 		Functions:           app.Functions,
 		FeatureObservations: observations,
 	}, nil
