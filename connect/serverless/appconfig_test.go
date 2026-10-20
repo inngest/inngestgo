@@ -40,7 +40,7 @@ func TestRewriteStepURLs(t *testing.T) {
 				"steps": {"step": {
 					"id": "step",
 					"retries": {"attempts": 3},
-					"runtime": {"type": "http", "url": "ws://connect?fnId=app-fn&step=step"}
+					"runtime": {"type": "http", "url": "inngest://serve?fnId=app-fn&step=step"}
 				}}
 			}]`,
 			wantStepURLs: map[string]string{
@@ -97,7 +97,7 @@ func TestReadAppConfigWithGoSDK(t *testing.T) {
 
 	var fns []fnConfig
 	r.NoError(json.Unmarshal(app.Functions, &fns))
-	requireConnectStepURLs(t, fns)
+	requireServeStepURLs(t, fns)
 }
 
 // jsFeatureObservations is the featureObservations object a JS app sends in

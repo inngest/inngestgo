@@ -22,7 +22,7 @@ type Introspection struct {
 	Capabilities json.RawMessage `json:"capabilities,omitempty"`
 
 	// Functions is the JSON array of function configs, with each step URL
-	// changed to the connect host.  fields that the Go SDK does not model
+	// changed to inngest://serve and the app's query kept.  fields that the Go SDK does not model
 	// pass through unchanged.
 	Functions json.RawMessage `json:"functions"`
 

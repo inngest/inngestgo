@@ -95,17 +95,17 @@ type fnConfig struct {
 	} `json:"steps"`
 }
 
-// requireConnectStepURLs checks that both test functions have their
-// step URL on the connect host.
-func requireConnectStepURLs(t *testing.T, fns []fnConfig) {
+// requireServeStepURLs checks that both test functions have their step URL
+// changed to inngest://serve.
+func requireServeStepURLs(t *testing.T, fns []fnConfig) {
 	t.Helper()
 	got := map[string]any{}
 	for _, f := range fns {
 		got[f.ID] = f.Steps["step"].Runtime["url"]
 	}
 	require.Equal(t, map[string]any{
-		testFnSlug:    "ws://connect?fnId=" + testFnSlug + "&step=step",
-		testStepsSlug: "ws://connect?fnId=" + testStepsSlug + "&step=step",
+		testFnSlug:    "inngest://serve?fnId=" + testFnSlug + "&step=step",
+		testStepsSlug: "inngest://serve?fnId=" + testStepsSlug + "&step=step",
 	}, got)
 }
 

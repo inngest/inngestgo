@@ -70,7 +70,7 @@ func TestIntrospectReturnsRewrittenConfigs(t *testing.T) {
 
 	r.Equal(testAppID, out.AppID)
 	r.Equal("go", out.SDKLanguage)
-	requireConnectStepURLs(t, decodeFunctions(t, out.Functions))
+	requireServeStepURLs(t, decodeFunctions(t, out.Functions))
 	r.Nil(out.Capabilities)
 	r.Nil(out.FeatureObservations)
 }

@@ -87,7 +87,7 @@ func TestIntrospectForkedApp(t *testing.T) {
 	r.NoError(err)
 
 	r.Equal(testAppID, out.AppID)
-	requireConnectStepURLs(t, decodeFunctions(t, out.Functions))
+	requireServeStepURLs(t, decodeFunctions(t, out.Functions))
 }
 
 // TestIntrospectStopsWhenAppExits checks the caller contract.  the caller cancels

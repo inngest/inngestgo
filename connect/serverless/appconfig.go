@@ -32,9 +32,12 @@ const (
 
 	syncKindInBand = "in_band"
 
-	// connectStepHost is the host that connect apps use in step URLs.  the
-	// executor sends requests for these steps over the gateway, not HTTP.
-	connectStepHost = "connect"
+	// serveStepURL replaces the app's own URL in each step URL.  it marks a
+	// function of an Inngest-hosted serve() app, and the executor sends its
+	// requests over the gateway, not HTTP.  it is the value of
+	// sdk.DeployTypeInngestServe in inngest's pkg/sdk.  this module's
+	// vendored inngest does not have that const yet.
+	serveStepURL = "inngest://serve"
 )
 
 // appConfig is what the worker reads from the app's reply to the in-band sync
@@ -49,7 +52,7 @@ type appConfig struct {
 	RawCapabilities json.RawMessage
 
 	// Functions is the JSON array of function configs with each step URL
-	// changed to the connect host.
+	// changed to serveStepURL.
 	Functions json.RawMessage
 
 	// FeatureObservations tells the gateway which optional SDK features the
@@ -195,8 +198,8 @@ func decodeFeatureObservations(raw json.RawMessage) (*sdkfeatureobs.FeatureObser
 	return observations, nil
 }
 
-// rewriteStepURLs changes each step URL to the connect host and keeps the
-// query, which holds fnId and the step.  every other field passes through
+// rewriteStepURLs changes each step URL to serveStepURL and keeps the query,
+// which holds fnId and the step.  every other field passes through
 // unchanged, so config the Go SDK does not model still reaches the gateway.
 func rewriteStepURLs(functions []json.RawMessage) (json.RawMessage, map[string]string, error) {
 	stepURLs := make(map[string]string, len(functions))
@@ -230,11 +233,10 @@ func rewriteStepURLs(functions []json.RawMessage) (json.RawMessage, map[string]s
 			}
 
 			stepURLs[slug] = appStepURL
-			runtime["url"] = (&url.URL{
-				Scheme:   "ws",
-				Host:     connectStepHost,
-				RawQuery: parsed.RawQuery,
-			}).String()
+			runtime["url"] = serveStepURL
+			if parsed.RawQuery != "" {
+				runtime["url"] = serveStepURL + "?" + parsed.RawQuery
+			}
 
 			encoded, err := json.Marshal(runtime)
 			if err != nil {
