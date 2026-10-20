@@ -87,9 +87,33 @@ func boot(ctx context.Context, cfg Config, keys signingKeys) (*appConfig, error)
 }
 
 func connectApp(ctx context.Context, cfg Config, app *appConfig, keys signingKeys, adm *admission) (connectworker.WorkerConnection, error) {
-	hashed, hashedFallback, err := keys.hashed()
+	opts, err := workerOpts(cfg, app, keys, adm)
 	if err != nil {
 		return nil, err
+	}
+
+	// the worker outlives ctx, so canceling ctx drains it through Close and
+	// does not cut off a reconnect.  canceling ctx before the first connection
+	// opens stops the attempt, so Run does not wait for the 30s connect timeout.
+	workerCtx, cancelWorker := context.WithCancel(context.WithoutCancel(ctx))
+	stopCancel := context.AfterFunc(ctx, cancelWorker)
+	conn, err := connectworker.Connect(workerCtx, opts, cfg.Logger)
+	if !stopCancel() {
+		// ctx ended while the worker connected.  the worker context is
+		// canceled, so a reconnect fails.  Close stops the worker.
+		if conn != nil {
+			_ = conn.Close()
+		}
+		return nil, fmt.Errorf("canceled while connecting: %w", ctx.Err())
+	}
+	return conn, err
+}
+
+// workerOpts builds the engine options for the app at cfg.AppURL.
+func workerOpts(cfg Config, app *appConfig, keys signingKeys, adm *admission) (connectworker.Opts, error) {
+	hashed, hashedFallback, err := keys.hashed()
+	if err != nil {
+		return connectworker.Opts{}, err
 	}
 
 	caps := app.Capabilities
@@ -102,12 +126,7 @@ func connectApp(ctx context.Context, cfg Config, app *appConfig, keys signingKey
 		env = &cfg.Env
 	}
 
-	// the worker outlives ctx, so canceling ctx drains it through Close and
-	// does not cut off a reconnect.  canceling ctx before the first connection
-	// opens stops the attempt, so Run does not wait for the 30s connect timeout.
-	workerCtx, cancelWorker := context.WithCancel(context.WithoutCancel(ctx))
-	stopCancel := context.AfterFunc(ctx, cancelWorker)
-	conn, err := connectworker.Connect(workerCtx, connectworker.Opts{
+	return connectworker.Opts{
 		Env: env,
 		Apps: []*connectproto.AppConfiguration{{
 			AppName:             app.ID,
@@ -125,6 +144,7 @@ func connectApp(ctx context.Context, cfg Config, app *appConfig, keys signingKey
 		Platform:                 &platform,
 		SDKVersion:               app.SDK.Version,
 		SDKLanguage:              app.SDK.Language,
+		PrepareConnect:           cfg.PrepareConnect,
 		Handler: &forwarder{
 			client:    &http.Client{},
 			keys:      keys,
@@ -132,16 +152,7 @@ func connectApp(ctx context.Context, cfg Config, app *appConfig, keys signingKey
 			admission: adm,
 			logger:    cfg.Logger,
 		},
-	}, cfg.Logger)
-	if !stopCancel() {
-		// ctx ended while the worker connected.  the worker context is
-		// canceled, so a reconnect fails.  Close stops the worker.
-		if conn != nil {
-			_ = conn.Close()
-		}
-		return nil, fmt.Errorf("canceled while connecting: %w", ctx.Err())
-	}
-	return conn, err
+	}, nil
 }
 
 // waitForExit blocks until ctx ends, the worker is idle for the idle timeout,

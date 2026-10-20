@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"os"
 	"time"
+
+	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
 )
 
 const (
@@ -75,6 +77,12 @@ type Config struct {
 	// expires.  a drain after MaxLifetime or MaxRequests waits up to 2h for
 	// every request, or until DrainTimeout after ctx ends.
 	DrainTimeout time.Duration
+
+	// PrepareConnect changes the WORKER_CONNECT message of each connection
+	// attempt, reconnects included, before the worker sends it.  the gateway
+	// syncs the app from that message.  an error fails that attempt, and the
+	// worker retries.  nil sends the message as built.
+	PrepareConnect func(req *connectproto.WorkerConnectRequestData) error
 
 	Logger *slog.Logger
 }

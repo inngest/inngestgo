@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
 	"github.com/stretchr/testify/require"
 )
 
@@ -288,4 +289,35 @@ func TestConfigDefaults(t *testing.T) {
 
 	c = Config{MaxLifetime: time.Hour}.withDefaults()
 	r.Equal(time.Hour, c.MaxLifetime)
+}
+
+func TestWorkerOptsPrepareConnect(t *testing.T) {
+	app := &appConfig{
+		ID:        testAppID,
+		Functions: []byte(`[]`),
+		stepURLs:  map[string]string{},
+	}
+
+	t.Run("nil hook", func(t *testing.T) {
+		opts, err := workerOpts(validConfig(), app, signingKeys{primary: testSigningKey}, newAdmission(1, 0, time.Time{}))
+		require.NoError(t, err)
+		require.Nil(t, opts.PrepareConnect)
+	})
+
+	t.Run("caller hook reaches the engine", func(t *testing.T) {
+		r := require.New(t)
+		cfg := validConfig()
+		cfg.PrepareConnect = func(req *connectproto.WorkerConnectRequestData) error {
+			req.InstanceId = "changed"
+			return nil
+		}
+
+		opts, err := workerOpts(cfg, app, signingKeys{primary: testSigningKey}, newAdmission(1, 0, time.Time{}))
+		r.NoError(err)
+		r.NotNil(opts.PrepareConnect)
+
+		req := &connectproto.WorkerConnectRequestData{}
+		r.NoError(opts.PrepareConnect(req))
+		r.Equal("changed", req.InstanceId)
+	})
 }
