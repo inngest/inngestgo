@@ -13,6 +13,7 @@ import (
 	"os"
 	"reflect"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -323,6 +324,11 @@ func (h *handler) Register(funcs ...ServableFunction) {
 		newFuncs[i] = f
 		i++
 	}
+	// Connect hashes the serialized function array, so map iteration order
+	// must not make identical workers appear to have different configurations.
+	sort.Slice(newFuncs, func(i, j int) bool {
+		return newFuncs[i].FullyQualifiedID() < newFuncs[j].FullyQualifiedID()
+	})
 
 	h.funcs = newFuncs
 }
