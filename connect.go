@@ -20,7 +20,8 @@ type ConnectOpts struct {
 	// InstanceID represents a stable identifier to be used for identifying connected SDKs.
 	// This can be a hostname or other identifier that remains stable across restarts.
 	//
-	// If nil, this defaults to the current machine's hostname.
+	// If nil, this defaults to the INNGEST_CONNECT_INSTANCE_ID env var, and then to
+	// the current machine's hostname.
 	InstanceID *string
 
 	RewriteGatewayEndpoint func(endpoint url.URL) (url.URL, error)

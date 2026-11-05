@@ -117,7 +117,8 @@ type Opts struct {
 	IsDev bool
 
 	// InstanceID is a stable ID for this worker, such as a hostname.  when
-	// nil, the worker uses the hostname.
+	// nil, the worker uses the INNGEST_CONNECT_INSTANCE_ID env var, and then
+	// the hostname.
 	InstanceID *string
 
 	// Platform, SDKVersion, and SDKLanguage go into the handshake.  error

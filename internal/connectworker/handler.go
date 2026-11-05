@@ -19,6 +19,7 @@ import (
 	"github.com/inngest/inngest/pkg/syscode"
 	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
 	"github.com/inngest/inngestgo/internal/types"
+	"github.com/inngest/inngestgo/pkg/env"
 	"github.com/pbnjay/memory"
 	"golang.org/x/sync/errgroup"
 )
@@ -531,6 +532,10 @@ func (h *connectHandler) processExecutorRequest(msg workerPoolMsg) {
 func (h *connectHandler) instanceId() string {
 	if h.opts.InstanceID != nil {
 		return *h.opts.InstanceID
+	}
+
+	if id := env.ConnectInstanceID(); id != "" {
+		return id
 	}
 
 	hostname, _ := os.Hostname()

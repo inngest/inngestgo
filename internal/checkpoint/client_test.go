@@ -288,3 +288,49 @@ func TestClient_Checkpoint_ValidRequestBody(t *testing.T) {
 	assert.Equal(t, "step-1", receivedBody.Steps[0].ID)
 	assert.Equal(t, "step-2", receivedBody.Steps[1].ID)
 }
+
+func TestClient_Checkpoint_InstanceIDHeader(t *testing.T) {
+	tests := []struct {
+		name       string
+		env        string
+		expected   string
+		expectSent bool
+	}{
+		{
+			name:       "sends header when env var is set",
+			env:        "worker-1",
+			expected:   "worker-1",
+			expectSent: true,
+		},
+		{
+			name: "omits header when env var is unset",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var received []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				received = r.Header.Values("x-inngest-instance-id")
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			t.Setenv("INNGEST_CONNECT_INSTANCE_ID", tt.env)
+			client := NewClient(server.URL, "primary-key", "")
+			client.httpClient = server.Client()
+
+			err := client.Checkpoint(context.Background(), AsyncRequest{
+				RunID: "run-123",
+				FnID:  uuid.New(),
+			})
+			require.NoError(t, err)
+
+			if tt.expectSent {
+				assert.Equal(t, []string{tt.expected}, received)
+			} else {
+				assert.Empty(t, received)
+			}
+		})
+	}
+}

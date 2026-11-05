@@ -9,7 +9,18 @@ const (
 	DevServerOrigin       = "http://127.0.0.1:8288"
 	DefaultAPIOrigin      = "https://api.inngest.com"
 	DefaultEventAPIOrigin = "https://inn.gs"
+
+	// ConnectInstanceIDEnvKey sets the connect worker's instance ID when the
+	// worker options do not set one.  checkpoint requests send its value in
+	// the x-inngest-instance-id header.
+	ConnectInstanceIDEnvKey = "INNGEST_CONNECT_INSTANCE_ID"
 )
+
+// ConnectInstanceID returns the INNGEST_CONNECT_INSTANCE_ID env var, or an
+// empty string when it is unset.
+func ConnectInstanceID() string {
+	return os.Getenv(ConnectInstanceIDEnvKey)
+}
 
 // IsDev returns whether to use the dev server, by checking the presence of the INNGEST_DEV
 // environment variable.
