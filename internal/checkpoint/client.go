@@ -23,8 +23,9 @@ type Client struct {
 	fallbackKey string
 	apiBaseURL  string
 	environment string
-	// instanceID comes from the INNGEST_CONNECT_INSTANCE_ID env var.  when it
-	// is empty, requests do not send the x-inngest-instance-id header.
+	// instanceID is the connect worker's instance ID, or the
+	// INNGEST_CONNECT_INSTANCE_ID env var outside connect.  when it is empty,
+	// requests do not send the x-inngest-instance-id header.
 	instanceID  string
 	httpClient  *http.Client
 	useFallback *atomic.Bool

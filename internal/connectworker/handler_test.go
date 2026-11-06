@@ -1532,7 +1532,7 @@ func TestHandleConnectionGracefulShutdownKeepsHeartbeats(t *testing.T) {
 	}
 }
 
-func TestInstanceID(t *testing.T) {
+func TestResolveInstanceID(t *testing.T) {
 	hostname, err := os.Hostname()
 	require.NoError(t, err)
 
@@ -1562,12 +1562,7 @@ func TestInstanceID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("INNGEST_CONNECT_INSTANCE_ID", tt.env)
-			h := &connectHandler{
-				opts: Opts{
-					InstanceID: tt.opt,
-				},
-			}
-			require.Equal(t, tt.expected, h.instanceId())
+			require.Equal(t, tt.expected, ResolveInstanceID(tt.opt))
 		})
 	}
 }

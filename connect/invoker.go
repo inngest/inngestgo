@@ -21,8 +21,11 @@ import (
 // this is used during regular Connect() execution and calls functions directly
 // from inbound requests.
 type invokerHandler struct {
-	invokers   map[string]FunctionInvoker
-	opts       Opts
+	invokers map[string]FunctionInvoker
+	opts     Opts
+	// instanceID is the ID that the worker sends in its handshake.  each
+	// request carries it so that checkpoint requests send the same ID.
+	instanceID string
 	logger     *slog.Logger
 	httpClient *http.Client
 }
@@ -67,6 +70,7 @@ func (i invokerHandler) Serve(_ context.Context, req *connectproto.GatewayExecut
 	}
 	request.CallCtx.RequestID = req.RequestId
 	request.CallCtx.JobID = req.JobId
+	request.CallCtx.InstanceID = i.instanceID
 
 	var stepId *string
 	if req.StepId != nil && *req.StepId != "step" {

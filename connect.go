@@ -21,7 +21,8 @@ type ConnectOpts struct {
 	// This can be a hostname or other identifier that remains stable across restarts.
 	//
 	// If nil, this defaults to the INNGEST_CONNECT_INSTANCE_ID env var, and then to
-	// the current machine's hostname.
+	// the current machine's hostname.  Checkpoint requests for runs on this worker
+	// send the same ID.
 	InstanceID *string
 
 	RewriteGatewayEndpoint func(endpoint url.URL) (url.URL, error)

@@ -118,7 +118,8 @@ type Opts struct {
 
 	// InstanceID is a stable ID for this worker, such as a hostname.  when
 	// nil, the worker uses the INNGEST_CONNECT_INSTANCE_ID env var, and then
-	// the hostname.
+	// the hostname.  checkpoint requests for runs on this worker send the same
+	// ID.
 	InstanceID *string
 
 	// Platform, SDKVersion, and SDKLanguage go into the handshake.  error
@@ -146,6 +147,10 @@ func Connect(ctx context.Context, opts Opts, invokers map[string]FunctionInvoker
 	}
 	l.Debug("using provided functions", "slugs", appSlugs)
 
+	// the handshake and the checkpoint requests read this one value.  a
+	// second lookup can return a different hostname or env var.
+	instanceID := connectworker.ResolveInstanceID(opts.InstanceID)
+
 	return connectworker.Connect(ctx, connectworker.Opts{
 		Env:                             opts.Env,
 		Apps:                            apps,
@@ -157,7 +162,7 @@ func Connect(ctx context.Context, opts Opts, invokers map[string]FunctionInvoker
 		MissedGatewayHeartbeatTolerance: opts.MissedGatewayHeartbeatTolerance,
 		APIBaseURL:                      opts.APIBaseURL,
 		IsDev:                           opts.IsDev,
-		InstanceID:                      opts.InstanceID,
+		InstanceID:                      &instanceID,
 		Platform:                        opts.Platform,
 		SDKVersion:                      opts.SDKVersion,
 		SDKLanguage:                     opts.SDKLanguage,
@@ -165,6 +170,7 @@ func Connect(ctx context.Context, opts Opts, invokers map[string]FunctionInvoker
 		Handler: invokerHandler{
 			invokers:   invokers,
 			opts:       opts,
+			instanceID: instanceID,
 			logger:     l,
 			httpClient: &http.Client{},
 		},

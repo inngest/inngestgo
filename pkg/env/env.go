@@ -11,8 +11,9 @@ const (
 	DefaultEventAPIOrigin = "https://inn.gs"
 
 	// ConnectInstanceIDEnvKey sets the connect worker's instance ID when the
-	// worker options do not set one.  checkpoint requests send its value in
-	// the x-inngest-instance-id header.
+	// worker options do not set one.  checkpoint requests send the worker's
+	// instance ID in the x-inngest-instance-id header.  outside connect they
+	// send this env var.
 	ConnectInstanceIDEnvKey = "INNGEST_CONNECT_INSTANCE_ID"
 )
 

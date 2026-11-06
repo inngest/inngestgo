@@ -638,6 +638,73 @@ func TestCheckpointUsesHandlerAPIBaseURL(t *testing.T) {
 	}
 }
 
+func TestCheckpointInstanceIDHeader(t *testing.T) {
+	tests := []struct {
+		name       string
+		instanceID string
+		env        string
+		expected   []string
+	}{
+		{
+			name:       "connect instance ID wins over env var",
+			instanceID: "from-connect",
+			env:        "from-env",
+			expected:   []string{"from-connect"},
+		},
+		{
+			name:     "env var outside connect",
+			env:      "from-env",
+			expected: []string{"from-env"},
+		},
+		{
+			name: "no header when both are unset",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			headers := make(chan []string, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				headers <- r.Header.Values(HeaderKeyInstanceID)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			t.Setenv("INNGEST_DEV", "")
+			t.Setenv("INNGEST_CONNECT_INSTANCE_ID", tt.env)
+			client, err := NewClient(ClientOpts{
+				AppID:      "checkpoint-instance-id",
+				APIBaseURL: &server.URL,
+			})
+			require.NoError(t, err)
+			fn, err := CreateFunction(
+				client,
+				FunctionOpts{ID: "checkpoint"},
+				EventTrigger("checkpoint/event", nil),
+				func(ctx context.Context, input Input[any]) (any, error) {
+					return step.Run(ctx, "step", func(ctx context.Context) (string, error) {
+						return "ok", nil
+					})
+				},
+			)
+			require.NoError(t, err)
+
+			request := createRequest(t, Event{Name: "checkpoint/event"})
+			request.CallCtx.InstanceID = tt.instanceID
+			_, _, err = client.(*apiClient).h.InvokeFunction(
+				context.Background(), fn.FullyQualifiedID(), nil, *request,
+			)
+			require.NoError(t, err)
+			select {
+			case got := <-headers:
+				require.Equal(t, tt.expected, got)
+			default:
+				t.Fatal("checkpoint request was not sent")
+			}
+		})
+	}
+}
+
 func TestHandlerAPIBaseURLUsesClientDev(t *testing.T) {
 	t.Setenv("INNGEST_DEV", "")
 	client, err := NewClient(ClientOpts{AppID: "dev-url", Dev: BoolPtr(true)})

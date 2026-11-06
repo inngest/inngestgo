@@ -170,6 +170,7 @@ func NewManager(opts Opts) InvocationManager {
 			SigningKeyFallback: opts.SigningKeyFallback,
 			Config:             checkpointConfig,
 			APIBaseURL:         opts.APIBaseURL,
+			InstanceID:         opts.Request.CallCtx.InstanceID,
 		}),
 	}
 }
