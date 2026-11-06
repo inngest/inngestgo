@@ -19,6 +19,7 @@ import (
 	"github.com/inngest/inngest/pkg/syscode"
 	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
 	"github.com/inngest/inngestgo/internal/types"
+	"github.com/inngest/inngestgo/pkg/env"
 	"github.com/pbnjay/memory"
 	"golang.org/x/sync/errgroup"
 )
@@ -529,8 +530,20 @@ func (h *connectHandler) processExecutorRequest(msg workerPoolMsg) {
 }
 
 func (h *connectHandler) instanceId() string {
-	if h.opts.InstanceID != nil {
-		return *h.opts.InstanceID
+	return ResolveInstanceID(h.opts.InstanceID)
+}
+
+// ResolveInstanceID returns opt when it is set, then the
+// INNGEST_CONNECT_INSTANCE_ID env var, then the hostname.  call it once per
+// worker.  the handshake and every checkpoint request from that worker must
+// send the same value.
+func ResolveInstanceID(opt *string) string {
+	if opt != nil {
+		return *opt
+	}
+
+	if id := env.ConnectInstanceID(); id != "" {
+		return id
 	}
 
 	hostname, _ := os.Hostname()

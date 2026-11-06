@@ -78,6 +78,7 @@ func TestInvokerHandlerUsesProtoRequestAndJobIDs(t *testing.T) {
 
 	invoker := &captureInvoker{}
 	h := newTestInvokerHandler(invoker, Opts{})
+	h.instanceID = "worker-1"
 	resp, err := h.Serve(context.Background(), &connectproto.GatewayExecutorRequestData{
 		RequestId:      "01ARZ3NDEKTSV4RRFFQ69G5FAV",
 		JobId:          "job-123",
@@ -89,6 +90,7 @@ func TestInvokerHandlerUsesProtoRequestAndJobIDs(t *testing.T) {
 	r.Equal(connectproto.SDKResponseStatus_DONE, resp.Status)
 	r.Equal("01ARZ3NDEKTSV4RRFFQ69G5FAV", invoker.request.CallCtx.RequestID)
 	r.Equal("job-123", invoker.request.CallCtx.JobID)
+	r.Equal("worker-1", invoker.request.CallCtx.InstanceID)
 }
 
 func TestInvokerHandlerHydratesUseAPIRequest(t *testing.T) {

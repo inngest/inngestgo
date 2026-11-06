@@ -2,13 +2,17 @@ package tests
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
+	"net/url"
 	"os"
 	"testing"
 	"time"
 
+	connectproto "github.com/inngest/inngest/proto/gen/connect/v1"
 	"github.com/inngest/inngestgo"
 	"github.com/inngest/inngestgo/connect/serverless"
+	"github.com/inngest/inngestgo/internal/fn"
 	"github.com/inngest/inngestgo/step"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -82,6 +86,25 @@ func TestServerlessRun(t *testing.T) {
 			Multiplex:   2,
 			IdleTimeout: idleTimeout,
 			Logger:      slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})),
+			// the dev server rejects inngest://serve step URLs.  ws://connect
+			// routes each request through the gateway to this worker.
+			PrepareConnect: func(req *connectproto.WorkerConnectRequestData) error {
+				for _, app := range req.Apps {
+					var functions []fn.SyncConfig
+					if err := json.Unmarshal(app.Functions, &functions); err != nil {
+						return err
+					}
+					for i := range functions {
+						functions[i].UpdateSteps(url.URL{Scheme: "ws", Host: "connect"})
+					}
+					var err error
+					app.Functions, err = json.Marshal(functions)
+					if err != nil {
+						return err
+					}
+				}
+				return nil
+			},
 		})
 	}()
 

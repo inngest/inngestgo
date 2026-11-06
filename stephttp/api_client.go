@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/inngest/inngestgo"
 	"github.com/inngest/inngestgo/internal/sdkrequest"
+	"github.com/inngest/inngestgo/pkg/env"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -124,7 +125,10 @@ type APIClient struct {
 	primaryKey  string
 	fallbackKey string
 	environment string
-	httpClient  *http.Client
+	// instanceID comes from the INNGEST_CONNECT_INSTANCE_ID env var.  when it
+	// is empty, requests do not send the x-inngest-instance-id header.
+	instanceID string
+	httpClient *http.Client
 	// useFallback tracks whether to use the fallback key (1) or primary key (0)
 	useFallback *atomic.Bool
 }
@@ -135,6 +139,7 @@ func NewAPIClient(baseURL, primaryKey, fallbackKey string) *APIClient {
 		baseURL:     baseURL,
 		primaryKey:  primaryKey,
 		fallbackKey: fallbackKey,
+		instanceID:  env.ConnectInstanceID(),
 		httpClient:  &http.Client{Timeout: 30 * time.Second},
 		useFallback: &atomic.Bool{},
 	}
@@ -257,6 +262,9 @@ func (c *APIClient) doSingle(ctx context.Context, method, path string, payload a
 	req.Header.Set(inngestgo.HeaderKeySDK, inngestgo.HeaderValueSDK)
 	if c.environment != "" {
 		req.Header.Set("X-Inngest-Env", c.environment)
+	}
+	if c.instanceID != "" {
+		req.Header.Set(inngestgo.HeaderKeyInstanceID, c.instanceID)
 	}
 
 	resp, err := c.httpClient.Do(req)

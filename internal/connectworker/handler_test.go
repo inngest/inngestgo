@@ -1531,3 +1531,38 @@ func TestHandleConnectionGracefulShutdownKeepsHeartbeats(t *testing.T) {
 		t.Fatal("handleConnection did not return after the pool drained")
 	}
 }
+
+func TestResolveInstanceID(t *testing.T) {
+	hostname, err := os.Hostname()
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		opt      *string
+		env      string
+		expected string
+	}{
+		{
+			name:     "option wins over env var",
+			opt:      new("from-opts"),
+			env:      "from-env",
+			expected: "from-opts",
+		},
+		{
+			name:     "env var when option is nil",
+			env:      "from-env",
+			expected: "from-env",
+		},
+		{
+			name:     "hostname when option and env var are unset",
+			expected: hostname,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("INNGEST_CONNECT_INSTANCE_ID", tt.env)
+			require.Equal(t, tt.expected, ResolveInstanceID(tt.opt))
+		})
+	}
+}
