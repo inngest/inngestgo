@@ -40,6 +40,32 @@ func TestTimeoutMarhsal(t *testing.T) {
 	})
 }
 
+func TestThrottleMarshalJSON(t *testing.T) {
+	t.Run("without scope", func(t *testing.T) {
+		v := Throttle{
+			Limit:  10,
+			Period: time.Minute,
+			Burst:  1,
+		}
+		byt, err := v.MarshalJSON()
+		require.NoError(t, err)
+		require.JSONEq(t, `{"limit":10,"period":"1m","burst":1}`, string(byt))
+	})
+
+	t.Run("with account scope", func(t *testing.T) {
+		v := Throttle{
+			Limit:  10,
+			Period: time.Minute,
+			Burst:  1,
+			Key:    ptr("event.data.provider"),
+			Scope:  ThrottleScopeAccount,
+		}
+		byt, err := v.MarshalJSON()
+		require.NoError(t, err)
+		require.JSONEq(t, `{"limit":10,"period":"1m","burst":1,"key":"event.data.provider","scope":"account"}`, string(byt))
+	})
+}
+
 func TestTriggerMarshalJSON(t *testing.T) {
 	t.Run("event trigger with nil CronTrigger", func(t *testing.T) {
 		tr := Trigger{EventTrigger: &EventTrigger{Event: "test/event"}}
