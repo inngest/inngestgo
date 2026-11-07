@@ -1,8 +1,26 @@
+## [v0.16.6] - 2026-11-07
+
+### 🚀 Features
+
+- *(compute)* Add api for sandboxes (#268)
+- *(functions)* Default to checkpointing after every step (#270)
+- *(connect)* Add wrapper for connect <> serverless shim (#272)
+- *(step)* Add RunWith as a shorthand (#275)
+- Add instance id env var and checkpointing header (#276)
+
+### 🐛 Bug Fixes
+
+- *(handler)* Close the register response body in out-of-band sync (#261)
+
+### 🚜 Refactor
+
+- *(connect)* Add new RequestHandler iface for inbound fn reqs (#271)
 ## [v0.16.5] - 2026-10-02
 
 ### ⚙️ Miscellaneous Tasks
 
 - *(stephttp)* Remove err from start
+- *(release)* V0.16.5 (#266)
 ## [v0.16.4] - 2026-10-02
 
 ### 🚀 Features
