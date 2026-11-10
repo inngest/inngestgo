@@ -1083,6 +1083,7 @@ func TestInspection(t *testing.T) {
 				"authentication_succeeded": true,
 				"capabilities": map[string]any{
 					"in_band_sync": "v1",
+					"loop":         "v1",
 					"trust_probe":  "v1",
 					"connect":      "v1",
 				},
@@ -1204,6 +1205,7 @@ func TestInspection(t *testing.T) {
 				"authentication_succeeded": true,
 				"capabilities": map[string]any{
 					"in_band_sync": "v1",
+					"loop":         "v1",
 					"trust_probe":  "v1",
 					"connect":      "v1",
 				},
@@ -1421,6 +1423,7 @@ func TestInBandSync(t *testing.T) {
 					"authentication_succeeded": true,
 					"capabilities": map[string]any{
 						"in_band_sync": "v1",
+						"loop":         "v1",
 						"trust_probe":  "v1",
 						"connect":      "v1",
 					},
@@ -1666,6 +1669,7 @@ func TestInBandSync(t *testing.T) {
 					"authentication_succeeded": true,
 					"capabilities": map[string]any{
 						"in_band_sync": "v1",
+						"loop":         "v1",
 						"trust_probe":  "v1",
 						"connect":      "v1",
 					},

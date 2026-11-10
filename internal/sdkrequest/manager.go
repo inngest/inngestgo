@@ -91,6 +91,15 @@ type InvocationManager interface {
 	// CloseCheckpointer cancels any pending background checkpoint timers.
 	// It should be called when the function invocation completes.
 	CloseCheckpointer()
+	// IsLoop reports whether the function is a loop or an fsm.
+	IsLoop() bool
+	// LoopKind returns the loop kind from the function config.  it is empty
+	// when the function is not a loop.
+	LoopKind() string
+	// Loop returns the collector for the wake, end, subscribe, and
+	// unsubscribe calls made during the run.  the handler sends its result
+	// as the LoopReturn opcode.
+	Loop() *LoopCollector
 }
 
 type Opts struct {
@@ -161,6 +170,7 @@ func NewManager(opts Opts) InvocationManager {
 		mw:                 opts.Middleware,
 		mode:               opts.Mode,
 		t:                  time.Now(),
+		loop:               newLoopCollector(),
 		checkpointer: checkpoint.New(checkpoint.Opts{
 			RunID:              opts.Request.CallCtx.RunID,
 			FnID:               opts.Request.CallCtx.FunctionID,
@@ -226,6 +236,9 @@ type requestCtxManager struct {
 
 	// t returns the time since the epoch since the request started.
 	t time.Time
+
+	// loop collects the loop calls made during the run.
+	loop *LoopCollector
 }
 
 func (r *requestCtxManager) SigningKey() string {
@@ -426,6 +439,21 @@ func (r *requestCtxManager) SetFn(f fn.ServableFunction) {
 
 func (r *requestCtxManager) CloseCheckpointer() {
 	r.checkpointer.Close()
+}
+
+func (r *requestCtxManager) IsLoop() bool {
+	return r.LoopKind() != ""
+}
+
+func (r *requestCtxManager) LoopKind() string {
+	if r.fn == nil || r.fn.Config().Loop == nil {
+		return ""
+	}
+	return r.fn.Config().Loop.Kind
+}
+
+func (r *requestCtxManager) Loop() *LoopCollector {
+	return r.loop
 }
 
 func (r *requestCtxManager) NewOp(op enums.Opcode, id string) UnhashedOp {

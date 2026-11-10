@@ -28,6 +28,8 @@ const (
 
 	OpcodeDeferAdd
 	OpcodeDeferAbort
+	// OpcodeLoopReturn is a RunComplete for a single loop iteration.
+	OpcodeLoopReturn
 )
 
 // opcodeSyncMap explicitly represents the sync opcodes that can be checkpointed.
@@ -40,7 +42,7 @@ var opcodeSyncMap = map[Opcode]struct{}{
 	OpcodeSyncRunComplete: {},
 	OpcodeStepFailed:      {},
 	OpcodeDeferAdd:        {},
-	OpcodeDeferAbort:     {},
+	OpcodeDeferAbort:      {},
 }
 
 // OpcodeIsSync returns whether the given opcode is synchronous.  This

@@ -29,6 +29,7 @@ func GetFnSyncConfig(fn ServableFunction) *SyncConfig {
 		Cancel:      config.Cancel,
 		Retries:     config.Retries,
 		Singleton:   config.Singleton,
+		Loop:        config.Loop,
 	}
 }
 
@@ -88,6 +89,10 @@ type SyncConfig struct {
 	// be ignored or cause the current instance to be canceled and replaced, depending on
 	// the specified mode.
 	Singleton *Singleton
+
+	// Loop is set for loops, fsms, and agents.  the server rejects it when
+	// the sync did not send capabilities.loop.
+	Loop *Loop `json:"loop,omitempty"`
 
 	Steps map[string]SDKStep `json:"steps"`
 }

@@ -22,7 +22,7 @@
       {
         devShells.default = pkgs.mkShell {
           nativeBuildInputs = with pkgs; [
-            go
+            go_1_27
             golangci-lint
             gotests
             gomodifytags
