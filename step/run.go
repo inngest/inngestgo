@@ -129,7 +129,7 @@ func Run[T any](
 
 	byt, err := json.Marshal(mutated)
 	if err != nil {
-		mgr.SetErr(fmt.Errorf("unable to marshal run respone for '%s': %w", id, err))
+		mgr.SetErr(fmt.Errorf("unable to marshal run response for '%s': %w", id, err))
 	}
 
 	// Depending on the manager's step mode, this will either return control to the handler
