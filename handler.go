@@ -942,10 +942,18 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request) error {
 		invokeErr = nil
 	}
 
-	// Handle OpcodeStepFailed for permanent step failures
-	if len(ops) == 1 && ops[0].Op == enums.OpcodeStepFailed {
-		invokeErr = nil
-		noRetry = true
+	// Handle OpcodeStepFailed for permanent step failures.
+	//
+	// The opcode is not necessarily the only one: a checkpointed function
+	// keeps successful steps buffered, so a permanent failure can be
+	// reported alongside an OpcodeStepRun. Look for the failure anywhere
+	// in the list.
+	for _, op := range ops {
+		if op.Op == enums.OpcodeStepFailed {
+			invokeErr = nil
+			noRetry = true
+			break
+		}
 	}
 
 	// Now that we've handled the OpcodeStepError, if we *still* have
