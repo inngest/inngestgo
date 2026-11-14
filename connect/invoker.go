@@ -112,6 +112,23 @@ func (i invokerHandler) Serve(_ context.Context, req *connectproto.GatewayExecut
 		err = nil
 	}
 
+	// Handle OpcodeStepFailed for permanent step failures. A step that
+	// exhausted its retries is reported through the opcode, so the error
+	// must be cleared here; otherwise the run is reported as failed and
+	// retried, and the handler never receives the cached step failure.
+	//
+	// The opcode is not necessarily the only one: a checkpointed function
+	// keeps successful steps buffered, so a permanent failure can be
+	// reported alongside an OpcodeStepRun. Look for the failure anywhere
+	// in the list.
+	for _, op := range ops {
+		if op.Op == enums.OpcodeStepFailed {
+			err = nil
+			noRetry = true
+			break
+		}
+	}
+
 	// Now that we've handled the OpcodeStepError, if we *still* ahve
 	// a StepError kind returned from a function we must have an unhandled
 	// step error.  This is a NonRetryableError, as the most likely code is:
