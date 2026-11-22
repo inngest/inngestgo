@@ -48,7 +48,33 @@ func TestValidateRequestSignature(t *testing.T) {
 			require.False(t, ok)
 			require.ErrorContains(t, err, "invalid timestamp")
 		})
-		t.Run("With an expired ts it fails", func(t *testing.T) {
+		t.Run("with non-JCS body it preserves raw payload in hash", func(t *testing.T) {
+			at := time.Now()
+			rawBody := []byte("not-valid-json-payload")
+			sigA, err := Sign(ctx, at, []byte(testKey), rawBody)
+			require.NoError(t, err)
+			sigB, err := Sign(ctx, at, []byte(testKey), []byte("different-raw-payload"))
+			require.NoError(t, err)
+			require.NotEqual(t, sigA, sigB)
+
+			ok, _, err := ValidateRequestSignature(ctx, sigA, testKey, "", rawBody, isDev)
+			require.True(t, ok)
+			require.NoError(t, err)
+
+			ok, _, err = ValidateRequestSignature(ctx, sigA, testKey, "", []byte("tampered-payload"), isDev)
+			require.False(t, ok)
+			require.ErrorIs(t, err, ErrInvalidSignature)
+		})
+		t.Run("with a far-future ts it fails", func(t *testing.T) {
+			future := time.Now().Add(1 * time.Hour)
+			sig, err := Sign(ctx, future, []byte(testKey), testBody)
+			require.NoError(t, err)
+
+			ok, _, err := ValidateRequestSignature(ctx, sig, testKey, "", testBody, isDev)
+			require.False(t, ok)
+			require.ErrorIs(t, err, ErrExpiredSignature)
+		})
+		t.Run("with an expired ts it fails", func(t *testing.T) {
 			ts := time.Now().Add(-1 * time.Hour).Unix()
 			ok, _, err := ValidateRequestSignature(ctx, fmt.Sprintf("t=%d&s=yea", ts), testKey, "", testBody, isDev)
 			require.False(t, ok)
@@ -149,6 +175,16 @@ func TestValidateResponseSignature(t *testing.T) {
 		ok, err := ValidateResponseSignature(ctx, sig, []byte(testKey), encodedBody)
 		r.True(ok)
 		r.NoError(err)
+	})
+
+	t.Run("with a far-future ts it fails", func(t *testing.T) {
+		future := time.Now().Add(1 * time.Hour)
+		sig, err := signWithoutJCS(future, []byte(testKey), testBody)
+		require.NoError(t, err)
+
+		ok, err := ValidateResponseSignature(ctx, sig, []byte(testKey), testBody)
+		require.False(t, ok)
+		require.ErrorIs(t, err, ErrExpiredSignature)
 	})
 }
 

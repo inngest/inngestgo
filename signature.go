@@ -31,11 +31,11 @@ var (
 func Sign(ctx context.Context, at time.Time, key, body []byte) (string, error) {
 	key = normalizeKey(key)
 
-	var err error
 	if len(body) > 0 {
-		body, err = jcs.Transform(body)
-		if err != nil {
+		if canonical, err := jcs.Transform(body); err != nil {
 			logger.Default().Warn("failed to canonicalize body", "error", err)
+		} else {
+			body = canonical
 		}
 	}
 
@@ -87,7 +87,7 @@ func validateRequestSignature(ctx context.Context, sig string, key, body []byte)
 		return false, ErrInvalidTimestamp
 	}
 	ts := time.Unix(int64(str), 0)
-	if time.Since(ts) > signatureTimeDeltaMax {
+	if time.Since(ts).Abs() > signatureTimeDeltaMax {
 		return false, ErrExpiredSignature
 	}
 
@@ -95,7 +95,7 @@ func validateRequestSignature(ctx context.Context, sig string, key, body []byte)
 	if err != nil {
 		return false, err
 	}
-	if actual != sig {
+	if !hmac.Equal([]byte(actual), []byte(sig)) {
 		return false, ErrInvalidSignature
 	}
 
@@ -164,7 +164,7 @@ func ValidateResponseSignature(ctx context.Context, sig string, key, body []byte
 		return false, ErrInvalidTimestamp
 	}
 	ts := time.Unix(int64(str), 0)
-	if time.Since(ts) > signatureTimeDeltaMax {
+	if time.Since(ts).Abs() > signatureTimeDeltaMax {
 		return false, ErrExpiredSignature
 	}
 
@@ -172,7 +172,7 @@ func ValidateResponseSignature(ctx context.Context, sig string, key, body []byte
 	if err != nil {
 		return false, err
 	}
-	if actual != sig {
+	if !hmac.Equal([]byte(actual), []byte(sig)) {
 		return false, ErrInvalidSignature
 	}
 
